@@ -162,6 +162,29 @@ fn playlist(p: music::Playlist) -> Playlist {
     }
 }
 
+/// At most this many artists read off a search's tracks and albums.
+const ARTISTS_BEHIND: usize = 20;
+
+/// The artists behind what a search found, for a service that does not
+/// search them itself: each once, the most frequent first.
+fn artists_behind(tracks: &[music::Track], albums: &[music::Album]) -> Vec<(String, String)> {
+    let mut seen: Vec<(String, String, usize)> = Vec::new();
+    let refs = tracks
+        .iter()
+        .flat_map(|t| &t.artist_refs)
+        .chain(albums.iter().flat_map(|a| &a.artist_refs));
+    for artist in refs {
+        let Some(id) = &artist.id else { continue };
+        match seen.iter_mut().find(|(seen_id, _, _)| seen_id == id) {
+            Some(entry) => entry.2 += 1,
+            None => seen.push((id.clone(), artist.name.clone(), 1)),
+        }
+    }
+    seen.sort_by_key(|entry| std::cmp::Reverse(entry.2));
+    seen.truncate(ARTISTS_BEHIND);
+    seen.into_iter().map(|(id, name, _)| (id, name)).collect()
+}
+
 /// Whether `again` is the start of `picks`, track for track.
 fn same_tracks(again: &[GenreItem], picks: &[GenreItem]) -> bool {
     let id = |item: &GenreItem| match item {
@@ -418,18 +441,35 @@ impl Session {
         Ok(track(self.api.track(&id.0).await.map_err(error)?))
     }
 
-    /// Tracks, albums and playlists: `MusicApi` has no artist search.
+    /// Tracks, albums, playlists, and artists: the service's own where it
+    /// searches them, otherwise the ones behind the tracks and albums.
     pub async fn search(&self, query: &str) -> Result<Results> {
-        let (tracks, albums, playlists) = tokio::join!(
+        let (tracks, albums, playlists, artists) = tokio::join!(
             self.api.search(query),
             self.api.search_albums(query),
-            self.api.search_playlists(query)
+            self.api.search_playlists(query),
+            self.provider.search_artists(query)
         );
+        let (tracks, albums) = (tracks.map_err(error)?, albums.map_err(error)?);
+        let mut artists = artists.map_err(error)?;
+        if artists.is_empty() {
+            let behind = artists_behind(&tracks, &albums);
+            let ids = behind.iter().map(|(id, _)| id.clone()).collect();
+            let pictures = self.api.artist_images(ids).await.unwrap_or_default();
+            artists = behind
+                .into_iter()
+                .map(|(id, name)| Artist {
+                    picture: pictures.get(&id).cloned(),
+                    id,
+                    name,
+                })
+                .collect();
+        }
         Ok(Results {
             query: query.to_owned(),
-            tracks: tracks.map_err(error)?.into_iter().map(track).collect(),
-            albums: albums.map_err(error)?.into_iter().map(album).collect(),
-            artists: Vec::new(),
+            tracks: tracks.into_iter().map(track).collect(),
+            albums: albums.into_iter().map(album).collect(),
+            artists,
             playlists: playlists.map_err(error)?.into_iter().map(playlist).collect(),
         })
     }
@@ -509,6 +549,36 @@ mod tests {
         assert!(super::same_tracks(&[track("a"), track("b")], &picks));
         assert!(!super::same_tracks(&[track("b"), track("a")], &picks));
         assert!(!super::same_tracks(&[], &picks), "an empty row repeats nothing");
+    }
+
+    #[test]
+    fn the_artists_behind_a_search_come_once_each_most_frequent_first() {
+        let track = |artists: &[(&str, Option<&str>)]| {
+            let item = crate::provider::map::item(crate::shell::carousel::Card {
+                target: Some(crate::shell::carousel::Target::Track("t".into())),
+                ..Default::default()
+            })
+            .expect("a track card");
+            let super::GenreItem::Track(mut t) = item else { unreachable!() };
+            t.artist_refs = artists
+                .iter()
+                .map(|(name, id)| music::ArtistRef {
+                    name: (*name).into(),
+                    id: id.map(Into::into),
+                })
+                .collect();
+            t
+        };
+        let tracks = vec![
+            track(&[("Jul", Some("j"))]),
+            track(&[("SCH", Some("s")), ("Jul", Some("j"))]),
+            track(&[("Unknown", None)]),
+        ];
+        let found = super::artists_behind(&tracks, &[]);
+        assert_eq!(
+            found,
+            vec![("j".to_string(), "Jul".to_string()), ("s".to_string(), "SCH".to_string())]
+        );
     }
 
     #[test]

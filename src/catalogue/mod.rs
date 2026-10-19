@@ -57,6 +57,13 @@ pub trait Provider: MusicProvider {
     fn has_feed(&self) -> bool {
         false
     }
+
+    /// Artists matching a query. `MusicApi` has no artist search: a
+    /// service with one answers here, and for the rest the session
+    /// reads the artists off the tracks and albums it found.
+    async fn search_artists(&self, _query: &str) -> anyhow::Result<Vec<crate::library::Artist>> {
+        Ok(Vec::new())
+    }
 }
 
 impl Provider for music::subsonic::SubsonicProvider {}

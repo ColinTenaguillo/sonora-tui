@@ -45,6 +45,9 @@ struct Inner {
     /// The artist page last fetched. One page carries the header, the top
     /// tracks and the rows, and the shell asks for those in three calls.
     page: Mutex<Option<(String, library::ArtistPage)>>,
+    /// The search last run: one request answers tracks, albums, artists
+    /// and playlists, and `MusicApi` asks for each on its own.
+    found: Mutex<Option<(String, search::Results)>>,
 }
 
 /// How long to wait before renewing a token due at `expires_at`: five
@@ -177,6 +180,19 @@ impl Inner {
         Ok(page)
     }
 
+    /// One search per query, whichever of its four lists is asked for.
+    async fn search(&self, query: &str) -> Result<search::Results> {
+        if let Some((q, found)) = lock(&self.found).as_ref() {
+            if q == query {
+                return Ok(found.clone());
+            }
+        }
+        let client = self.client().await?;
+        let found = search::search(&client, query).await?;
+        *lock(&self.found) = Some((query.to_owned(), found.clone()));
+        Ok(found)
+    }
+
     /// The tracks behind a playlist id, which is a mix when prefixed.
     async fn list_tracks(&self, id: &str) -> Result<Vec<Track>> {
         let client = self.client().await?;
@@ -203,6 +219,7 @@ impl TidalProvider {
                 abandoned: AtomicBool::new(false),
                 renewal: Mutex::new(None),
                 page: Mutex::new(None),
+                found: Mutex::new(None),
             }),
         })
     }
@@ -630,20 +647,17 @@ impl MusicApi for TidalApi {
     }
 
     async fn search(&self, query: &str) -> Result<Vec<Track>> {
-        let client = self.inner.client().await?;
-        let found = search::search(&client, query).await?;
+        let found = self.inner.search(query).await?;
         Ok(found.tracks.into_iter().map(map::track).collect())
     }
 
     async fn search_albums(&self, query: &str) -> Result<Vec<Album>> {
-        let client = self.inner.client().await?;
-        let found = search::search(&client, query).await?;
+        let found = self.inner.search(query).await?;
         Ok(found.albums.into_iter().map(map::album).collect())
     }
 
     async fn search_playlists(&self, query: &str) -> Result<Vec<Playlist>> {
-        let client = self.inner.client().await?;
-        let found = search::search(&client, query).await?;
+        let found = self.inner.search(query).await?;
         Ok(found.playlists.into_iter().map(map::playlist).collect())
     }
 
@@ -692,6 +706,10 @@ impl crate::catalogue::Provider for TidalProvider {
 
     fn has_feed(&self) -> bool {
         true
+    }
+
+    async fn search_artists(&self, query: &str) -> Result<Vec<crate::library::Artist>> {
+        Ok(self.inner.search(query).await?.artists)
     }
 
     /// Releases from the artists followed, dated, as the web's Feed page.
