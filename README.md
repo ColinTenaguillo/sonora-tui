@@ -88,7 +88,8 @@ kind = "tidal"   # spotify, apple, deezer, youtube, subsonic, local
 
 Settings (`8`) has the same choice as its first row: pick a service with
 `h`/`l`, press Enter, and the app leaves the one it is on and signs in to the
-other. Each service keeps its own session, so coming back asks nothing.
+other. On the sign-in screen itself, `Tab` steps to the next service. Each
+service keeps its own session, so coming back asks nothing.
 
 Each signs in from the same screen, its own way:
 
@@ -100,7 +101,7 @@ Each signs in from the same screen, its own way:
 | `deezer` | Paste the `Cookie` header (or just the `arl` cookie) of a signed-in deezer.com tab. |
 | `youtube` | `g` to continue as a guest, or paste the `Cookie` header of a signed-in music.youtube.com tab; with several accounts on it, pick one. |
 | `subsonic` | The server and user from the config below; the password is typed on the login screen. |
-| `local` | Nothing: the folders from the config below are read at each start. |
+| `local` | Nothing: the first run asks for a folder, and the folders in the config are read at each start. |
 
 No webview: the cookies come out of the browser's devtools (Network, any
 request, Request Headers, the `Cookie` line). Cookies, passwords and tokens
@@ -126,8 +127,9 @@ username = "you"
 
 ### Local files
 
-The folders are read at each start, from an index kept under the cache
-between runs, and every track, album and artist found is the library:
+With no folder named, the sign-in screen asks for one and writes it to the
+config. The folders are read at each start, from an index kept under the
+cache between runs, and every track, album and artist found is the library:
 
 ```toml
 [provider]
@@ -204,7 +206,7 @@ Press `?` in the app for the full list.
 | `b` | Open an artist's biography |
 | `a` / `c` | Open the artist, or the album whose cover you are looking at |
 | `R` | Radio from the selected track, or the one playing |
-| `t`, `Tab` | Next tab in search |
+| `t`, `Tab` | Next tab in search; on the sign-in screen, the next service |
 | `Space` | Pause / resume |
 | `A` | Favourite the track, or take it out again |
 | `F` | Favourite the artist, album, playlist or mix under the cursor, or the one whose view is open; again to take it out |
