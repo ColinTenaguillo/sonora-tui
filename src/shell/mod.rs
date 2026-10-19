@@ -4177,12 +4177,7 @@ impl App {
             // Playlist edits. Each opens its question; `x` asks none.
             KeyCode::Char('P') if self.session.is_some() => {
                 if let Some(track) = self.selected_track() {
-                    self.prompt = Some(playlistedit::Prompt::AddTo {
-                        track: track.id,
-                        title: track.title,
-                        selected: 0,
-                        naming: None,
-                    });
+                    self.prompt = Some(playlistedit::Prompt::add_to(track.id, track.title));
                 }
                 None
             }
@@ -5955,7 +5950,9 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     if let Some(prompt) = &app.prompt {
         let owned: Vec<crate::library::Playlist> =
             app.playlists.iter().filter(|p| p.owned).cloned().collect();
-        playlistedit::render(frame, frame.area(), &palette, prompt, &owned);
+        let mut art = app.artwork.take();
+        playlistedit::render(frame, frame.area(), &palette, prompt, &owned, art.as_mut());
+        app.artwork = art;
     }
     if app.showing_help {
         // Clamped here, where the height is known: the key handler only
