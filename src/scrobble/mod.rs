@@ -6,14 +6,17 @@
 //! the outbox. Whether a listen counts is the services' own rule, and lives
 //! with them: thirty seconds at least, and half the track or four minutes.
 //!
-//! ponytail: a submission that fails is logged and dropped. A queue kept
-//! for the network coming back is the next step, if listens go missing.
+//! A submission that fails is kept, per service, and goes out again with
+//! the next one -- a listen earned on a train is filed when the network
+//! is back. Kept in memory: the app's last drain on the way out is the
+//! last try, and a backlog is capped so a service that is gone for good
+//! cannot grow one without end.
 
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use music::scrobble::{Account, Play, Secret, Service};
@@ -165,6 +168,36 @@ pub fn play_of(track: &Track, at: SystemTime) -> Option<Play> {
 pub struct Outbox {
     pub now_playing: Option<Play>,
     pub finished: Vec<Play>,
+    /// The listens a service refused, by its id, to go out again with
+    /// the next batch. Shared with the requests in flight, which put a
+    /// batch back here when it fails.
+    pub backlog: Backlog,
+}
+
+/// Listens a service has not taken yet, by service id.
+pub type Backlog = Arc<Mutex<HashMap<String, Vec<Play>>>>;
+
+/// The most listens kept back for one service.
+const BACKLOG_CAP: usize = 200;
+
+/// `plays` back into the backlog for `service`, oldest dropped past the cap.
+fn keep(backlog: &Backlog, service: &str, plays: Vec<Play>) {
+    let mut all = backlog.lock().unwrap_or_else(|p| p.into_inner());
+    let kept = all.entry(service.to_owned()).or_default();
+    kept.extend(plays);
+    if kept.len() > BACKLOG_CAP {
+        let over = kept.len() - BACKLOG_CAP;
+        kept.drain(..over);
+    }
+}
+
+/// What `service` still owes, taken out to be sent.
+fn owed(backlog: &Backlog, service: &str) -> Vec<Play> {
+    backlog
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(service)
+        .unwrap_or_default()
 }
 
 type Sending = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -187,16 +220,24 @@ pub fn drain(linked: &[Linked], outbox: &mut Outbox) -> Vec<Sending> {
     let plays: Vec<Play> = std::mem::take(&mut outbox.finished);
     if !plays.is_empty() {
         for l in linked.iter().filter(|l| l.account.enabled).cloned() {
-            let plays = plays.clone();
+            // What the service still owes goes first, so the order holds.
+            let backlog = Arc::clone(&outbox.backlog);
+            let mut batch = owed(&backlog, l.service.id());
+            batch.extend(plays.iter().cloned());
             sending.push(Box::pin(async move {
-                match l.service.scrobble(&l.account, &plays).await {
+                match l.service.scrobble(&l.account, &batch).await {
                     Ok(()) => tracing::info!(
                         "scrobbled {} to {}",
-                        plays.len(),
+                        batch.len(),
                         l.service.id()
                     ),
                     Err(error) => {
-                        tracing::warn!("scrobbling: {} refused: {error:#}", l.service.id())
+                        tracing::warn!(
+                            "scrobbling: {} refused {}, kept for the next try: {error:#}",
+                            l.service.id(),
+                            batch.len()
+                        );
+                        keep(&backlog, l.service.id(), batch);
                     }
                 }
             }));
@@ -234,6 +275,28 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_batch_is_kept_and_goes_out_first_next_time_up_to_a_cap() {
+        let backlog = Backlog::default();
+        let play = |title: &str| Play {
+            artist: "A".into(),
+            title: title.into(),
+            album: None,
+            duration: Duration::from_secs(200),
+            at: SystemTime::UNIX_EPOCH,
+        };
+        keep(&backlog, "lastfm", vec![play("one"), play("two")]);
+        assert!(owed(&backlog, "listenbrainz").is_empty(), "another service owes nothing");
+        let again = owed(&backlog, "lastfm");
+        assert_eq!(again.iter().map(|p| p.title.as_str()).collect::<Vec<_>>(), ["one", "two"]);
+        assert!(owed(&backlog, "lastfm").is_empty(), "taken out once");
+
+        keep(&backlog, "lastfm", (0..BACKLOG_CAP + 5).map(|i| play(&i.to_string())).collect());
+        let kept = owed(&backlog, "lastfm");
+        assert_eq!(kept.len(), BACKLOG_CAP);
+        assert_eq!(kept[0].title, "5", "the oldest go first");
+    }
+
+    #[test]
     fn a_track_is_a_listen_only_with_an_artist_and_a_title() {
         let mut track = Track::sample("Song", "Someone", Duration::from_secs(200));
         track.album = String::new();
@@ -266,6 +329,7 @@ mod tests {
         let mut outbox = Outbox {
             now_playing: Some(play.clone()),
             finished: vec![play.clone(), play],
+            backlog: Backlog::default(),
         };
         let sending = drain(std::slice::from_ref(&linked), &mut outbox);
         assert_eq!(sending.len(), 2, "one now-playing, one batch of listens");
