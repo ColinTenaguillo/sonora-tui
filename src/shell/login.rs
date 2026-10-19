@@ -21,9 +21,10 @@ pub enum LoginState {
         username: String,
         typed: Secret,
     },
-    /// Local files with no folder named yet: the path is typed here and
-    /// written to the config.
-    Folder {
+    /// A setting the config has not got yet, typed here and written to
+    /// it: the local folder, or the Subsonic server and user.
+    Text {
+        field: Field,
         typed: String,
     },
     /// The service wants authorising in the browser, at this link, and
@@ -43,6 +44,39 @@ pub enum LoginState {
     /// The service is working on it: nothing to type, nothing to press.
     Busy(String),
     Failed(String),
+}
+
+/// What a `Text` prompt asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Field {
+    Folder,
+    Server,
+    Username,
+}
+
+impl Field {
+    pub fn question(self) -> &'static str {
+        match self {
+            Field::Folder => "Where is your music?",
+            Field::Server => "Which Subsonic server?",
+            Field::Username => "Which user on it?",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Field::Folder => "folder",
+            Field::Server => "server",
+            Field::Username => "user",
+        }
+    }
+
+    fn enter(self) -> &'static str {
+        match self {
+            Field::Folder => "Enter to read it",
+            Field::Server | Field::Username => "Enter to continue",
+        }
+    }
 }
 
 /// A password in flight. Printed as dots: `Action` is logged at debug
@@ -130,15 +164,18 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
             }),
             Line::from("Tab to change service."),
         ],
-        LoginState::Folder { typed } => vec![
-            Line::from("Where is your music?"),
+        LoginState::Text { field, typed } => vec![
+            Line::from(field.question()),
             Line::from(""),
             Line::from(vec![
-                Span::raw("folder: "),
+                Span::raw(format!("{}: ", field.label())),
                 Span::styled(typed.clone(), Style::default().add_modifier(Modifier::BOLD)),
             ]),
             Line::from(""),
-            Line::from("Enter to read it, Tab to change service, Esc to quit."),
+            Line::from(format!(
+                "{}, Tab to change service, Esc to quit.",
+                field.enter()
+            )),
         ],
         LoginState::Url(url) => vec![
             Line::from("Authorise in your browser — opening it now."),
@@ -370,12 +407,18 @@ mod tests {
     }
 
     #[test]
-    fn the_folder_prompt_shows_what_is_typed() {
-        let text = rendered(&LoginState::Folder {
+    fn the_text_prompts_show_what_is_typed_and_what_for() {
+        let text = rendered(&LoginState::Text {
+            field: Field::Folder,
             typed: "~/Music".into(),
         });
         assert!(text.contains("~/Music"), "{text}");
         assert!(text.contains("Tab"), "says how to leave:\n{text}");
+        let text = rendered(&LoginState::Text {
+            field: Field::Server,
+            typed: "https://".into(),
+        });
+        assert!(text.contains("Subsonic server"), "{text}");
     }
 
     #[test]
