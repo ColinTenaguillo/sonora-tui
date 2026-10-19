@@ -392,10 +392,13 @@ fn translate(
             "TIDAL is rate limiting playback; try again shortly".into(),
         )),
         Engine::Gated => Some(PlaybackEvent::SessionExpired),
-        // Only Spotify sends this, when its audio key is denied: the
-        // account may not stream, which is what a free account gets.
+        // Only Spotify sends this, when its audio key is denied (0x0001).
+        // A free account gets it, and so does a Premium one that Spotify
+        // moved to its newer sign-in flow -- accounts made since late
+        // 2025, more over time. librespot cannot stream for those yet:
+        // librespot-org/librespot#1649. Nothing on this side fixes it.
         Engine::Refused => Some(PlaybackEvent::Error(
-            "Spotify refused the stream: playback needs Premium on this account".into(),
+            "Spotify is not granting this account playback keys: free, or a newer account librespot cannot stream for yet (librespot#1649)".into(),
         )),
         Engine::Length { duration, .. } => Some(PlaybackEvent::Length(duration)),
         // The engine reopens the output itself; a resume, a seek and a
