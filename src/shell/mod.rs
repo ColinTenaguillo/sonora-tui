@@ -946,6 +946,10 @@ pub struct App {
     pub home_from_collection: bool,
     /// The service has no Explore page: said on it, rather than blank.
     pub explore_empty: bool,
+    /// Whether the home and Explore replies have arrived at all: until
+    /// then an empty page is loading, after it the service had nothing.
+    pub home_loaded: bool,
+    pub explore_loaded: bool,
     /// The activity feed as it came back: releases from the artists the
     /// user follows, newest first and ungrouped. Kept beside the rows so a
     /// filter can be applied without asking for the feed again.
@@ -2632,6 +2636,7 @@ impl App {
                     })
                     .collect();
                 self.explore_empty = self.explore.rows.is_empty();
+                self.explore_loaded = true;
                 None
             }
             Action::PlaylistsLoaded(playlists) => {
@@ -2655,6 +2660,7 @@ impl App {
             }
             Action::HomeLoaded(home) => {
                 let home = *home;
+                self.home_loaded = true;
                 self.home_from_collection = home.rows.is_empty();
                 self.home.rows = home
                     .rows
@@ -5268,6 +5274,22 @@ fn cover_drawer(
     }
 }
 
+/// A line or two in the middle of an otherwise empty pane: loading,
+/// nothing here, no such page on this service.
+fn notice(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, palette: &theme::Palette, lines: Vec<ratatui::text::Line<'static>>) {
+    let height = (lines.len() as u16).min(area.height);
+    frame.render_widget(
+        ratatui::widgets::Paragraph::new(lines)
+            .style(palette.subtitle())
+            .alignment(ratatui::layout::Alignment::Center),
+        ratatui::layout::Rect {
+            y: area.y + area.height / 3,
+            height,
+            ..area
+        },
+    );
+}
+
 /// What the Feed page says on a service that has none.
 fn feed_notice(service: &str) -> Vec<ratatui::text::Line<'static>> {
     vec![
@@ -5415,46 +5437,52 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                 // `artwork` needs &mut to cache what it decodes, and the closure
                 // is handed to a renderer that also borrows `app` — so take it out
                 // for the duration and put it back.
-                if section == sidebar::Section::Explore && app.explore_empty {
-                    frame.render_widget(
-                        ratatui::widgets::Paragraph::new(vec![
+                let explore = section == sidebar::Section::Explore;
+                let (state, loaded) = match explore {
+                    true => (&app.explore, app.explore_loaded),
+                    false => (&app.home, app.home_loaded),
+                };
+                // An empty page says why rather than staying blank: no such
+                // page on this service, the reply still on its way, or
+                // nothing in it. No early return: the bar below is drawn
+                // after this match.
+                if explore && app.explore_empty {
+                    notice(
+                        frame,
+                        regions.main,
+                        &palette,
+                        vec![
                             ratatui::text::Line::from(format!(
                                 "{} has no Explore page.",
                                 app.service_name()
                             )),
                             ratatui::text::Line::from("Search (s) still covers its catalogue."),
-                        ])
-                        .style(palette.subtitle())
-                        .alignment(ratatui::layout::Alignment::Center),
-                        ratatui::layout::Rect {
-                            y: regions.main.y + regions.main.height / 3,
-                            height: 2.min(regions.main.height),
-                            ..regions.main
-                        },
+                        ],
                     );
-                    return;
-                }
-                let mut art = app.artwork.take();
-                let state = if section == sidebar::Section::Explore {
-                    &app.explore
+                } else if state.rows.is_empty() {
+                    let line = match loaded {
+                        false => "Loading…".to_string(),
+                        true => format!("{} has nothing to show here yet.", app.service_name()),
+                    };
+                    notice(frame, regions.main, &palette, vec![ratatui::text::Line::from(line)]);
                 } else {
-                    &app.home
-                };
-                home::render(
-                    frame,
-                    regions.main,
-                    &palette,
-                    state,
-                    main_focused,
-                    trackgrid::Marks {
-                        favourites: &app.favourites,
-                        playing: app.now_playing.track.as_ref().map(|t| &t.id),
-                        tier: app.now_playing.tier,
-                        liked: &liked,
-                    },
-                    cover_drawer(&mut art),
-                );
-                app.artwork = art;
+                    let mut art = app.artwork.take();
+                    home::render(
+                        frame,
+                        regions.main,
+                        &palette,
+                        state,
+                        main_focused,
+                        trackgrid::Marks {
+                            favourites: &app.favourites,
+                            playing: app.now_playing.track.as_ref().map(|t| &t.id),
+                            tier: app.now_playing.tier,
+                            liked: &liked,
+                        },
+                        cover_drawer(&mut art),
+                    );
+                    app.artwork = art;
+                }
             }
             sidebar::Section::Feed => {
                 // The Feed is a page of rows like the home page, but headed and
@@ -5479,38 +5507,25 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                 // Only TIDAL has one. Blank, the page read as broken; it
                 // says what it would show and where it is shown.
                 if !app.session.as_ref().is_some_and(|s| s.has_feed()) {
-                    frame.render_widget(
-                        ratatui::widgets::Paragraph::new(feed_notice(app.service_name()))
-                            .style(palette.subtitle())
-                            .alignment(ratatui::layout::Alignment::Center),
-                        ratatui::layout::Rect {
-                            y: body.y + body.height / 3,
-                            height: 2.min(body.height),
-                            ..body
+                    notice(frame, body, &palette, feed_notice(app.service_name()));
+                } else {
+                    let mut art = app.artwork.take();
+                    home::render(
+                        frame,
+                        body,
+                        &palette,
+                        &app.feed,
+                        main_focused,
+                        trackgrid::Marks {
+                            favourites: &app.favourites,
+                            playing: app.now_playing.track.as_ref().map(|t| &t.id),
+                            tier: app.now_playing.tier,
+                            liked: &liked,
                         },
+                        cover_drawer(&mut art),
                     );
-                    return;
+                    app.artwork = art;
                 }
-                let mut art = app.artwork.take();
-                home::render(
-                    frame,
-                    ratatui::layout::Rect {
-                        y: regions.main.y + header,
-                        height: regions.main.height.saturating_sub(header),
-                        ..regions.main
-                    },
-                    &palette,
-                    &app.feed,
-                    main_focused,
-                    trackgrid::Marks {
-                        favourites: &app.favourites,
-                        playing: app.now_playing.track.as_ref().map(|t| &t.id),
-                        tier: app.now_playing.tier,
-                        liked: &liked,
-                    },
-                    cover_drawer(&mut art),
-                );
-                app.artwork = art;
             }
             sidebar::Section::Settings => {
                 settings::render(
@@ -10575,6 +10590,21 @@ mod tests {
         app.update(Action::AlbumsLoaded(Vec::new()));
         assert_eq!(app.home.rows.len(), 1);
         assert_eq!(app.home.rows[0].heading, "Picks");
+    }
+
+    #[test]
+    fn an_empty_home_says_loading_until_the_reply_and_nothing_after() {
+        let text_of = |app: &mut App| {
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+            terminal.draw(|f| draw(f, app)).unwrap();
+            geometry::text(terminal.backend().buffer())
+        };
+        let mut app = signed_in(sidebar::Section::Music);
+        assert!(text_of(&mut app).contains("Loading"), "before the reply");
+        app.update(Action::HomeLoaded(Box::new(crate::browse::Home { rows: Vec::new() })));
+        let text = text_of(&mut app);
+        assert!(!text.contains("Loading") && text.contains("nothing to show"), "{text}");
     }
 
     #[test]
