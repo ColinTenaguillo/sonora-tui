@@ -81,10 +81,17 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl TidalFetch {
     pub fn new(wanted: Quality) -> Result<Self> {
-        let blocking = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .connect_timeout(Duration::from_secs(10))
-            .build()?;
+        // Built on a thread of its own: the provider is set up inside the
+        // async run loop, and a blocking client made in a runtime context
+        // trips reqwest's guard -- a panic at startup in debug builds.
+        let blocking = std::thread::spawn(|| {
+            reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .connect_timeout(Duration::from_secs(10))
+                .build()
+        })
+        .join()
+        .map_err(|_| anyhow!("the HTTP client could not be built"))??;
         Ok(Self {
             shared: Arc::new(Shared {
                 session: Mutex::new(None),

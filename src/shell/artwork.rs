@@ -165,16 +165,26 @@ impl Artwork {
         let by_config = crate::config::Config::load()
             .map(|c| c.ui.halfblocks)
             .unwrap_or(false);
-        let by_env = std::env::var("RATIDAL_HALFBLOCKS").is_ok_and(|v| v != "0");
+        let by_env = std::env::var("SONORA_TUI_HALFBLOCKS").is_ok_and(|v| v != "0");
         if by_config || by_env {
             tracing::info!(
                 "half blocks asked for ({}); covers will not use an image protocol",
                 if by_env {
-                    "RATIDAL_HALFBLOCKS"
+                    "SONORA_TUI_HALFBLOCKS"
                 } else {
                     "ui.halfblocks"
                 }
             );
+            return Picker::halfblocks();
+        }
+        // Under tmux the query reaches the terminal only with
+        // `allow-passthrough` on. Off, tmux drops it, nothing answers, and
+        // the thread the library left reading stdin for the reply stays
+        // there for the rest of the run -- taking every other keystroke
+        // with it. Half blocks, rather than a keyboard that works one key
+        // in two.
+        if std::env::var_os("TMUX").is_some() && !tmux_passes_through() {
+            tracing::info!("tmux without allow-passthrough; covers will render as half blocks");
             return Picker::halfblocks();
         }
         match Picker::from_query_stdio() {
@@ -383,6 +393,15 @@ fn clear_round_corners(
     }
 }
 
+/// Whether this tmux lets an escape sequence through to the terminal.
+fn tmux_passes_through() -> bool {
+    std::process::Command::new("tmux")
+        .args(["show", "-gqv", "allow-passthrough"])
+        .output()
+        .ok()
+        .is_some_and(|out| matches!(String::from_utf8_lossy(&out.stdout).trim(), "on" | "all"))
+}
+
 /// How a cover is fitted to its cells.
 ///
 /// `Scale` keeps the image's proportions and, unlike `Fit`, enlarges a
@@ -479,6 +498,9 @@ impl Artwork {
 
         tokio::spawn(async move {
             let decoded = fetch_and_decode(&http, &picker, &url, shape).await;
+            if decoded.is_none() {
+                tracing::debug!("no cover from {url}");
+            }
             let _ = tx.send(Loaded {
                 url,
                 shape,
