@@ -26,7 +26,10 @@ pub fn render(frame: &mut Frame, area: Rect, palette: &Palette, title: &str) {
     );
     if area.height > 2 {
         frame.render_widget(
-            Paragraph::new(Line::styled("Loading…", palette.subtitle())),
+            Paragraph::new(Line::styled(
+                super::waiting::animated("Loading…").into_owned(),
+                palette.subtitle(),
+            )),
             Rect {
                 y: area.y + 2,
                 height: 1,
