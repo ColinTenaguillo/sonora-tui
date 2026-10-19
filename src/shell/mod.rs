@@ -3449,7 +3449,12 @@ impl App {
     fn load_if_needed(&mut self) -> Option<Action> {
         match self.sidebar.section() {
             sidebar::Section::Explore if self.explore.rows.is_empty() => Some(Action::LoadExplore),
-            sidebar::Section::Feed if self.feed_cards.is_empty() => Some(Action::LoadFeed),
+            sidebar::Section::Feed
+                if self.feed_cards.is_empty()
+                    && self.session.as_ref().is_some_and(|s| s.has_feed()) =>
+            {
+                Some(Action::LoadFeed)
+            }
             // The three that arrive together at sign-in. Any of them can be
             // dropped on the way in -- the reply is only taken when nothing
             // is open over the pane -- and nothing asked for them a second
@@ -5167,6 +5172,14 @@ fn cover_drawer(
     }
 }
 
+/// What the Feed page says on a service that has none.
+fn feed_notice(service: &str) -> Vec<ratatui::text::Line<'static>> {
+    vec![
+        ratatui::text::Line::from(format!("{service} has no feed.")),
+        ratatui::text::Line::from("TIDAL's lists new releases from the artists you follow."),
+    ]
+}
+
 pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     // Borrowed by field, so the closure lives beside the artwork being
     // taken out and put back below.
@@ -5343,6 +5356,26 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                     &app.feed.filter,
                     app.filtering,
                 );
+                let body = ratatui::layout::Rect {
+                    y: regions.main.y + header,
+                    height: regions.main.height.saturating_sub(header),
+                    ..regions.main
+                };
+                // Only TIDAL has one. Blank, the page read as broken; it
+                // says what it would show and where it is shown.
+                if !app.session.as_ref().is_some_and(|s| s.has_feed()) {
+                    frame.render_widget(
+                        ratatui::widgets::Paragraph::new(feed_notice(app.service_name()))
+                            .style(palette.subtitle())
+                            .alignment(ratatui::layout::Alignment::Center),
+                        ratatui::layout::Rect {
+                            y: body.y + body.height / 3,
+                            height: 2.min(body.height),
+                            ..body
+                        },
+                    );
+                    return;
+                }
                 let mut art = app.artwork.take();
                 home::render(
                     frame,
@@ -10364,6 +10397,18 @@ mod tests {
     /// network until a fetch is awaited.
     fn sample_session() -> std::sync::Arc<crate::catalogue::Session> {
         crate::catalogue::Session::sample()
+    }
+
+    #[test]
+    fn a_service_without_a_feed_says_so_instead_of_a_blank_page() {
+        assert!(sample_session().has_feed(), "TIDAL has one");
+        let text: String = feed_notice("Deezer")
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(text.contains("Deezer has no feed"), "{text}");
+        assert!(text.contains("TIDAL"), "and says where one is:\n{text}");
     }
 
     #[test]

@@ -481,6 +481,10 @@ impl Session {
         self.provider.feed().await.map_err(error)
     }
 
+    pub fn has_feed(&self) -> bool {
+        self.provider.has_feed()
+    }
+
     pub async fn explore(&self) -> Result<Home> {
         let genres = self.api.genres().await.map_err(error)?;
         Ok(rows(vec![GenreSection {

@@ -51,6 +51,12 @@ pub trait Provider: MusicProvider {
     async fn feed(&self) -> anyhow::Result<Vec<crate::shell::carousel::Card>> {
         Ok(Vec::new())
     }
+
+    /// Whether `feed` ever has anything: the page says so rather than
+    /// staying blank.
+    fn has_feed(&self) -> bool {
+        false
+    }
 }
 
 impl Provider for music::subsonic::SubsonicProvider {}

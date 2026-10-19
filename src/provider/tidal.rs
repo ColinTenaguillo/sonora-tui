@@ -675,6 +675,10 @@ impl crate::catalogue::Provider for TidalProvider {
         Arc::new(self.inner.fetch.clone())
     }
 
+    fn has_feed(&self) -> bool {
+        true
+    }
+
     /// Releases from the artists followed, dated, as the web's Feed page.
     async fn feed(&self) -> Result<Vec<crate::shell::carousel::Card>> {
         let client = self.inner.client().await?;
