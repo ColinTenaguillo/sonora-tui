@@ -4412,7 +4412,7 @@ fn open_collection(
             Ok(tracks) => {
                 let _ = tx.send(Action::CollectionLoaded { for_title, tracks });
             }
-            Err(crate::tidal::TidalError::Unauthorized) => {
+            Err(crate::catalogue::Error::Unauthorized) => {
                 let _ = tx.send(Action::SessionExpired);
             }
             Err(e) => {
@@ -5081,7 +5081,7 @@ pub async fn run(
                                     tracing::info!("search {query:?}: {} results", results.total());
                                     let _ = t.send(Action::SearchLoaded(Box::new(results)));
                                 }
-                                Err(crate::tidal::TidalError::Unauthorized) => {
+                                Err(crate::catalogue::Error::Unauthorized) => {
                                     let _ = t.send(Action::SessionExpired);
                                 }
                                 Err(e) => {
@@ -5366,7 +5366,7 @@ fn load_collection(
                 tracing::info!("loaded {} favourite tracks", tracks.len());
                 let _ = t.send(Action::TracksLoaded(tracks));
             }
-            Err(crate::tidal::TidalError::Unauthorized) => {
+            Err(crate::catalogue::Error::Unauthorized) => {
                 let _ = t.send(Action::SessionExpired);
             }
             Err(e) => {

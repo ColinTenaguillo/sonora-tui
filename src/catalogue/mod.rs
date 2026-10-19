@@ -6,10 +6,9 @@
 //! (`crate::provider`), with a `Fetch` of its own behind the engine. The
 //! shell holds a `Session` and does not know which service answers.
 //!
-//! The error is still `TidalError`: it is the vocabulary the shell already
-//! matches on, and the one variant it inspects, `Unauthorized`, means the
-//! same thing from any service. ponytail: rename it when a second service
-//! grows an error of its own worth naming.
+//! The error is the catalogue's own: the one thing the shell tells apart
+//! is a session the service no longer accepts, and everything else is
+//! words for the status line.
 
 pub(crate) mod session;
 
@@ -20,11 +19,20 @@ use music::MusicProvider;
 
 use crate::config::{Config, ProviderKind};
 use crate::playback::{NoMeta, StreamMeta};
-use crate::tidal::TidalError;
-
 pub use session::Session;
 
-pub type Result<T> = std::result::Result<T, TidalError>;
+/// What a request to the service can fail with, as the shell tells them
+/// apart: a session the service no longer accepts, and everything else
+/// as words.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("not authorized — the session may have expired")]
+    Unauthorized,
+    #[error("{0}")]
+    Other(String),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// What `F` can favourite: the three kinds the account keeps a list of.
 /// A TIDAL mix is a playlist here, under its prefixed id.

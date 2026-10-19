@@ -16,7 +16,7 @@ use crate::library::{Album, Artist, ArtistPage, FavouriteIds, PageKind, Playlist
 use crate::playback::StreamMeta;
 use crate::search::Results;
 use crate::shell::carousel::{Card, Target};
-use crate::tidal::TidalError;
+use super::Error;
 
 pub struct Session {
     name: &'static str,
@@ -102,13 +102,23 @@ impl Session {
     }
 }
 
-/// sonora reports with `anyhow`; the shell matches on `TidalError`. The
-/// one case it tells apart, a session the service no longer accepts, is
-/// what sonora calls a credentials failure.
-fn error(error: anyhow::Error) -> TidalError {
-    match error.downcast_ref::<music::SignInFailure>() {
-        Some(music::SignInFailure(music::SignInProblem::Credentials)) => TidalError::Unauthorized,
-        _ => TidalError::Other(format!("{error:#}")),
+/// sonora reports with `anyhow`; the shell matches on `Error`. The one
+/// case it tells apart, a session the service no longer accepts, is what
+/// sonora calls a credentials failure -- and, from the TIDAL provider's
+/// own requests, a 401 anywhere in the chain.
+fn error(error: anyhow::Error) -> Error {
+    let refused = error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<music::SignInFailure>(),
+            Some(music::SignInFailure(music::SignInProblem::Credentials))
+        ) || matches!(
+            cause.downcast_ref::<crate::tidal::TidalError>(),
+            Some(crate::tidal::TidalError::Unauthorized)
+        )
+    });
+    match refused {
+        true => Error::Unauthorized,
+        false => Error::Other(format!("{error:#}")),
     }
 }
 
@@ -734,7 +744,10 @@ mod tests {
     #[test]
     fn a_refused_session_is_the_one_error_the_shell_tells_apart() {
         let refused = anyhow::Error::from(music::SignInFailure(music::SignInProblem::Credentials));
-        assert!(matches!(error(refused), TidalError::Unauthorized));
-        assert!(matches!(error(anyhow::anyhow!("down")), TidalError::Other(m) if m == "down"));
+        assert!(matches!(error(refused), Error::Unauthorized));
+        // A TIDAL 401 under a context is the same thing.
+        let tidal = anyhow::Error::from(crate::tidal::TidalError::Unauthorized).context("loading");
+        assert!(matches!(error(tidal), Error::Unauthorized));
+        assert!(matches!(error(anyhow::anyhow!("down")), Error::Other(m) if m == "down"));
     }
 }
