@@ -42,6 +42,9 @@ struct Inner {
     abandoned: AtomicBool,
     /// The task renewing the token ahead of its expiry, while signed in.
     renewal: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// The artist page last fetched. One page carries the header, the top
+    /// tracks and the rows, and the shell asks for those in three calls.
+    page: Mutex<Option<(String, library::ArtistPage)>>,
 }
 
 /// How long to wait before renewing a token due at `expires_at`: five
@@ -160,6 +163,20 @@ impl Inner {
         }
     }
 
+    /// The artist's page, fetched once: `artist`, `artist_catalogue` and
+    /// `artist_profile` all read it, back to back.
+    async fn artist_page(&self, artist_id: &str) -> Result<library::ArtistPage> {
+        if let Some((id, page)) = lock(&self.page).as_ref() {
+            if id == artist_id {
+                return Ok(page.clone());
+            }
+        }
+        let client = self.client().await?;
+        let page = library::artist_page(&client, artist_id).await?;
+        *lock(&self.page) = Some((artist_id.to_owned(), page.clone()));
+        Ok(page)
+    }
+
     /// The tracks behind a playlist id, which is a mix when prefixed.
     async fn list_tracks(&self, id: &str) -> Result<Vec<Track>> {
         let client = self.client().await?;
@@ -185,6 +202,7 @@ impl TidalProvider {
                 fetch: TidalFetch::new(wanted)?,
                 abandoned: AtomicBool::new(false),
                 renewal: Mutex::new(None),
+                page: Mutex::new(None),
             }),
         })
     }
@@ -355,8 +373,7 @@ impl MusicApi for TidalApi {
     }
 
     async fn artist(&self, artist_id: &str) -> Result<Artist> {
-        let client = self.inner.client().await?;
-        let page = library::artist_page(&client, artist_id).await?;
+        let page = self.inner.artist_page(artist_id).await?;
         Ok(Artist {
             name: page.name,
             cover_large: page.picture,
@@ -374,11 +391,10 @@ impl MusicApi for TidalApi {
 
     /// What the page cut: the whole of the top tracks, where the page
     /// carried four of a hundred and named the rest, and the appears-on
-    /// row. ponytail: the page is fetched again here, after `artist`
-    /// fetched it; cache it if the two round trips show.
+    /// row.
     async fn artist_catalogue(&self, artist_id: &str, _known: &[Track]) -> Result<ArtistCatalogue> {
         let client = self.inner.client().await?;
-        let page = library::artist_page(&client, artist_id).await?;
+        let page = self.inner.artist_page(artist_id).await?;
         let top_tracks = match page.top_tracks_path.as_deref() {
             Some(path) => browse::module_items(&client, path, TOP_TRACKS_ALL)
                 .await?
@@ -421,8 +437,7 @@ impl MusicApi for TidalApi {
     }
 
     async fn artist_profile(&self, artist_id: &str) -> Result<ArtistProfile> {
-        let client = self.inner.client().await?;
-        let page = library::artist_page(&client, artist_id).await?;
+        let page = self.inner.artist_page(artist_id).await?;
         Ok(ArtistProfile {
             name: page.name,
             cover_large: page.picture,
