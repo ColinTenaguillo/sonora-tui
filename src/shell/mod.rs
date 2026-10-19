@@ -100,6 +100,12 @@ pub enum Action {
         uuid: String,
         track: crate::domain::TrackId,
     },
+    /// What was typed into a text setting's box, on Enter.
+    SettingTyped(settings::Setting, String),
+    /// A setting changed, by key or by box, for whatever reads it live:
+    /// the scrobblers link again, the Discord presence restarts, a folder
+    /// of files is read again, the colours change.
+    SettingChanged(settings::Setting),
     /// The service took an edit. The playlists are reloaded alongside;
     /// an open playlist that was edited is reloaded, a deleted one closed.
     PlaylistEdited {
@@ -1025,6 +1031,8 @@ pub struct App {
     pub help_scroll: u16,
     /// A playlist edit's question, while it is up. It takes the keys.
     pub prompt: Option<playlistedit::Prompt>,
+    /// A text setting being typed into, while its box is up.
+    pub setting_edit: Option<settings::Edit>,
     /// The lyrics, on "L".
     pub lyrics: lyricsview::Pane,
     /// Where listens are reported, once the config's services are linked.
@@ -1421,6 +1429,22 @@ impl App {
             | settings::Setting::Explicit
             | settings::Setting::Ai
             | settings::Setting::NerdFont => None,
+            settings::Setting::Theme | settings::Setting::Librefm => {
+                Some(Action::SettingChanged(which))
+            }
+            // Typed into or acted on with Enter: h and l did nothing.
+            settings::Setting::LastfmKey
+            | settings::Setting::LastfmSecret
+            | settings::Setting::LastfmLink
+            | settings::Setting::ListenbrainzToken
+            | settings::Setting::MalojaUrl
+            | settings::Setting::MalojaKey
+            | settings::Setting::Discord
+            | settings::Setting::SubsonicServer
+            | settings::Setting::SubsonicUser
+            | settings::Setting::LocalFolders
+            | settings::Setting::TidalClientId
+            | settings::Setting::TidalClientSecret => None,
             // The only setting that cannot show itself: the image protocol
             // is probed before raw mode, so the picker the covers draw
             // through was built before this row existed. Saying so is the
@@ -2840,9 +2864,15 @@ impl App {
                 None
             }
             Action::ScrobblersLinked(linked) => {
-                if !linked.is_empty() {
-                    let names: Vec<String> = linked.iter().map(|l| l.label()).collect();
-                    self.say(format!("scrobbling to {}", names.join(", ")));
+                match linked.is_empty() {
+                    false => {
+                        let names: Vec<String> = linked.iter().map(|l| l.label()).collect();
+                        self.say(format!("scrobbling to {}", names.join(", ")));
+                    }
+                    // Only worth a word when something was linked before:
+                    // at start, no scrobbler is the ordinary case.
+                    true if !self.scrobblers.is_empty() => self.say("scrobbling off"),
+                    true => {}
                 }
                 self.scrobblers = linked;
                 None
@@ -3339,12 +3369,46 @@ impl App {
             // tested: the loop's copy could only be exercised by running the
             // whole app, and a test that called the helpers directly passed
             // just as well with the bug in place.
-            // Enter on the Service row is the switch itself; on any other
-            // row it is nothing.
+            // Enter on the Service row is the switch itself; on a text or
+            // folder row it opens the box; on the link row it links; on a
+            // toggle it flips, as l would.
             Action::ActivateSelection if self.on_settings() => {
-                (self.settings.current() == settings::Setting::Service)
-                    .then_some(Action::SwitchProvider)
+                let which = self.settings.current();
+                match (which, which.kind()) {
+                    (settings::Setting::Service, _) => Some(Action::SwitchProvider),
+                    (_, settings::Kind::Text { .. } | settings::Kind::Folders) => {
+                        self.setting_edit = Some(settings::Edit {
+                            setting: which,
+                            typed: settings::text_of(&self.config, which),
+                        });
+                        None
+                    }
+                    (_, settings::Kind::Link) => Some(Action::SettingChanged(which)),
+                    (_, settings::Kind::Toggle) => self.change_setting(true),
+                    (_, settings::Kind::Cycle) => None,
+                }
             }
+            Action::SettingTyped(setting, text) => {
+                settings::set_text(&mut self.config, setting, &text);
+                self.save_config();
+                Some(Action::SettingChanged(setting))
+            }
+            // What the shell itself reads live; the loop does the rest.
+            Action::SettingChanged(setting) => match setting {
+                settings::Setting::Theme => {
+                    self.palette = theme::Palette::from_config(&self.config.ui).0;
+                    self.needs_repaint = true;
+                    None
+                }
+                // The folders are the library: it is read again, the way
+                // a service switch reads it, when that is the service on.
+                settings::Setting::LocalFolders
+                    if self.config.provider.kind == crate::config::ProviderKind::Local =>
+                {
+                    Some(Action::SwitchProvider)
+                }
+                _ => None,
+            },
             Action::SwitchProvider => {
                 self.leave_service();
                 Some(Action::BeginLogin)
@@ -3722,6 +3786,25 @@ impl App {
                     Some(Action::Edit(edit))
                 }
             };
+        }
+        if let Some(edit) = self.setting_edit.as_mut() {
+            match key.code {
+                KeyCode::Char(c) => edit.typed.push(c),
+                KeyCode::Backspace => {
+                    edit.typed.pop();
+                }
+                KeyCode::Enter => {
+                    let edit = self.setting_edit.take().expect("checked");
+                    self.needs_repaint = true;
+                    return Some(Action::SettingTyped(edit.setting, edit.typed));
+                }
+                KeyCode::Esc => {
+                    self.setting_edit = None;
+                    self.needs_repaint = true;
+                }
+                _ => {}
+            }
+            return None;
         }
         // Read before the keymap: the map knows keys, not modifiers, and
         // would translate the `d` of ctrl-d as a bare `d`. Not while a box
@@ -4238,6 +4321,14 @@ impl App {
                     None => {}
                 }
                 None
+            }
+            KeyCode::Char('x')
+                if self.on_settings()
+                    && self.settings.current() == settings::Setting::LocalFolders =>
+            {
+                settings::remove_last_folder(&mut self.config)?;
+                self.save_config();
+                Some(Action::SettingChanged(settings::Setting::LocalFolders))
             }
             KeyCode::Char('x') if self.open_owned_playlist().is_some() => {
                 let uuid = self.open_owned_playlist()?;
@@ -4916,6 +5007,34 @@ pub async fn run(
                                 }
                             }
                         });
+                    }
+                }
+                // The settings that something off the loop reads: the
+                // scrobblers are linked again from the config as it is now
+                // -- Last.fm and Libre.fm through the browser if they have
+                // not been -- and the Discord presence starts over on the
+                // new application, or stops on none.
+                Action::SettingChanged(setting) if setting.is_scrobbling() => {
+                    let (scrobble, tx) = (app.config.scrobble.clone(), action_tx.clone());
+                    app.say("linking the scrobblers…");
+                    tokio::spawn(async move {
+                        let linked = match crate::scrobble::configured(&scrobble) {
+                            true => {
+                                let file = crate::config::paths::scrobble_file();
+                                crate::scrobble::link(&scrobble, file.as_deref()).await
+                            }
+                            false => Vec::new(),
+                        };
+                        let _ = tx.send(Action::ScrobblersLinked(linked));
+                    });
+                }
+                Action::SettingChanged(settings::Setting::Discord) => {
+                    if let Some(presence) = app.presence.take() {
+                        let _ = presence.send(crate::presence::Presence::Off);
+                    }
+                    let id = app.config.discord.application_id.trim();
+                    if !id.is_empty() {
+                        app.presence = Some(crate::presence::spawn(id.to_owned()));
                     }
                 }
                 Action::Edit(edit) => {
@@ -5790,6 +5909,11 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                 }
             }
             sidebar::Section::Settings => {
+                let linked: Vec<(String, String)> = app
+                    .scrobblers
+                    .iter()
+                    .map(|l| (l.service.id().to_string(), l.label()))
+                    .collect();
                 settings::render(
                     frame,
                     regions.main,
@@ -5797,6 +5921,7 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                     &app.config,
                     &app.settings,
                     main_focused,
+                    &linked,
                 );
             }
             section @ (sidebar::Section::Playlists
@@ -6006,6 +6131,9 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         let mut art = app.artwork.take();
         playlistedit::render(frame, frame.area(), &palette, prompt, &owned, art.as_mut());
         app.artwork = art;
+    }
+    if let Some(edit) = &app.setting_edit {
+        settings::render_edit(frame, frame.area(), &palette, edit);
     }
     if app.showing_help {
         // Clamped here, where the height is known: the key handler only
@@ -10979,6 +11107,52 @@ mod tests {
             count_delta: 0,
         });
         assert!(matches!(next, Some(Action::CloseCollection)));
+    }
+
+    #[test]
+    fn a_text_setting_is_typed_in_its_box_and_written_on_enter() {
+        let mut app = signed_in(sidebar::Section::Settings);
+        while app.settings.current() != settings::Setting::Discord {
+            app.settings.next();
+        }
+        app.update(Action::ActivateSelection);
+        assert!(matches!(&app.setting_edit, Some(settings::Edit { setting: settings::Setting::Discord, .. })));
+        for c in "12q".chars() {
+            assert!(key(&mut app, KeyCode::Char(c)).is_none(), "{c} is typed, q included");
+        }
+        key(&mut app, KeyCode::Backspace);
+        let typed = match key(&mut app, KeyCode::Enter) {
+            Some(Action::SettingTyped(settings::Setting::Discord, text)) => text,
+            other => panic!("Enter sends the text, got {other:?}"),
+        };
+        assert_eq!(typed, "12");
+        assert!(app.setting_edit.is_none());
+        let next = app.update(Action::SettingTyped(settings::Setting::Discord, typed));
+        assert!(matches!(next, Some(Action::SettingChanged(settings::Setting::Discord))));
+        assert_eq!(app.config.discord.application_id, "12");
+
+        // Esc leaves the value as it was.
+        app.update(Action::ActivateSelection);
+        for c in "9".chars() {
+            key(&mut app, KeyCode::Char(c));
+        }
+        key(&mut app, KeyCode::Esc);
+        assert!(app.setting_edit.is_none());
+        assert_eq!(app.config.discord.application_id, "12");
+
+        // The folders row: Enter adds, x drops the last, and on the local
+        // service the library is read again.
+        while app.settings.current() != settings::Setting::LocalFolders {
+            app.settings.next();
+        }
+        app.config.provider.kind = crate::config::ProviderKind::Local;
+        let next = app.update(Action::SettingTyped(settings::Setting::LocalFolders, "~/Music".into()));
+        assert!(matches!(next, Some(Action::SettingChanged(settings::Setting::LocalFolders))));
+        assert!(matches!(
+            app.update(Action::SettingChanged(settings::Setting::LocalFolders)),
+            Some(Action::SwitchProvider)
+        ));
+        assert_eq!(app.config.local.folders, ["~/Music"]);
     }
 
     #[test]

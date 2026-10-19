@@ -26,10 +26,38 @@ pub enum Setting {
     Ai,
     NerdFont,
     Halfblocks,
+    Theme,
+    LastfmKey,
+    LastfmSecret,
+    LastfmLink,
+    Librefm,
+    ListenbrainzToken,
+    MalojaUrl,
+    MalojaKey,
+    Discord,
+    SubsonicServer,
+    SubsonicUser,
+    LocalFolders,
+    TidalClientId,
+    TidalClientSecret,
+}
+
+/// How a row is changed: stepped with h and l, flipped, typed into,
+/// grown a folder at a time, or acted on with Enter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Cycle,
+    Toggle,
+    /// Enter opens a box for the text; a secret is drawn as dots.
+    Text { secret: bool },
+    /// Enter adds a folder, x takes the last one out.
+    Folders,
+    /// Enter does the thing: links the account.
+    Link,
 }
 
 impl Setting {
-    pub const ALL: [Setting; 11] = [
+    pub const ALL: [Setting; 25] = [
         Setting::Service,
         Setting::Quality,
         Setting::Volume,
@@ -41,7 +69,63 @@ impl Setting {
         Setting::Ai,
         Setting::NerdFont,
         Setting::Halfblocks,
+        Setting::Theme,
+        Setting::LastfmKey,
+        Setting::LastfmSecret,
+        Setting::LastfmLink,
+        Setting::Librefm,
+        Setting::ListenbrainzToken,
+        Setting::MalojaUrl,
+        Setting::MalojaKey,
+        Setting::Discord,
+        Setting::SubsonicServer,
+        Setting::SubsonicUser,
+        Setting::LocalFolders,
+        Setting::TidalClientId,
+        Setting::TidalClientSecret,
     ];
+
+    pub fn kind(&self) -> Kind {
+        match self {
+            Setting::Service | Setting::Quality | Setting::Volume | Setting::Equalizer | Setting::Theme => Kind::Cycle,
+            Setting::Normalisation
+            | Setting::Gapless
+            | Setting::Autoplay
+            | Setting::Explicit
+            | Setting::Ai
+            | Setting::NerdFont
+            | Setting::Halfblocks
+            | Setting::Librefm => Kind::Toggle,
+            Setting::LastfmKey | Setting::MalojaUrl | Setting::Discord | Setting::SubsonicServer | Setting::SubsonicUser | Setting::TidalClientId => {
+                Kind::Text { secret: false }
+            }
+            Setting::LastfmSecret | Setting::ListenbrainzToken | Setting::MalojaKey | Setting::TidalClientSecret => {
+                Kind::Text { secret: true }
+            }
+            Setting::LocalFolders => Kind::Folders,
+            Setting::LastfmLink => Kind::Link,
+        }
+    }
+
+    /// The heading a row sits under.
+    pub fn group(&self) -> &'static str {
+        match self {
+            Setting::Service => "Streaming",
+            Setting::Quality | Setting::Volume | Setting::Normalisation | Setting::Gapless | Setting::Equalizer | Setting::Autoplay | Setting::Explicit | Setting::Ai => "Playback",
+            Setting::NerdFont | Setting::Halfblocks | Setting::Theme => "Appearance",
+            Setting::LastfmKey | Setting::LastfmSecret | Setting::LastfmLink | Setting::Librefm | Setting::ListenbrainzToken | Setting::MalojaUrl | Setting::MalojaKey => "Scrobbling",
+            Setting::Discord => "Discord",
+            Setting::SubsonicServer | Setting::SubsonicUser => "Subsonic",
+            Setting::LocalFolders => "Local files",
+            Setting::TidalClientId | Setting::TidalClientSecret => "TIDAL",
+        }
+    }
+
+    /// Whether changing this row touches the scrobblers, which are linked
+    /// again when it does.
+    pub fn is_scrobbling(&self) -> bool {
+        self.group() == "Scrobbling"
+    }
 
     fn label(&self) -> &'static str {
         match self {
@@ -56,6 +140,20 @@ impl Setting {
             Setting::Ai => "Allow AI-generated content",
             Setting::NerdFont => "Nerd font icons",
             Setting::Halfblocks => "Draw covers as half blocks",
+            Setting::Theme => "Theme",
+            Setting::LastfmKey => "Last.fm API key",
+            Setting::LastfmSecret => "Last.fm API secret",
+            Setting::LastfmLink => "Last.fm account",
+            Setting::Librefm => "Libre.fm",
+            Setting::ListenbrainzToken => "ListenBrainz token",
+            Setting::MalojaUrl => "Maloja server",
+            Setting::MalojaKey => "Maloja API key",
+            Setting::Discord => "Discord application id",
+            Setting::SubsonicServer => "Subsonic server",
+            Setting::SubsonicUser => "Subsonic user",
+            Setting::LocalFolders => "Music folders",
+            Setting::TidalClientId => "TIDAL client id",
+            Setting::TidalClientSecret => "TIDAL client secret",
         }
     }
 
@@ -79,8 +177,134 @@ impl Setting {
             Setting::Halfblocks => {
                 "On if your terminal draws covers in the wrong place. Takes effect at the next start."
             }
+            Setting::Theme => "h or l to pick one; the colours change at once.",
+            Setting::LastfmKey => "From last.fm/api/account/create. Enter to type it.",
+            Setting::LastfmSecret => "Its secret. Enter to type it; shown as dots.",
+            Setting::LastfmLink => "Enter to approve the account in the browser, once the key and secret are set.",
+            Setting::Librefm => "On, the account is approved in the browser at the next link.",
+            Setting::ListenbrainzToken => "The user token from listenbrainz.org/settings. Enter to type it.",
+            Setting::MalojaUrl => "Your Maloja server, with its scheme. Enter to type it.",
+            Setting::MalojaKey => "Its API key. Enter to type it; shown as dots.",
+            Setting::Discord => "From discord.com/developers; empty turns the presence off. Enter to type it.",
+            Setting::SubsonicServer => "Used at the next sign-in. Enter to type it.",
+            Setting::SubsonicUser => "The password is asked on the sign-in screen. Enter to type it.",
+            Setting::LocalFolders => "Enter adds a folder, x takes the last one out; the library is read again.",
+            Setting::TidalClientId => "Your own, instead of the shipped one. Enter to type it; empty keeps the default.",
+            Setting::TidalClientSecret => "Its secret. Enter to type it; shown as dots.",
         }
     }
+}
+
+/// What a text row holds now, as the box opens on it.
+pub fn text_of(config: &crate::config::Config, setting: Setting) -> String {
+    match setting {
+        Setting::LastfmKey => config.scrobble.lastfm.as_ref().map(|k| k.key.clone()).unwrap_or_default(),
+        Setting::LastfmSecret => config.scrobble.lastfm.as_ref().map(|k| k.secret.clone()).unwrap_or_default(),
+        Setting::ListenbrainzToken => config.scrobble.listenbrainz.clone().unwrap_or_default(),
+        Setting::MalojaUrl => config.scrobble.maloja.as_ref().map(|m| m.url.clone()).unwrap_or_default(),
+        Setting::MalojaKey => config.scrobble.maloja.as_ref().map(|m| m.key.clone()).unwrap_or_default(),
+        Setting::Discord => config.discord.application_id.clone(),
+        Setting::SubsonicServer => config.subsonic.server.clone(),
+        Setting::SubsonicUser => config.subsonic.username.clone(),
+        Setting::TidalClientId => config.auth.client_id.clone(),
+        Setting::TidalClientSecret => config.auth.client_secret.clone(),
+        // A folder row opens on an empty box: the text is a new folder.
+        _ => String::new(),
+    }
+}
+
+/// Write what was typed into the row. A pair that is empty on both sides
+/// -- Last.fm's key and secret, Maloja's server and key -- is no service
+/// at all, and is written as none.
+pub fn set_text(config: &mut crate::config::Config, setting: Setting, text: &str) {
+    let text = text.trim();
+    match setting {
+        Setting::LastfmKey | Setting::LastfmSecret => {
+            let mut keys = config.scrobble.lastfm.take().unwrap_or_default();
+            match setting {
+                Setting::LastfmKey => keys.key = text.to_owned(),
+                _ => keys.secret = text.to_owned(),
+            }
+            config.scrobble.lastfm = (!keys.key.is_empty() || !keys.secret.is_empty()).then_some(keys);
+        }
+        Setting::ListenbrainzToken => {
+            config.scrobble.listenbrainz = (!text.is_empty()).then(|| text.to_owned());
+        }
+        Setting::MalojaUrl | Setting::MalojaKey => {
+            let mut maloja = config.scrobble.maloja.take().unwrap_or_default();
+            match setting {
+                Setting::MalojaUrl => maloja.url = text.to_owned(),
+                _ => maloja.key = text.to_owned(),
+            }
+            config.scrobble.maloja = (!maloja.url.is_empty() || !maloja.key.is_empty()).then_some(maloja);
+        }
+        Setting::Discord => config.discord.application_id = text.to_owned(),
+        Setting::SubsonicServer => config.subsonic.server = text.to_owned(),
+        Setting::SubsonicUser => config.subsonic.username = text.to_owned(),
+        Setting::LocalFolders => {
+            if !text.is_empty() {
+                config.local.folders.push(text.to_owned());
+            }
+        }
+        Setting::TidalClientId => config.auth.client_id = text.to_owned(),
+        Setting::TidalClientSecret => config.auth.client_secret = text.to_owned(),
+        _ => {}
+    }
+}
+
+/// `x` on the folders row.
+pub fn remove_last_folder(config: &mut crate::config::Config) -> Option<String> {
+    config.local.folders.pop()
+}
+
+/// A text row being typed into.
+#[derive(Debug, Clone)]
+pub struct Edit {
+    pub setting: Setting,
+    pub typed: String,
+}
+
+/// The box a text row opens: its label, what is typed, and the keys.
+pub fn render_edit(frame: &mut Frame, area: Rect, palette: &Palette, edit: &Edit) {
+    use ratatui::style::{Modifier, Style};
+    use ratatui::widgets::{Block, Borders, Clear};
+    let secret = matches!(edit.setting.kind(), Kind::Text { secret: true });
+    let shown = match secret {
+        true => "\u{2022}".repeat(edit.typed.chars().count()),
+        false => edit.typed.clone(),
+    };
+    let lines = vec![
+        Line::from(edit.setting.label()),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(shown, Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled("_", palette.subtitle()),
+        ]),
+        Line::from(""),
+        Line::styled("Enter to save, Esc to leave it as it was.", palette.subtitle()),
+    ];
+    let (w, h) = (62.min(area.width), (lines.len() as u16 + 2).min(area.height));
+    let modal = Rect {
+        x: area.x + (area.width - w) / 2,
+        y: area.y + (area.height - h) / 2,
+        width: w,
+        height: h,
+    };
+    if modal.width < 4 || modal.height < 3 {
+        return;
+    }
+    frame.render_widget(Clear, modal);
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(palette.rule())
+                .padding(ratatui::widgets::Padding::horizontal(1))
+                .title(" Setting ")
+                .title_style(palette.page_heading()),
+        ),
+        modal,
+    );
 }
 
 /// The qualities in the order the view steps through them, best first.
@@ -185,6 +409,27 @@ pub fn cycle(config: &mut crate::config::Config, setting: Setting, forward: bool
         // is probed before the terminal is put into raw mode, so the picker
         // this would change was built before the app drew anything.
         Setting::Halfblocks => config.ui.halfblocks = !config.ui.halfblocks,
+        Setting::Theme => {
+            let themes = super::theme::THEMES;
+            let at = themes.iter().position(|t| *t == config.ui.theme).unwrap_or(0);
+            let n = themes.len();
+            let next = if forward { at + 1 } else { at + n - 1 };
+            config.ui.theme = themes[next % n].to_string();
+        }
+        Setting::Librefm => config.scrobble.librefm = !config.scrobble.librefm,
+        // Typed into, grown, or acted on: h and l do nothing here.
+        Setting::LastfmKey
+        | Setting::LastfmSecret
+        | Setting::LastfmLink
+        | Setting::ListenbrainzToken
+        | Setting::MalojaUrl
+        | Setting::MalojaKey
+        | Setting::Discord
+        | Setting::SubsonicServer
+        | Setting::SubsonicUser
+        | Setting::LocalFolders
+        | Setting::TidalClientId
+        | Setting::TidalClientSecret => {}
     }
 }
 
@@ -232,8 +477,54 @@ fn on_off(on: bool) -> String {
 const VOLUME_STEP: f32 = 0.05;
 
 /// The value column, as drawn.
-fn value_of(config: &crate::config::Config, setting: Setting) -> String {
+/// A secret's value: whether there is one, never what it is.
+fn set_or_not(text: &str) -> String {
+    match text.is_empty() {
+        true => "not set".to_string(),
+        false => "set".to_string(),
+    }
+}
+
+/// `linked` is each scrobbler linked right now, as (service id, label).
+fn value_of(config: &crate::config::Config, setting: Setting, linked: &[(String, String)]) -> String {
+    let linked_as = |id: &str| {
+        linked
+            .iter()
+            .find(|(service, _)| service == id)
+            .map(|(_, label)| format!("linked as {label}"))
+    };
     match setting {
+        Setting::Theme => match config.ui.theme.is_empty() {
+            true => "default".to_string(),
+            false => config.ui.theme.clone(),
+        },
+        Setting::LastfmSecret | Setting::ListenbrainzToken | Setting::MalojaKey | Setting::TidalClientSecret => {
+            set_or_not(&text_of(config, setting))
+        }
+        Setting::LastfmLink => match config.scrobble.lastfm.is_some() {
+            false => "set the key and secret first".to_string(),
+            true => linked_as("lastfm").unwrap_or_else(|| "not linked".to_string()),
+        },
+        Setting::Librefm => match (config.scrobble.librefm, linked_as("librefm")) {
+            (false, _) => "Off".to_string(),
+            (true, Some(as_who)) => format!("On, {as_who}"),
+            (true, None) => "On, not linked".to_string(),
+        },
+        Setting::LastfmKey | Setting::MalojaUrl | Setting::Discord | Setting::SubsonicServer | Setting::SubsonicUser => {
+            let text = text_of(config, setting);
+            match text.is_empty() {
+                true => "not set".to_string(),
+                false => text,
+            }
+        }
+        Setting::TidalClientId => match config.auth.client_id.is_empty() {
+            true => "the shipped one".to_string(),
+            false => config.auth.client_id.clone(),
+        },
+        Setting::LocalFolders => match config.local.folders.len() {
+            0 => "none".to_string(),
+            _ => config.local.folders.join(", "),
+        },
         Setting::Service => config.provider.kind.label().to_string(),
         Setting::Quality => describe(config.audio.quality()).to_string(),
         Setting::Volume => volume_bar(config.audio.volume),
@@ -300,6 +591,7 @@ pub fn render(
     config: &crate::config::Config,
     state: &SettingsState,
     focused: bool,
+    linked: &[(String, String)],
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -316,11 +608,47 @@ pub fn render(
     // scrolled just far enough that the selected row is drawn: a setting
     // the keys can reach but the screen cannot show is a setting nobody
     // can read while changing it.
-    let per_screen = (area.height.saturating_sub(2) / 3).max(1) as usize;
-    let first = state.selected.saturating_sub(per_screen - 1);
+    // The first row drawn: as far back from the selection as the pane
+    // holds, three lines a row and one more wherever a heading comes.
+    let fits = area.height.saturating_sub(2) as usize;
+    let height_from = |first: usize| -> usize {
+        let rows = &Setting::ALL[first..=state.selected.min(Setting::ALL.len() - 1)];
+        let headings = rows
+            .windows(2)
+            .filter(|w| w[0].group() != w[1].group())
+            .count()
+            + 1;
+        rows.len() * 3 + headings
+    };
+    let mut first = state.selected.min(Setting::ALL.len() - 1);
+    while first > 0 && height_from(first - 1) <= fits {
+        first -= 1;
+    }
+    let mut group: Option<&str> = None;
     for (i, setting) in Setting::ALL.iter().enumerate().skip(first) {
         if y >= bottom {
             break;
+        }
+        // A heading where the group changes, so twenty-five rows read as
+        // seven short lists.
+        if group != Some(setting.group()) {
+            group = Some(setting.group());
+            frame.render_widget(
+                Paragraph::new(Line::styled(
+                    format!("  {}", setting.group()),
+                    palette.section_heading(),
+                )),
+                Rect {
+                    x: area.x,
+                    y,
+                    width: area.width,
+                    height: 1,
+                },
+            );
+            y += 1;
+            if y >= bottom {
+                break;
+            }
         }
         let selected = focused && i == state.selected;
         // The same grey band a selected row gets everywhere else, so a
@@ -343,7 +671,7 @@ pub fn render(
                     format!("  {:width$}", setting.label(), width = label_width()),
                     palette.title(),
                 ),
-                Span::styled(value_of(config, *setting), palette.accent_text()),
+                Span::styled(value_of(config, *setting, linked), palette.accent_text()),
             ])),
             Rect {
                 x: area.x,
@@ -379,7 +707,7 @@ pub fn render(
     if y < bottom {
         frame.render_widget(
             Paragraph::new(Line::styled(
-                "  h l  change      saved to config.toml",
+                "  h l  change   Enter  type or do   x  drop a folder      saved to config.toml",
                 palette.subtitle(),
             )),
             Rect {
@@ -395,6 +723,54 @@ pub fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_typed_pair_is_one_service_and_an_emptied_pair_is_none() {
+        let mut config = crate::config::Config::default();
+        set_text(&mut config, Setting::LastfmKey, " abc ");
+        assert_eq!(config.scrobble.lastfm.as_ref().map(|k| k.key.as_str()), Some("abc"));
+        set_text(&mut config, Setting::LastfmSecret, "s3");
+        assert_eq!(config.scrobble.lastfm.as_ref().map(|k| k.secret.as_str()), Some("s3"));
+        assert_eq!(value_of(&config, Setting::LastfmSecret, &[]), "set", "a secret is never shown");
+        assert_eq!(value_of(&config, Setting::LastfmLink, &[]), "not linked");
+        let linked = vec![("lastfm".to_string(), "Last.fm".to_string())];
+        assert_eq!(value_of(&config, Setting::LastfmLink, &linked), "linked as Last.fm");
+        set_text(&mut config, Setting::LastfmKey, "");
+        set_text(&mut config, Setting::LastfmSecret, "");
+        assert!(config.scrobble.lastfm.is_none(), "both empty is no service");
+
+        set_text(&mut config, Setting::LocalFolders, "~/Music");
+        set_text(&mut config, Setting::LocalFolders, "/media/flac");
+        assert_eq!(value_of(&config, Setting::LocalFolders, &[]), "~/Music, /media/flac");
+        assert_eq!(remove_last_folder(&mut config).as_deref(), Some("/media/flac"));
+        assert_eq!(config.local.folders, ["~/Music"]);
+
+        cycle(&mut config, Setting::Theme, true);
+        assert_eq!(config.ui.theme, super::super::theme::THEMES[1]);
+        cycle(&mut config, Setting::Theme, false);
+        assert_eq!(config.ui.theme, super::super::theme::THEMES[0]);
+    }
+
+    #[test]
+    fn every_row_has_a_group_and_the_groups_are_contiguous() {
+        let mut seen: Vec<&str> = Vec::new();
+        for s in Setting::ALL {
+            match seen.last() {
+                Some(last) if *last == s.group() => {}
+                _ => {
+                    assert!(!seen.contains(&s.group()), "{:?} is split in two", s.group());
+                    seen.push(s.group());
+                }
+            }
+        }
+        let buf = crate::shell::geometry::draw(120, 90, |f, area, palette| {
+            render(f, area, palette, &crate::config::Config::default(), &SettingsState::default(), true, &[]);
+        });
+        let text = crate::shell::geometry::text(&buf);
+        for group in ["Scrobbling", "Discord", "Local files", "TIDAL"] {
+            assert!(text.contains(group), "{group} is headed:\n{text}");
+        }
+    }
 
     #[test]
     fn the_three_content_settings_are_toggles_with_tidals_own_defaults() {
@@ -429,9 +805,9 @@ mod tests {
     fn a_toggle_reads_on_or_off_rather_than_true_or_false() {
         let mut config = crate::config::Config::default();
         config.playback.autoplay = false;
-        assert_eq!(value_of(&config, Setting::Autoplay), "Off");
+        assert_eq!(value_of(&config, Setting::Autoplay, &[]), "Off");
         config.playback.autoplay = true;
-        assert_eq!(value_of(&config, Setting::Autoplay), "On");
+        assert_eq!(value_of(&config, Setting::Autoplay, &[]), "On");
     }
 
     #[test]
@@ -444,9 +820,9 @@ mod tests {
             state.next();
         }
         let last = state.current();
-        assert_eq!(last, Setting::Halfblocks);
+        assert_eq!(Some(last), Setting::ALL.last().copied());
         let buf = crate::shell::geometry::draw(120, 24, |f, area, palette| {
-            render(f, area, palette, &config, &state, true);
+            render(f, area, palette, &config, &state, true, &[]);
         });
         let text = crate::shell::geometry::text(&buf);
         assert!(text.contains(last.label()), "the selected row is drawn:\n{text}");
@@ -463,8 +839,8 @@ mod tests {
         let _ = &fixed;
         let config = crate::config::Config::default();
         let state = SettingsState::default();
-        let buf = crate::shell::geometry::draw(120, 40, |f, area, palette| {
-            render(f, area, palette, &config, &state, false);
+        let buf = crate::shell::geometry::draw(120, 100, |f, area, palette| {
+            render(f, area, palette, &config, &state, false, &[]);
         });
         let text = crate::shell::geometry::text(&buf);
 
@@ -485,7 +861,7 @@ mod tests {
             columns.push((label, value_at));
         }
 
-        let first = columns[0].1.expect("the first row has a value");
+        let first = columns[0].1.unwrap_or_else(|| panic!("the first row has a value:\n{text}"));
         for (label, at) in &columns {
             let at = at.unwrap_or_else(|| panic!("{label} has no value beside it"));
             assert_eq!(
@@ -518,12 +894,12 @@ mod tests {
 
         cycle(&mut config, Setting::Halfblocks, true);
         assert!(config.ui.halfblocks, "the setting turned on");
-        assert_eq!(value_of(&config, Setting::Halfblocks), "On");
+        assert_eq!(value_of(&config, Setting::Halfblocks, &[]), "On");
 
         // Either direction flips it, as the other toggles do.
         cycle(&mut config, Setting::Halfblocks, false);
         assert!(!config.ui.halfblocks, "and back again");
-        assert_eq!(value_of(&config, Setting::Halfblocks), "Off");
+        assert_eq!(value_of(&config, Setting::Halfblocks, &[]), "Off");
     }
 
     #[test]
@@ -563,11 +939,11 @@ mod tests {
         let mut config = crate::config::Config::default();
 
         config.ui.nerd_font = false;
-        assert_eq!(value_of(&config, Setting::NerdFont), "Off");
+        assert_eq!(value_of(&config, Setting::NerdFont, &[]), "Off");
 
         config.ui.nerd_font = true;
         fixed.set(true);
-        let on = value_of(&config, Setting::NerdFont);
+        let on = value_of(&config, Setting::NerdFont, &[]);
         assert!(on.starts_with("On"), "it says so: {on:?}");
         assert!(
             on.chars().any(|c| (0xE000..=0xF8FF).contains(&(c as u32))),

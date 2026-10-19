@@ -102,7 +102,7 @@ const BINDINGS: &[Binding] = &[
     },
     Binding {
         keys: "x",
-        what: "in the queue, or a playlist of yours: take the highlighted track out",
+        what: "in the queue or a playlist of yours, take the track out; in Settings, the last folder",
     },
     Binding {
         keys: "i",
