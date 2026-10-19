@@ -325,6 +325,9 @@ pub struct SearchState {
     pub query: String,
     /// True while the box has the keyboard.
     pub typing: bool,
+    /// A query has been sent and its reply has not come back: the view
+    /// says it is searching rather than nothing, or "Nothing found".
+    pub pending: bool,
     /// The results of the last query that came back. Held separately from
     /// `query` so the previous results stay on screen while the next query
     /// is being typed, rather than blanking on every keystroke.
@@ -2375,6 +2378,9 @@ impl App {
                 // waiting, or a view whose fetch died says "loading" for
                 // the rest of the session.
                 self.awaiting = false;
+                if let Some(state) = self.search.as_mut() {
+                    state.pending = false;
+                }
                 // The login modal paints over `status`, so while it is
                 // showing (no session yet) an error must go where it is
                 // actually visible.
@@ -2757,12 +2763,20 @@ impl App {
                 state.typing = true;
                 None
             }
-            Action::RunSearch(_) => None, // the request is a side effect in run()
+            // The request is a side effect in run(); the view only notes
+            // that it is out.
+            Action::RunSearch(_) => {
+                if let Some(state) = self.search.as_mut() {
+                    state.pending = true;
+                }
+                None
+            }
             Action::SearchLoaded(results) => {
                 if let Some(state) = self.search.as_mut() {
                     // A reply for a query the user has since retyped would
                     // show results under text that no longer produced them.
                     if state.query.trim() == results.query {
+                        state.pending = false;
                         state.results = *results;
                         state.tab = 0;
                         // New results: every tab's position means nothing.
@@ -5598,6 +5612,7 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
             searchview::View {
                 query: &search.query,
                 typing: search.typing,
+                pending: search.pending,
                 results: &search.results,
                 tab: search.tab,
                 tracks: &search.tracks,
