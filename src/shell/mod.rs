@@ -83,8 +83,9 @@ pub enum Action {
     /// Settings row would pick it, without going through Settings -- which
     /// a screen stuck on "retry or quit" could not reach.
     NextService,
-    /// The folder typed for local files, to check and write to the config.
-    AddFolder(String),
+    /// A setting typed on the sign-in screen, to check and write to the
+    /// config: the local folder, the Subsonic server or user.
+    Typed(login::Field, String),
     /// Signed in, or a stored session resumed.
     SessionOpened(std::sync::Arc<crate::catalogue::Session>),
     BeginLogin,
@@ -2365,21 +2366,26 @@ impl App {
                 let local = self.config.provider.kind == crate::config::ProviderKind::Local;
                 (local && !self.config.local.folders().is_empty()).then_some(Action::BeginLogin)
             }
-            Action::AddFolder(typed) => {
-                let probe = crate::config::LocalConfig {
-                    folders: vec![typed.clone()],
-                };
-                match probe.folders().first().filter(|p| p.is_dir()) {
-                    Some(_) => {
+            Action::Typed(field, typed) => {
+                match field {
+                    login::Field::Folder => {
+                        let probe = crate::config::LocalConfig {
+                            folders: vec![typed.clone()],
+                        };
+                        if !probe.folders().first().is_some_and(|p| p.is_dir()) {
+                            self.login =
+                                login::LoginState::Failed(format!("{typed} is not a folder"));
+                            return None;
+                        }
                         self.config.local.folders.push(typed);
-                        self.save_config();
-                        Some(Action::BeginLogin)
                     }
-                    None => {
-                        self.login = login::LoginState::Failed(format!("{typed} is not a folder"));
-                        None
-                    }
+                    login::Field::Server => self.config.subsonic.server = typed,
+                    login::Field::Username => self.config.subsonic.username = typed,
                 }
+                self.save_config();
+                // On to what the service wants next: the user after the
+                // server, the password after that; a folder is read now.
+                Some(Action::BeginLogin)
             }
             Action::SessionOpened(session) => {
                 self.session = Some(session.clone());
@@ -3335,7 +3341,8 @@ impl App {
             // loop starts, and this is what the screen says meanwhile. With
             // none named yet, the first is asked for here.
             crate::config::ProviderKind::Local if self.config.local.folders().is_empty() => {
-                login::LoginState::Folder {
+                login::LoginState::Text {
+                    field: login::Field::Folder,
                     typed: "~/Music".into(),
                 }
             }
@@ -3364,14 +3371,22 @@ impl App {
             .is_some_and(|p| p.sign_in_options().contains(&music::SignIn::Anonymous))
     }
 
-    /// The login screen for the Subsonic server the config names, or what
-    /// to put in the config when it names none.
+    /// The login screen for the Subsonic server the config names: the
+    /// server and the user are asked for first when it names none, and
+    /// the password every time.
     fn subsonic_prompt(&self) -> login::LoginState {
         let subsonic = &self.config.subsonic;
-        if subsonic.server.trim().is_empty() || subsonic.username.trim().is_empty() {
-            return login::LoginState::Failed(
-                "set [subsonic] server and username in config.toml, then press Enter".into(),
-            );
+        if subsonic.server.trim().is_empty() {
+            return login::LoginState::Text {
+                field: login::Field::Server,
+                typed: "https://".into(),
+            };
+        }
+        if subsonic.username.trim().is_empty() {
+            return login::LoginState::Text {
+                field: login::Field::Username,
+                typed: String::new(),
+            };
         }
         login::LoginState::Password {
             server: subsonic.server.trim().to_owned(),
@@ -3777,14 +3792,14 @@ impl App {
                     }
                     return None;
                 }
-                login::LoginState::Folder { typed } => {
+                login::LoginState::Text { field, typed } => {
                     match key.code {
                         KeyCode::Char(c) => typed.push(c),
                         KeyCode::Backspace => {
                             typed.pop();
                         }
                         KeyCode::Enter if !typed.trim().is_empty() => {
-                            return Some(Action::AddFolder(typed.trim().to_owned()));
+                            return Some(Action::Typed(*field, typed.trim().to_owned()));
                         }
                         KeyCode::Tab => return Some(Action::NextService),
                         KeyCode::Esc => return Some(Action::Quit),
@@ -10606,7 +10621,10 @@ mod tests {
         let mut app = App::default();
         app.config.provider.kind = crate::config::ProviderKind::Local;
         app.update(Action::BeginLogin);
-        assert!(matches!(&app.login, login::LoginState::Folder { typed } if typed == "~/Music"));
+        assert!(matches!(
+            &app.login,
+            login::LoginState::Text { field: login::Field::Folder, typed } if typed == "~/Music"
+        ));
 
         for _ in 0..7 {
             key(&mut app, KeyCode::Backspace);
@@ -10615,28 +10633,47 @@ mod tests {
             assert!(key(&mut app, KeyCode::Char(c)).is_none(), "{c} is typed, not bound");
         }
         let sent = match key(&mut app, KeyCode::Enter) {
-            Some(Action::AddFolder(path)) => path,
+            Some(Action::Typed(login::Field::Folder, path)) => path,
             other => panic!("Enter sends the folder, got {other:?}"),
         };
         assert_eq!(sent, "/nowhere");
-        assert!(app.update(Action::AddFolder(sent)).is_none());
+        assert!(app.update(Action::Typed(login::Field::Folder, sent)).is_none());
         assert!(matches!(app.login, login::LoginState::Failed(_)), "{:?}", app.login);
         assert!(app.config.local.folders.is_empty(), "nothing is written for a path that is not there");
 
         let here = std::env::temp_dir().display().to_string();
-        assert!(matches!(app.update(Action::AddFolder(here.clone())), Some(Action::BeginLogin)));
+        assert!(matches!(
+            app.update(Action::Typed(login::Field::Folder, here.clone())),
+            Some(Action::BeginLogin)
+        ));
         assert_eq!(app.config.local.folders, vec![here]);
     }
 
     #[test]
-    fn a_subsonic_config_without_a_server_says_what_to_set() {
+    fn a_subsonic_config_without_a_server_asks_for_it_then_the_user_then_the_password() {
         let mut app = App::default();
         app.config.provider.kind = crate::config::ProviderKind::Subsonic;
         app.update(Action::BeginLogin);
-        match &app.login {
-            login::LoginState::Failed(msg) => assert!(msg.contains("[subsonic]"), "{msg}"),
-            other => panic!("expected a hint, got {other:?}"),
-        }
+        assert!(matches!(
+            &app.login,
+            login::LoginState::Text { field: login::Field::Server, typed } if typed == "https://"
+        ));
+        let next = app.update(Action::Typed(login::Field::Server, "https://music.example.org".into()));
+        assert!(matches!(next, Some(Action::BeginLogin)));
+        app.update(Action::BeginLogin);
+        assert!(matches!(
+            &app.login,
+            login::LoginState::Text { field: login::Field::Username, .. }
+        ));
+        app.update(Action::Typed(login::Field::Username, "colin".into()));
+        app.update(Action::BeginLogin);
+        assert!(matches!(
+            &app.login,
+            login::LoginState::Password { server, username, .. }
+                if server == "https://music.example.org" && username == "colin"
+        ));
+        assert_eq!(app.config.subsonic.server, "https://music.example.org");
+        assert_eq!(app.config.subsonic.username, "colin");
     }
 
     #[test]

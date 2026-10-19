@@ -100,7 +100,7 @@ Each signs in from the same screen, its own way:
 | `apple` | Paste the `Cookie` header of a signed-in music.apple.com tab. Playback needs Google's Widevine module: see below. |
 | `deezer` | Paste the `Cookie` header (or just the `arl` cookie) of a signed-in deezer.com tab. |
 | `youtube` | `g` to continue as a guest, or paste the `Cookie` header of a signed-in music.youtube.com tab; with several accounts on it, pick one. |
-| `subsonic` | The server and user from the config below; the password is typed on the login screen. |
+| `subsonic` | Server and user asked on the login screen the first time, then kept in the config; the password is typed each time, never stored. |
 | `local` | Nothing: the first run asks for a folder, and the folders in the config are read at each start. |
 
 No webview: the cookies come out of the browser's devtools (Network, any
@@ -114,7 +114,8 @@ local library has no radio.
 
 ### Subsonic
 
-Navidrome, Gonic, Airsonic — anything that speaks the Subsonic API:
+Navidrome, Gonic, Airsonic — anything that speaks the Subsonic API. The
+first run asks for the server and the user and writes them here:
 
 ```toml
 [provider]
@@ -218,7 +219,7 @@ Press `?` in the app for the full list.
 | `r` | Repeat: off, all, one |
 | `S` | Sleep timer: 15, 30, 45, 60 minutes, end of track, off |
 | `L` | The lyrics, synced where they are — `j`/`k` to scroll, `Esc` to close |
-| `?` | The key list |
+| `?` | The key list; `j`/`k` scroll it on a short terminal |
 | `q` | Quit |
 
 `Esc` steps back rather than quitting: only `q` leaves the app.
