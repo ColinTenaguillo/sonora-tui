@@ -162,6 +162,17 @@ fn playlist(p: music::Playlist) -> Playlist {
     }
 }
 
+/// Whether `again` is the start of `picks`, track for track.
+fn same_tracks(again: &[GenreItem], picks: &[GenreItem]) -> bool {
+    let id = |item: &GenreItem| match item {
+        GenreItem::Track(t) => t.id.clone(),
+        _ => None,
+    };
+    !again.is_empty()
+        && again.len() <= picks.len()
+        && again.iter().zip(picks).all(|(a, p)| id(a).is_some() && id(a) == id(p))
+}
+
 /// A shelf's title as text. The local provider names its shelves by the
 /// translation key sonora's own screens look up; this is the English of
 /// each, and any other title is already text.
@@ -437,7 +448,16 @@ impl Session {
                 },
             );
         }
-        if !feed.listen_again.is_empty() {
+        // Subsonic and a folder of files have no history to draw on, and
+        // sonora fills both shelves from the same random draw: one row of
+        // it is enough.
+        let repeats = match sections.first() {
+            Some(picks) if picks.title == "Quick picks" => {
+                same_tracks(&feed.listen_again, &picks.items)
+            }
+            _ => false,
+        };
+        if !feed.listen_again.is_empty() && !repeats {
             sections.insert(
                 0,
                 GenreSection {
@@ -472,6 +492,21 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_listen_again_row_that_repeats_the_quick_picks_is_recognised() {
+        let track = |id: &str| {
+            crate::provider::map::item(crate::shell::carousel::Card {
+                target: Some(crate::shell::carousel::Target::Track(id.into())),
+                ..Default::default()
+            })
+            .expect("a track card")
+        };
+        let picks = vec![track("a"), track("b"), track("c")];
+        assert!(super::same_tracks(&[track("a"), track("b")], &picks));
+        assert!(!super::same_tracks(&[track("b"), track("a")], &picks));
+        assert!(!super::same_tracks(&[], &picks), "an empty row repeats nothing");
+    }
+
     #[test]
     fn a_shelf_named_by_a_translation_key_reads_as_english() {
         assert_eq!(super::heading("home-recently-added".into()), "Recently added");
