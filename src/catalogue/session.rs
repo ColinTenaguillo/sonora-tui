@@ -176,24 +176,46 @@ fn playlist(p: music::Playlist) -> Playlist {
 /// At most this many artists read off a search's tracks and albums.
 const ARTISTS_BEHIND: usize = 20;
 
+/// One artist read off a search's results.
+#[derive(Debug, PartialEq, Eq)]
+struct Behind {
+    id: String,
+    name: String,
+    /// The cover of the first track or album they were seen on: what the
+    /// card shows when the service has no portrait to give for the id.
+    cover: Option<String>,
+}
+
 /// The artists behind what a search found, for a service that does not
 /// search them itself: each once, the most frequent first.
-fn artists_behind(tracks: &[music::Track], albums: &[music::Album]) -> Vec<(String, String)> {
-    let mut seen: Vec<(String, String, usize)> = Vec::new();
+fn artists_behind(tracks: &[music::Track], albums: &[music::Album]) -> Vec<Behind> {
+    let mut seen: Vec<(Behind, usize)> = Vec::new();
     let refs = tracks
         .iter()
-        .flat_map(|t| &t.artist_refs)
-        .chain(albums.iter().flat_map(|a| &a.artist_refs));
-    for artist in refs {
+        .flat_map(|t| t.artist_refs.iter().map(move |a| (a, &t.cover)))
+        .chain(albums.iter().flat_map(|al| al.artist_refs.iter().map(move |a| (a, &al.cover))));
+    for (artist, cover) in refs {
         let Some(id) = &artist.id else { continue };
-        match seen.iter_mut().find(|(seen_id, _, _)| seen_id == id) {
-            Some(entry) => entry.2 += 1,
-            None => seen.push((id.clone(), artist.name.clone(), 1)),
+        match seen.iter_mut().find(|(b, _)| &b.id == id) {
+            Some(entry) => {
+                entry.1 += 1;
+                if entry.0.cover.is_none() {
+                    entry.0.cover = cover.clone();
+                }
+            }
+            None => seen.push((
+                Behind {
+                    id: id.clone(),
+                    name: artist.name.clone(),
+                    cover: cover.clone(),
+                },
+                1,
+            )),
         }
     }
-    seen.sort_by_key(|entry| std::cmp::Reverse(entry.2));
+    seen.sort_by_key(|entry| std::cmp::Reverse(entry.1));
     seen.truncate(ARTISTS_BEHIND);
-    seen.into_iter().map(|(id, name, _)| (id, name)).collect()
+    seen.into_iter().map(|(b, _)| b).collect()
 }
 
 /// Whether `again` is the start of `picks`, track for track.
@@ -487,14 +509,14 @@ impl Session {
         let mut artists = artists.map_err(error)?;
         if artists.is_empty() {
             let behind = artists_behind(&tracks, &albums);
-            let ids = behind.iter().map(|(id, _)| id.clone()).collect();
+            let ids = behind.iter().map(|b| b.id.clone()).collect();
             let pictures = self.api.artist_images(ids).await.unwrap_or_default();
             artists = behind
                 .into_iter()
-                .map(|(id, name)| Artist {
-                    picture: pictures.get(&id).cloned(),
-                    id,
-                    name,
+                .map(|b| Artist {
+                    picture: pictures.get(&b.id).cloned().or(b.cover),
+                    id: b.id,
+                    name: b.name,
                 })
                 .collect();
         }
@@ -602,16 +624,18 @@ mod tests {
                 .collect();
             t
         };
-        let tracks = vec![
+        let mut tracks = vec![
             track(&[("Jul", Some("j"))]),
             track(&[("SCH", Some("s")), ("Jul", Some("j"))]),
             track(&[("Unknown", None)]),
         ];
+        tracks[1].cover = Some("https://x/sch.jpg".into());
         let found = super::artists_behind(&tracks, &[]);
-        assert_eq!(
-            found,
-            vec![("j".to_string(), "Jul".to_string()), ("s".to_string(), "SCH".to_string())]
-        );
+        let names: Vec<(&str, &str)> = found.iter().map(|b| (b.id.as_str(), b.name.as_str())).collect();
+        assert_eq!(names, [("j", "Jul"), ("s", "SCH")]);
+        // The first cover seen stands in for a portrait: Jul's first track
+        // had none, the second had one.
+        assert_eq!(found[0].cover.as_deref(), Some("https://x/sch.jpg"));
     }
 
     #[test]
