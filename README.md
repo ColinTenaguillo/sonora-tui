@@ -41,17 +41,19 @@ keyboard-driven shell around them, built with ratatui.
 ## Install
 
 Prebuilt binaries for Linux (x86_64, aarch64) and macOS 12 or later (Apple
-Silicon, Intel), from the
-[latest release](https://github.com/ColinTenaguillo/sonora-tui/releases/latest):
-
-```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/ColinTenaguillo/sonora-tui/releases/latest/download/sonora-tui-installer.sh | sh
-```
-
-With Homebrew, on macOS or Linux, from the same binaries:
+Silicon, Intel). With Homebrew, on either:
 
 ```sh
 brew install ColinTenaguillo/tap/sonora-tui
+```
+
+`brew upgrade` follows the releases. Without Homebrew, the installer from the
+[latest release](https://github.com/ColinTenaguillo/sonora-tui/releases/latest)
+puts the binary in `~/.cargo/bin`, with `sonora-tui-update` beside it for the
+next version:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/ColinTenaguillo/sonora-tui/releases/latest/download/sonora-tui-installer.sh | sh
 ```
 
 On Linux the binary needs ALSA at runtime — `libasound2` on Debian and
