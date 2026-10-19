@@ -79,6 +79,12 @@ pub enum Action {
     SessionReady,
     /// The password typed for the Subsonic server the config names.
     Connect(login::Secret),
+    /// Tab on the sign-in screen: the next service in the list, as the
+    /// Settings row would pick it, without going through Settings -- which
+    /// a screen stuck on "retry or quit" could not reach.
+    NextService,
+    /// The folder typed for local files, to check and write to the config.
+    AddFolder(String),
     /// Signed in, or a stored session resumed.
     SessionOpened(std::sync::Arc<crate::catalogue::Session>),
     BeginLogin,
@@ -1269,6 +1275,17 @@ impl App {
         })
     }
 
+    /// Write the config where it was read from. Nowhere in a test, which
+    /// has no file.
+    fn save_config(&mut self) {
+        if let Some(path) = self.config_path.as_ref() {
+            if let Err(e) = self.config.save_to(path) {
+                tracing::warn!("the settings could not be saved: {e}");
+                self.say(format!("could not save settings: {e}"));
+            }
+        }
+    }
+
     /// Step the highlighted setting and write the file.
     ///
     /// Saved on the keystroke rather than on leaving the view: there is no
@@ -1278,12 +1295,7 @@ impl App {
     fn change_setting(&mut self, forward: bool) -> Option<Action> {
         let which = self.settings.current();
         settings::cycle(&mut self.config, which, forward);
-        if let Some(path) = self.config_path.as_ref() {
-            if let Err(e) = self.config.save_to(path) {
-                tracing::warn!("the settings could not be saved: {e}");
-                self.say(format!("could not save settings: {e}"));
-            }
-        }
+        self.save_config();
         // The volume is heard now rather than on the next track: a level
         // you cannot hear yourself setting is one you set by guessing.
         match which {
@@ -2302,6 +2314,33 @@ impl App {
             // The connection is made by the loop; the prompt stays up,
             // emptied, until it answers.
             Action::Connect(_) => None,
+            // Not `SwitchProvider`: that signs in at once, and a sign-in
+            // for every service passed on the way to the wanted one would
+            // open seven browser tabs. The new service waits for Enter --
+            // except a folder of files, which has nothing to ask.
+            Action::NextService => {
+                settings::cycle(&mut self.config, settings::Setting::Service, true);
+                self.save_config();
+                self.leave_service();
+                let local = self.config.provider.kind == crate::config::ProviderKind::Local;
+                (local && !self.config.local.folders().is_empty()).then_some(Action::BeginLogin)
+            }
+            Action::AddFolder(typed) => {
+                let probe = crate::config::LocalConfig {
+                    folders: vec![typed.clone()],
+                };
+                match probe.folders().first().filter(|p| p.is_dir()) {
+                    Some(_) => {
+                        self.config.local.folders.push(typed);
+                        self.save_config();
+                        Some(Action::BeginLogin)
+                    }
+                    None => {
+                        self.login = login::LoginState::Failed(format!("{typed} is not a folder"));
+                        None
+                    }
+                }
+            }
             Action::SessionOpened(session) => {
                 self.session = Some(session.clone());
                 self.login_input = None;
@@ -3243,11 +3282,12 @@ impl App {
         match self.config.provider.kind {
             crate::config::ProviderKind::Subsonic => self.subsonic_prompt(),
             // Nothing to sign in to: the folders are read as soon as the
-            // loop starts, and this is what the screen says meanwhile.
+            // loop starts, and this is what the screen says meanwhile. With
+            // none named yet, the first is asked for here.
             crate::config::ProviderKind::Local if self.config.local.folders().is_empty() => {
-                login::LoginState::Failed(
-                    "set [local] folders in config.toml, then press Enter".into(),
-                )
+                login::LoginState::Folder {
+                    typed: "~/Music".into(),
+                }
             }
             crate::config::ProviderKind::Local => {
                 login::LoginState::Busy("Reading your music folders…".into())
@@ -3676,6 +3716,22 @@ impl App {
                         KeyCode::Enter if !typed.0.is_empty() => {
                             return Some(Action::Connect(std::mem::take(typed)));
                         }
+                        KeyCode::Tab => return Some(Action::NextService),
+                        KeyCode::Esc => return Some(Action::Quit),
+                        _ => {}
+                    }
+                    return None;
+                }
+                login::LoginState::Folder { typed } => {
+                    match key.code {
+                        KeyCode::Char(c) => typed.push(c),
+                        KeyCode::Backspace => {
+                            typed.pop();
+                        }
+                        KeyCode::Enter if !typed.trim().is_empty() => {
+                            return Some(Action::AddFolder(typed.trim().to_owned()));
+                        }
+                        KeyCode::Tab => return Some(Action::NextService),
                         KeyCode::Esc => return Some(Action::Quit),
                         _ => {}
                     }
@@ -3721,6 +3777,9 @@ impl App {
                 login::LoginState::Idle | login::LoginState::Failed(_) => {
                     if key.code == KeyCode::Char(Self::GUEST_KEY) && self.guest_allowed() {
                         return Some(Action::BeginGuest);
+                    }
+                    if key.code == KeyCode::Tab {
+                        return Some(Action::NextService);
                     }
                 }
             }
@@ -5963,19 +6022,19 @@ mod tests {
         let mut app = App::default();
         assert!(app.session.is_none());
 
-        for code in [
-            KeyCode::Char('j'),
-            KeyCode::Char('k'),
-            KeyCode::Tab,
-            KeyCode::Char(' '),
-        ] {
+        for code in [KeyCode::Char('j'), KeyCode::Char('k'), KeyCode::Char(' ')] {
             let action = app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
             assert!(action.is_none(), "{code:?} must be inert before login");
         }
-        // Enter is the exception: logged out, it starts the login flow.
+        // Two exceptions: logged out, Enter starts the login flow and Tab
+        // moves to the next service.
         assert!(matches!(
             app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
             Some(Action::BeginLogin)
+        ));
+        assert!(matches!(
+            app.on_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+            Some(Action::NextService)
         ));
     }
 
@@ -10314,6 +10373,54 @@ mod tests {
             matches!(&app.login, login::LoginState::Password { typed, .. } if typed.0.is_empty()),
             "the prompt stays up, emptied, while the connection is made"
         );
+    }
+
+    #[test]
+    fn tab_on_the_sign_in_screen_moves_to_the_next_service_without_signing_in() {
+        // A failed sign-in offered retry or quit, and quitting was the only
+        // way to another service: Settings is behind the session.
+        let mut app = App {
+            login: login::LoginState::Failed("no network".into()),
+            ..App::default()
+        };
+        assert!(matches!(key(&mut app, KeyCode::Tab), Some(Action::NextService)));
+        let next = app.update(Action::NextService);
+        assert_eq!(app.config.provider.kind, crate::config::ProviderKind::Spotify);
+        assert!(matches!(app.login, login::LoginState::Idle), "{:?}", app.login);
+        assert!(next.is_none(), "nothing signs in until Enter, got {next:?}");
+
+        // A folder of files already named is read at once.
+        app.config.provider.kind = crate::config::ProviderKind::Subsonic;
+        app.config.local.folders = vec!["~".into()];
+        assert!(matches!(app.update(Action::NextService), Some(Action::BeginLogin)));
+        assert_eq!(app.config.provider.kind, crate::config::ProviderKind::Local);
+    }
+
+    #[test]
+    fn local_files_without_a_folder_ask_for_one_and_write_it() {
+        let mut app = App::default();
+        app.config.provider.kind = crate::config::ProviderKind::Local;
+        app.update(Action::BeginLogin);
+        assert!(matches!(&app.login, login::LoginState::Folder { typed } if typed == "~/Music"));
+
+        for _ in 0..7 {
+            key(&mut app, KeyCode::Backspace);
+        }
+        for c in "/nowhere".chars() {
+            assert!(key(&mut app, KeyCode::Char(c)).is_none(), "{c} is typed, not bound");
+        }
+        let sent = match key(&mut app, KeyCode::Enter) {
+            Some(Action::AddFolder(path)) => path,
+            other => panic!("Enter sends the folder, got {other:?}"),
+        };
+        assert_eq!(sent, "/nowhere");
+        assert!(app.update(Action::AddFolder(sent)).is_none());
+        assert!(matches!(app.login, login::LoginState::Failed(_)), "{:?}", app.login);
+        assert!(app.config.local.folders.is_empty(), "nothing is written for a path that is not there");
+
+        let here = std::env::temp_dir().display().to_string();
+        assert!(matches!(app.update(Action::AddFolder(here.clone())), Some(Action::BeginLogin)));
+        assert_eq!(app.config.local.folders, vec![here]);
     }
 
     #[test]

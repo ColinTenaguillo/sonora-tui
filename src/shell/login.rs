@@ -21,6 +21,11 @@ pub enum LoginState {
         username: String,
         typed: Secret,
     },
+    /// Local files with no folder named yet: the path is typed here and
+    /// written to the config.
+    Folder {
+        typed: String,
+    },
     /// The service wants authorising in the browser, at this link, and
     /// will hear back on its own -- Spotify's callback port.
     Url(String),
@@ -123,6 +128,17 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
             } else {
                 "Press Enter to begin."
             }),
+            Line::from("Tab to change service."),
+        ],
+        LoginState::Folder { typed } => vec![
+            Line::from("Where is your music?"),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("folder: "),
+                Span::styled(typed.clone(), Style::default().add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(""),
+            Line::from("Enter to read it, Tab to change service, Esc to quit."),
         ],
         LoginState::Url(url) => vec![
             Line::from("Authorise in your browser — opening it now."),
@@ -217,14 +233,14 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
                 ),
             ]),
             Line::from(""),
-            Line::from("Enter to connect, Esc to quit."),
+            Line::from("Enter to connect, Tab to change service, Esc to quit."),
         ],
         LoginState::Failed(reason) => vec![
             Line::from("Sign-in failed"),
             Line::from(""),
             Line::from(reason.clone()),
             Line::from(""),
-            Line::from("Press Enter to retry, q to quit."),
+            Line::from("Enter to retry, Tab to change service, q to quit."),
         ],
     };
 
@@ -351,6 +367,15 @@ mod tests {
         });
         assert!(text.contains("> Label"), "{text}");
         assert!(text.contains("  Colin"), "{text}");
+    }
+
+    #[test]
+    fn the_folder_prompt_shows_what_is_typed() {
+        let text = rendered(&LoginState::Folder {
+            typed: "~/Music".into(),
+        });
+        assert!(text.contains("~/Music"), "{text}");
+        assert!(text.contains("Tab"), "says how to leave:\n{text}");
     }
 
     #[test]
