@@ -399,11 +399,21 @@ fn cover_resize() -> ratatui_image::Resize {
 
 /// The URL to fetch for a cover: the same one, asked at a size worth drawing.
 ///
-/// Google's image host encodes the size in the URL, and YouTube Music names
-/// the thumbnail its own web page would draw at that spot -- 60 pixels for
-/// a row of quick picks. Asking for 544 costs the same request and gives a
-/// card that is not a blur.
+/// Two hosts encode the size in the URL and hand out the small one. Google's
+/// names the thumbnail YouTube Music's own page would draw at that spot --
+/// 60 pixels for a row of quick picks. Spotify's names each size by the
+/// four hex digits after the kind: a track carries its album's 64 pixel
+/// cover and an artist row its 160 pixel portrait. Asking for the large one
+/// costs the same request and gives a card that is not a blur.
 fn sized(url: &str) -> std::borrow::Cow<'_, str> {
+    if let Some(rest) = url.strip_prefix("https://i.scdn.co/image/") {
+        let large = match rest.get(..16) {
+            Some("ab67616d00004851" | "ab67616d00001e02") => "ab67616d0000b273",
+            Some("ab6761610000f178" | "ab67616100005174") => "ab6761610000e5eb",
+            _ => return url.into(),
+        };
+        return format!("https://i.scdn.co/image/{large}{}", &rest[16..]).into();
+    }
     if !url.contains("googleusercontent.com") {
         return url.into();
     }
@@ -497,7 +507,12 @@ async fn fetch_and_decode(
     url: &str,
     shape: Shape,
 ) -> Option<Decoded> {
-    let bytes = http.get(sized(url).as_ref()).send().await.ok()?.bytes().await.ok()?;
+    let bytes: Vec<u8> = match url.strip_prefix("file://") {
+        // The local provider's covers: the file beside the album, or the
+        // tag's picture written out to the cache.
+        Some(path) => tokio::fs::read(path).await.ok()?,
+        None => http.get(sized(url).as_ref()).send().await.ok()?.bytes().await.ok()?.to_vec(),
+    };
     let picker = picker.clone();
 
     // Decoding is CPU-bound and would stall the runtime's worker otherwise.
@@ -597,6 +612,23 @@ mod tests {
         assert_eq!((same.width(), same.height()), (50, 50));
     }
 
+    #[tokio::test]
+    async fn a_local_cover_is_read_from_disk() {
+        // The local provider hands out `file://` URLs, which no HTTP client
+        // fetches: the covers came back as failures and the cards stayed
+        // blank.
+        let dir = std::env::temp_dir().join(format!("sonora-tui-cover-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("cover.png");
+        image::RgbImage::new(8, 8).save(&path).unwrap();
+        let url = format!("file://{}", path.display());
+        let decoded =
+            fetch_and_decode(&reqwest::Client::new(), &Picker::halfblocks(), &url, Shape::Square)
+                .await;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(decoded.is_some());
+    }
+
     #[test]
     fn google_thumbnails_are_asked_for_at_card_size() {
         assert_eq!(
@@ -607,7 +639,17 @@ mod tests {
             sized("https://lh3.googleusercontent.com/abc=w226-h226"),
             "https://lh3.googleusercontent.com/abc=w544-h544"
         );
+        assert_eq!(
+            sized("https://i.scdn.co/image/ab67616d00004851aabbcc"),
+            "https://i.scdn.co/image/ab67616d0000b273aabbcc"
+        );
+        assert_eq!(
+            sized("https://i.scdn.co/image/ab6761610000f178aabbcc"),
+            "https://i.scdn.co/image/ab6761610000e5ebaabbcc"
+        );
         for untouched in [
+            "https://i.scdn.co/image/ab67616d0000b273aabbcc",
+            "https://i.scdn.co/image/short",
             "https://i.ytimg.com/vi/x/hqdefault.jpg",
             "https://resources.tidal.com/images/a/640x640.jpg?w=60-h",
             "https://lh3.googleusercontent.com/abc=w60",
