@@ -367,6 +367,9 @@ moved under the new name on the first start.
   out.
 - **Failed scrobbles are dropped**, with a line in the log; there is no retry
   queue yet.
+- **A card's year is what the service sends.** Spotify and YouTube Music
+  send none on their home shelves, so their album cards there have no year;
+  the album page and the Albums view do.
 
 ## Contributing
 
