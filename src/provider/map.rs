@@ -113,6 +113,7 @@ pub fn item(card: Card) -> Option<GenreItem> {
     let Card {
         title,
         subtitle,
+        detail,
         cover_url,
         target,
         duration,
@@ -148,9 +149,11 @@ pub fn item(card: Card) -> Option<GenreItem> {
             cover_large: cover_url.clone(),
             cover: cover_url,
             release_type: ReleaseType::Album,
-            year: 0,
+            // The card's third line is the year, on an album: the home
+            // page's albums lost theirs on this round trip.
+            year: detail.parse().unwrap_or(0),
             track_count: 0,
-            release_date: String::new(),
+            release_date: detail,
             label: String::new(),
             copyrights: Vec::new(),
             added_at: None,
@@ -235,6 +238,25 @@ mod tests {
         assert_eq!(out.added_at, Some(1_616_247_907));
         assert_eq!(out.tags, ["HIRES_LOSSLESS"]);
         assert!(out.playable);
+    }
+
+    #[test]
+    fn a_home_album_card_keeps_its_year_through_the_round_trip() {
+        let card = Card {
+            title: "good kid".into(),
+            detail: "2012".into(),
+            target: Some(Target::Album("20556792".into())),
+            ..Default::default()
+        };
+        match item(card) {
+            Some(GenreItem::Album(a)) => assert_eq!(a.year, 2012),
+            other => panic!("an album, got {other:?}"),
+        }
+        let blank = Card {
+            target: Some(Target::Album("1".into())),
+            ..Default::default()
+        };
+        assert!(matches!(item(blank), Some(GenreItem::Album(a)) if a.year == 0));
     }
 
     #[test]
