@@ -183,9 +183,16 @@ fn centred(area: Rect, width: u16, height: u16) -> Rect {
     }
 }
 
-pub fn render(frame: &mut Frame, area: Rect, palette: &Palette) {
-    // Two for the border, one for the closing hint and its blank line.
-    let height = BINDINGS.len() as u16 + 4;
+/// How many lines the list overhangs a terminal `height` rows tall: what
+/// `j` can scroll it by.
+pub fn overflow(height: u16) -> u16 {
+    (BINDINGS.len() as u16 + 2).saturating_sub(height)
+}
+
+pub fn render(frame: &mut Frame, area: Rect, palette: &Palette, scroll: u16) {
+    // Two for the border; the closing hint sits in it.
+    let height = BINDINGS.len() as u16 + 2;
+    let overhang = overflow(area.height);
     // As wide as the longest line wants, plus the border and a column of
     // air each side: a fixed width cut the end off the longer descriptions.
     let longest = BINDINGS
@@ -201,7 +208,7 @@ pub fn render(frame: &mut Frame, area: Rect, palette: &Palette) {
         return;
     }
 
-    let mut lines: Vec<Line> = BINDINGS
+    let lines: Vec<Line> = BINDINGS
         .iter()
         .map(|b| {
             if b.keys.is_empty() {
@@ -215,19 +222,27 @@ pub fn render(frame: &mut Frame, area: Rect, palette: &Palette) {
         })
         .collect();
 
-    lines.push(Line::raw(""));
-    lines.push(Line::styled("any key to close", palette.subtitle()));
+    // In the frame rather than at the end of the list, where a list that
+    // overhangs would have scrolled it out of sight.
+    let hint = match overhang {
+        0 => " any key to close ",
+        _ => " j k to scroll, any other key to close ",
+    };
 
     frame.render_widget(Clear, modal);
     frame.render_widget(
-        Paragraph::new(lines).alignment(Alignment::Left).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(palette.rule())
-                .padding(ratatui::widgets::Padding::horizontal(1))
-                .title(" Keys ")
-                .title_style(palette.page_heading()),
-        ),
+        Paragraph::new(lines)
+            .alignment(Alignment::Left)
+            .scroll((scroll.min(overhang), 0))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(palette.rule())
+                    .padding(ratatui::widgets::Padding::horizontal(1))
+                    .title(" Keys ")
+                    .title_style(palette.page_heading())
+                    .title_bottom(Line::styled(hint, palette.subtitle()).right_aligned()),
+            ),
         modal,
     );
 }
@@ -246,8 +261,26 @@ mod tests {
     }
 
     #[test]
+    fn a_short_terminal_scrolls_to_the_end_of_the_list() {
+        // At twenty rows the list overhangs: unscrolled, the top is drawn
+        // and "quit" is not; scrolled by the overhang, the reverse.
+        let draw = |scroll| {
+            let buf = crate::shell::geometry::draw(120, 20, |f, a, p| render(f, a, p, scroll));
+            crate::shell::geometry::text(&buf)
+        };
+        let over = overflow(20);
+        assert!(over > 0);
+        let top = draw(0);
+        assert!(top.contains("Moving around") && !top.contains("quit"), "{top}");
+        assert!(top.contains("j k to scroll"), "{top}");
+        let bottom = draw(over);
+        assert!(bottom.contains("quit") && !bottom.contains("Moving around"), "{bottom}");
+        assert_eq!(overflow(60), 0, "a tall terminal has nothing to scroll");
+    }
+
+    #[test]
     fn the_longest_line_is_drawn_to_its_end() {
-        let buf = crate::shell::geometry::draw(120, 60, render);
+        let buf = crate::shell::geometry::draw(120, 60, |f, a, p| render(f, a, p, 0));
         let text = crate::shell::geometry::text(&buf);
         for b in BINDINGS.iter().filter(|b| !b.what.is_empty()) {
             let tail: String = b.what.chars().rev().take(12).collect::<Vec<_>>().into_iter().rev().collect();
@@ -275,7 +308,7 @@ mod tests {
         let palette = Palette::detect();
         for (w, h) in [(1, 1), (10, 4), (56, 24), (200, 60)] {
             let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-            term.draw(|f| render(f, f.area(), &palette)).unwrap();
+            term.draw(|f| render(f, f.area(), &palette, 3)).unwrap();
         }
     }
 

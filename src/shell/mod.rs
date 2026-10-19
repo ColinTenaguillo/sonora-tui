@@ -989,6 +989,8 @@ pub struct App {
     pub filtering: bool,
     /// The key list, on "?".
     pub showing_help: bool,
+    /// How far the key list is scrolled, on a terminal too short for it.
+    pub help_scroll: u16,
     /// The lyrics, on "L".
     pub lyrics: lyricsview::Pane,
     /// Where listens are reported, once the config's services are linked.
@@ -3764,7 +3766,21 @@ impl App {
             }
         }
         if self.showing_help {
+            // Too short a terminal cut the end of the list off, with no
+            // way to reach it: j and k scroll, anything else closes.
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.help_scroll = self.help_scroll.saturating_add(1);
+                    return None;
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.help_scroll = self.help_scroll.saturating_sub(1);
+                    return None;
+                }
+                _ => {}
+            }
             self.showing_help = false;
+            self.help_scroll = 0;
             // The modal wrote over cells the image protocols had marked
             // `Skip`, and on the next frame they go back to `Skip` — so
             // nothing is written to undo it and a patch of the help stays
@@ -5680,7 +5696,10 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
 
     // Last, so it covers whatever is underneath.
     if app.showing_help {
-        help::render(frame, frame.area(), &palette);
+        // Clamped here, where the height is known: the key handler only
+        // counts.
+        app.help_scroll = app.help_scroll.min(help::overflow(frame.area().height));
+        help::render(frame, frame.area(), &palette, app.help_scroll);
     }
 }
 
