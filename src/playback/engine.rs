@@ -392,8 +392,10 @@ fn translate(
             "TIDAL is rate limiting playback; try again shortly".into(),
         )),
         Engine::Gated => Some(PlaybackEvent::SessionExpired),
+        // Only Spotify sends this, when its audio key is denied: the
+        // account may not stream, which is what a free account gets.
         Engine::Refused => Some(PlaybackEvent::Error(
-            "the audio output refused the stream".into(),
+            "Spotify refused the stream: playback needs Premium on this account".into(),
         )),
         Engine::Length { duration, .. } => Some(PlaybackEvent::Length(duration)),
         // The engine reopens the output itself; a resume, a seek and a
