@@ -435,9 +435,10 @@ fn render_list(
             text_area,
         );
     }
+    // Short enough for the box: the long form was cut at "Esc to".
     let hint = match typing {
-        true => "type to search; up/down to move, Enter to pick, Esc to leave the box",
-        false => "j/k or arrows to move, Enter to pick, / to search, Esc to close",
+        true => "type to search · ↑↓ move · Enter pick · Esc leave the box",
+        false => "j/k move · Enter pick · / search · Esc close",
     };
     frame.render_widget(
         Paragraph::new(Line::styled(hint, palette.subtitle())),
