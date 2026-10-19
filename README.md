@@ -211,7 +211,7 @@ Press `?` in the app for the full list.
 | `Space` | Pause / resume |
 | `A` | Favourite the track, or take it out again |
 | `F` | Favourite the artist, album, playlist or mix under the cursor, or the one whose view is open; again to take it out |
-| `P` | Add the selected track to one of your playlists, or to a new one named on the spot |
+| `P` | Add the selected track to one of your playlists — a list with covers and sizes, `/` to search it — or to a new one named on the spot |
 | `N` | New playlist |
 | `m` / `D` | Rename, or delete after a `y`, the playlist open or under the cursor — yours only |
 | `x` | In a playlist of yours: take the highlighted track out |
