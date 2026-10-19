@@ -231,6 +231,67 @@ impl Client {
         outcome(status, path, resp.text().await?)
     }
 
+    /// The `ETag` of a v1 resource. The playlist edits send it back as
+    /// `If-None-Match`, which is how TIDAL keeps two edits from crossing:
+    /// without it the endpoints answer 412.
+    pub(crate) async fn etag(&self, path: &str) -> Result<Option<String>, TidalError> {
+        let resp = self
+            .http
+            .get(format!("{API_HOST}{}{path}", Api::V1.prefix()))
+            .bearer_auth(&self.token.access_token)
+            .query(&[("countryCode", self.token.country_code.clone())])
+            .send()
+            .await?;
+        let etag = resp
+            .headers()
+            .get(reqwest::header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let status = resp.status().as_u16();
+        outcome(status, path, resp.text().await?)?;
+        Ok(etag)
+    }
+
+    /// POST a form to the v1 API under the resource's `If-None-Match`.
+    pub(crate) async fn post_form_matching(
+        &self,
+        path: &str,
+        form: &[(&str, String)],
+        etag: Option<&str>,
+    ) -> Result<String, TidalError> {
+        let mut req = self
+            .http
+            .post(format!("{API_HOST}{}{path}", Api::V1.prefix()))
+            .bearer_auth(&self.token.access_token)
+            .query(&[("countryCode", self.token.country_code.clone())])
+            .form(form);
+        if let Some(etag) = etag {
+            req = req.header(reqwest::header::IF_NONE_MATCH, etag);
+        }
+        let resp = req.send().await?;
+        let status = resp.status().as_u16();
+        outcome(status, path, resp.text().await?)
+    }
+
+    /// DELETE against the v1 API under the resource's `If-None-Match`.
+    pub(crate) async fn delete_matching(
+        &self,
+        path: &str,
+        etag: Option<&str>,
+    ) -> Result<String, TidalError> {
+        let mut req = self
+            .http
+            .delete(format!("{API_HOST}{}{path}", Api::V1.prefix()))
+            .bearer_auth(&self.token.access_token)
+            .query(&[("countryCode", self.token.country_code.clone())]);
+        if let Some(etag) = etag {
+            req = req.header(reqwest::header::IF_NONE_MATCH, etag);
+        }
+        let resp = req.send().await?;
+        let status = resp.status().as_u16();
+        outcome(status, path, resp.text().await?)
+    }
+
     /// DELETE against the v1 API.
     pub(crate) async fn delete(&self, path: &str) -> Result<String, TidalError> {
         let resp = self

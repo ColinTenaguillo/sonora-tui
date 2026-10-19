@@ -513,16 +513,19 @@ impl MusicApi for TidalApi {
 
     // ponytail: playlist editing waits for the endpoints. Favouriting a
     // playlist is the one write TIDAL already has here.
-    async fn create_playlist(&self, _name: &str) -> Result<String> {
-        bail!("creating playlists is not supported yet")
+    async fn create_playlist(&self, name: &str) -> Result<String> {
+        let client = self.inner.client().await?;
+        Ok(library::create_playlist(&client, name).await?)
     }
 
-    async fn rename_playlist(&self, _playlist_id: &str, _name: &str) -> Result<()> {
-        bail!("renaming playlists is not supported yet")
+    async fn rename_playlist(&self, playlist_id: &str, name: &str) -> Result<()> {
+        let client = self.inner.client().await?;
+        Ok(library::rename_playlist(&client, playlist_id, name).await?)
     }
 
-    async fn delete_playlist(&self, _playlist_id: &str) -> Result<()> {
-        bail!("deleting playlists is not supported yet")
+    async fn delete_playlist(&self, playlist_id: &str) -> Result<()> {
+        let client = self.inner.client().await?;
+        Ok(library::delete_playlist(&client, playlist_id).await?)
     }
 
     async fn remove_playlist_from_library(&self, playlist_id: &str) -> Result<()> {
@@ -547,12 +550,14 @@ impl MusicApi for TidalApi {
         bail!("playlist visibility is not supported yet")
     }
 
-    async fn add_track_to_playlist(&self, _playlist_id: &str, _track_id: &str) -> Result<()> {
-        bail!("editing playlists is not supported yet")
+    async fn add_track_to_playlist(&self, playlist_id: &str, track_id: &str) -> Result<()> {
+        let client = self.inner.client().await?;
+        Ok(library::add_playlist_track(&client, playlist_id, TrackId::from(track_id)).await?)
     }
 
-    async fn remove_track_from_playlist(&self, _playlist_id: &str, _track_id: &str) -> Result<()> {
-        bail!("editing playlists is not supported yet")
+    async fn remove_track_from_playlist(&self, playlist_id: &str, track_id: &str) -> Result<()> {
+        let client = self.inner.client().await?;
+        Ok(library::remove_playlist_track(&client, playlist_id, TrackId::from(track_id)).await?)
     }
 
     async fn saved_albums(&self) -> Result<Vec<Album>> {

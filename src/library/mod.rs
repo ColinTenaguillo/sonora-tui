@@ -401,6 +401,76 @@ pub fn parse_favourite_ids(body: &str) -> FavouriteIds {
     }
 }
 
+/// A new, empty playlist of the account's own, by uuid.
+pub async fn create_playlist(client: &Client, title: &str) -> Result<String, TidalError> {
+    let path = format!("/users/{}/playlists", client.user_id());
+    let body = client
+        .post_form(
+            &path,
+            &[("title", title.to_owned()), ("description", String::new())],
+        )
+        .await?;
+    let dto: PlaylistDto = serde_json::from_str(&body)
+        .map_err(|e| TidalError::Parse(format!("a new playlist did not parse: {e}")))?;
+    Ok(dto.uuid)
+}
+
+pub async fn rename_playlist(client: &Client, uuid: &str, title: &str) -> Result<(), TidalError> {
+    let path = format!("/playlists/{uuid}");
+    let etag = client.etag(&path).await?;
+    client
+        .post_form_matching(&path, &[("title", title.to_owned())], etag.as_deref())
+        .await?;
+    Ok(())
+}
+
+pub async fn delete_playlist(client: &Client, uuid: &str) -> Result<(), TidalError> {
+    client.delete(&format!("/playlists/{uuid}")).await?;
+    Ok(())
+}
+
+pub async fn add_playlist_track(
+    client: &Client,
+    uuid: &str,
+    id: crate::domain::TrackId,
+) -> Result<(), TidalError> {
+    let page = format!("/playlists/{uuid}");
+    let etag = client.etag(&page).await?;
+    client
+        .post_form_matching(
+            &format!("{page}/items"),
+            &[
+                ("trackIds", id.to_string()),
+                ("onDupes", "FAIL".into()),
+                ("onArtifactNotFound", "FAIL".into()),
+            ],
+            etag.as_deref(),
+        )
+        .await?;
+    Ok(())
+}
+
+/// The endpoint deletes by position, so the track's is looked up first.
+pub async fn remove_playlist_track(
+    client: &Client,
+    uuid: &str,
+    id: crate::domain::TrackId,
+) -> Result<(), TidalError> {
+    let page = format!("/playlists/{uuid}");
+    let items: Vec<FavouriteItem> =
+        fetch_all(client, "playlist tracks", &format!("{page}/items")).await?;
+    let index = items
+        .into_iter()
+        .map(|i| i.item.into_track().id)
+        .position(|t| t == id)
+        .ok_or_else(|| TidalError::Parse(format!("track {id} is not in playlist {uuid}")))?;
+    let etag = client.etag(&page).await?;
+    client
+        .delete_matching(&format!("{page}/items/{index}"), etag.as_deref())
+        .await?;
+    Ok(())
+}
+
 pub async fn playlist_tracks(client: &Client, uuid: &str) -> Result<Vec<Track>, TidalError> {
     // Playlist items use the same `item` wrapper as favourites.
     let path = format!("/playlists/{uuid}/items");
