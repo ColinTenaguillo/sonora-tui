@@ -3097,6 +3097,16 @@ impl App {
                     self.open.as_ref().and_then(|o| o.target.as_ref()),
                     Some(Collection::Playlist(open)) if *open == uuid
                 );
+                // The playlists arrived just before this; the open view's
+                // heading takes the name they now carry, so a rename shows
+                // without reopening.
+                if open_is_it && !deleted {
+                    if let Some(name) = self.playlists.iter().find(|p| p.uuid == uuid).map(|p| p.title.clone()) {
+                        if let Some(open) = self.open.as_mut() {
+                            open.title = name;
+                        }
+                    }
+                }
                 (deleted && open_is_it).then_some(Action::CloseCollection)
             }
             Action::FavouriteChanged { id, favourite } => {
@@ -10893,13 +10903,16 @@ mod tests {
             Some(Action::RemoveFromPlaylist { uuid, .. }) if uuid == "mine"
         ));
 
-        // A deleted playlist that was open closes; an edited one stays.
+        // A deleted playlist that was open closes; a renamed one shows
+        // its new name in the heading, from the reloaded list.
+        app.update(Action::PlaylistsLoaded(vec![owned_playlist("mine", "Mine 2", true)]));
         let next = app.update(Action::PlaylistEdited {
             message: "renamed".into(),
             uuid: "mine".into(),
             deleted: false,
         });
-        assert!(next.is_none() && app.open.is_some());
+        assert!(next.is_none());
+        assert_eq!(app.open.as_ref().map(|o| o.title.as_str()), Some("Mine 2"));
         let next = app.update(Action::PlaylistEdited {
             message: "playlist deleted".into(),
             uuid: "mine".into(),
