@@ -1,13 +1,32 @@
-# sonora-tui — a terminal music player for your streaming services
+<div align="center">
 
-[![CI](https://github.com/ColinTenaguillo/sonora-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/ColinTenaguillo/sonora-tui/actions/workflows/ci.yml)
+<img src=".github/readme-icon.svg" alt="" width="60" height="60">
+
+<h1>sonora-tui</h1>
+
+<p align="center">
+  <a href="CHANGELOG.md">Changelog</a>
+  ·
+  <a href="#install">Install</a>
+  ·
+  <a href="#services">Services</a>
+  ·
+  <a href="#keys">Keys</a>
+  ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+[![Build](https://img.shields.io/github/actions/workflow/status/ColinTenaguillo/sonora-tui/ci.yml?style=flat-square&label=build)](https://github.com/ColinTenaguillo/sonora-tui/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ColinTenaguillo/sonora-tui?style=flat-square&label=release)](https://github.com/ColinTenaguillo/sonora-tui/releases/latest)
+[![License](https://img.shields.io/github/license/ColinTenaguillo/sonora-tui?style=flat-square&label=license)](LICENSE)
 [![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
 
-Stream from TIDAL, Spotify, Apple Music, Deezer, YouTube Music or a Subsonic
-server, or play your own files — in the terminal, in Rust. The catalogue, the
-engine, the lyrics and the scrobblers are
-[sonora](https://github.com/sonorahq/sonora)'s `music` crate; this is a
-keyboard-driven shell around them, built with ratatui.
+### A terminal music player for your streaming services
+
+TIDAL, Spotify, Apple Music, Deezer, YouTube Music, Subsonic and your own files —
+in the terminal, over [sonora](https://github.com/sonorahq/sonora)'s `music` crate.
+
+</div>
 
 <p align="center">
   <img src="docs/demo.gif" alt="A tour: the home page, a hi-res album playing, a search, an artist page and biography, the queue, Explore, a filtered list and the key list">
