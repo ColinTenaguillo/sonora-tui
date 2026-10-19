@@ -40,27 +40,37 @@ keyboard-driven shell around them, built with ratatui.
 
 ## Install
 
-Prebuilt binaries for Linux (x86_64, aarch64) and macOS 12 or later (Apple
-Silicon, Intel), from the
-[latest release](https://github.com/ColinTenaguillo/sonora-tui/releases/latest):
+Runs on macOS 12 or later (Apple Silicon, Intel) and Linux (x86_64,
+aarch64). On Linux it plays through ALSA, which every desktop has.
 
-```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/ColinTenaguillo/sonora-tui/releases/latest/download/sonora-tui-installer.sh | sh
-```
+### Homebrew
 
-With Homebrew, on macOS or Linux, from the same binaries:
+macOS or Linux. The one way in that follows the releases: `brew upgrade`
+brings the next version.
 
 ```sh
 brew install ColinTenaguillo/tap/sonora-tui
 ```
 
-On Linux the binary needs ALSA at runtime — `libasound2` on Debian and
-Ubuntu, `alsa-lib` on Fedora and Arch — which a desktop already has.
+### Installer script
+
+Downloads the binary for your platform into `~/.cargo/bin`. Run it again
+for a newer release.
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/ColinTenaguillo/sonora-tui/releases/latest/download/sonora-tui-installer.sh | sh
+```
+
+### Prebuilt archive
+
+Each [release](https://github.com/ColinTenaguillo/sonora-tui/releases/latest)
+carries an archive per platform and its SHA-256. Unpack it and put
+`sonora-tui` on your `PATH`.
 
 ### From source
 
-Needs Rust (stable), a C++ compiler for the Widevine host and CMake for
-the Opus decoder. On Linux, the ALSA headers as well:
+Rust (stable), a C++ compiler for the Widevine host, CMake for the Opus
+decoder, and on Linux the ALSA headers:
 
 ```sh
 sudo apt install build-essential cmake pkg-config libasound2-dev   # Debian, Ubuntu
@@ -68,20 +78,11 @@ sudo dnf install gcc-c++ cmake pkg-config alsa-lib-devel            # Fedora
 sudo pacman -S base-devel cmake pkgconf alsa-lib                    # Arch
 ```
 
-Then:
-
 ```sh
 cargo install --git https://github.com/ColinTenaguillo/sonora-tui
 ```
 
-or from a checkout:
-
-```sh
-git clone https://github.com/ColinTenaguillo/sonora-tui
-cd sonora-tui
-cargo build --release
-./target/release/sonora-tui
-```
+or from a checkout, `cargo build --release` and run `target/release/sonora-tui`.
 
 ## Services
 
