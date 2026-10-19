@@ -366,9 +366,6 @@ moved under the new name on the first start.
 - **Not bit-perfect.** The device's physical format is left alone, so content
   is resampled to whatever rate it is already at. The quality badge reports
   what the service delivered, not what reached the speakers.
-- **TIDAL playlists are read-only for now.** The other six services create,
-  rename, delete and edit the account's own playlists; TIDAL's endpoints
-  are next.
 - **No videos.** This plays audio, so the video rows on genre pages are left
   out.
 - **Failed scrobbles are dropped**, with a line in the log; there is no retry
