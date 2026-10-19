@@ -48,6 +48,12 @@ Silicon, Intel), from the
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/ColinTenaguillo/sonora-tui/releases/latest/download/sonora-tui-installer.sh | sh
 ```
 
+With Homebrew, on macOS or Linux, from the same binaries:
+
+```sh
+brew install ColinTenaguillo/tap/sonora-tui
+```
+
 On Linux the binary needs ALSA at runtime — `libasound2` on Debian and
 Ubuntu, `alsa-lib` on Fedora and Arch — which a desktop already has.
 
