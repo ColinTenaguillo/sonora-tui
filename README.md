@@ -394,8 +394,9 @@ moved under the new name on the first start.
   what the service delivered, not what reached the speakers.
 - **No videos.** This plays audio, so the video rows on genre pages are left
   out.
-- **Failed scrobbles are dropped**, with a line in the log; there is no retry
-  queue yet.
+- **A refused scrobble is retried** with the next batch, in memory, up to
+  two hundred listens a service; nothing survives quitting but the one last
+  try on the way out.
 - **A card's year is what the service sends.** Spotify and YouTube Music
   send none on their home shelves, so their album cards there have no year;
   the album page and the Albums view do.
