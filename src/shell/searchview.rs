@@ -648,11 +648,11 @@ mod tests {
             geometry::text(&buf)
         };
         let text = draw(&empty, true);
-        assert!(text.contains("Searching.") && !text.contains("Nothing found"), "{text}");
+        assert!(text.contains("Searching ") && !text.contains("Nothing found"), "{text}");
         let text = draw(&empty, false);
         assert!(text.contains("Nothing found"), "{text}");
         let text = draw(&full, true);
-        assert!(text.contains("Searching.") && text.contains("Daft"), "old results stay up:\n{text}");
+        assert!(text.contains("Searching ") && text.contains("Daft"), "old results stay up:\n{text}");
     }
 
     #[test]
