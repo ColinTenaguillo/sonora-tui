@@ -15,6 +15,8 @@ pub struct Playlist {
     /// the web client shows "TIDAL" there and so do we.
     pub creator: String,
     pub cover: Option<String>,
+    /// The account's own, so it can be edited: the service says.
+    pub owned: bool,
 }
 
 impl Playlist {
@@ -28,6 +30,7 @@ impl Playlist {
             duration: None,
             creator: "Coco".into(),
             cover: None,
+            owned: true,
         }
     }
 }
@@ -132,7 +135,8 @@ fn walk_ends(got: usize, offset: u32, total: u32) -> bool {
 pub async fn playlists(client: &Client) -> Result<Vec<Playlist>, TidalError> {
     let path = format!("/users/{}/playlists", client.user_id());
     let items: Vec<PlaylistDto> = fetch_all(client, "playlists", &path).await?;
-    Ok(items.into_iter().map(playlist_from_dto).collect())
+    let user = client.user_id();
+    Ok(items.into_iter().map(|p| playlist_from_dto(p, user)).collect())
 }
 
 /// One playlist's header, by uuid: what a page needs above the tracks when
@@ -141,7 +145,7 @@ pub async fn playlist(client: &Client, uuid: &str) -> Result<Playlist, TidalErro
     let body = client.get(&format!("/playlists/{uuid}"), &[]).await?;
     let dto: PlaylistDto = serde_json::from_str(&body)
         .map_err(|e| TidalError::Parse(format!("a playlist did not parse: {e}")))?;
-    Ok(playlist_from_dto(dto))
+    Ok(playlist_from_dto(dto, client.user_id()))
 }
 
 /// One album's header, by id, for the same reason.
@@ -152,8 +156,10 @@ pub async fn album(client: &Client, id: &str) -> Result<Album, TidalError> {
     Ok(album_from_dto(dto))
 }
 
-pub fn playlist_from_dto(p: PlaylistDto) -> Playlist {
+/// `user_id` is the signed-in account's: a playlist it created is its own.
+pub fn playlist_from_dto(p: PlaylistDto, user_id: u64) -> Playlist {
     Playlist {
+        owned: p.creator.id == Some(user_id),
         uuid: p.uuid,
         title: p.title,
         track_count: p.number_of_tracks,
@@ -1006,10 +1012,10 @@ mod tests {
             uuid: "x".into(),
             title: "Classical Focus".into(),
             number_of_tracks: 118,
-            creator: crate::tidal::dto::PlaylistCreator { name: None },
+            creator: crate::tidal::dto::PlaylistCreator { name: None, id: None },
             ..Default::default()
         };
-        assert_eq!(playlist_from_dto(dto).creator, "TIDAL");
+        assert_eq!(playlist_from_dto(dto, 1).creator, "TIDAL");
     }
 
     #[test]

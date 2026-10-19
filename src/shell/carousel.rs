@@ -1502,6 +1502,7 @@ mod tests {
             duration: Some(std::time::Duration::from_secs(41 * 60 + 1)),
             creator: "Someone".into(),
             cover: None,
+            owned: false,
         };
         let card = playlist_card(&playlist);
         assert!(

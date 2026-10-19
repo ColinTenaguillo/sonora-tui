@@ -159,6 +159,7 @@ fn playlist(p: music::Playlist) -> Playlist {
         duration: None,
         creator: p.owner,
         cover: p.cover,
+        owned: p.owned,
     }
 }
 
@@ -329,6 +330,28 @@ fn iso_date(epoch: i64) -> String {
 }
 
 impl Session {
+    /// The edits the service allows on the account's own playlists. The
+    /// id of the new one comes back, so a track can go straight into it.
+    pub async fn create_playlist(&self, name: &str) -> Result<String> {
+        self.api.create_playlist(name).await.map_err(error)
+    }
+
+    pub async fn rename_playlist(&self, uuid: &str, name: &str) -> Result<()> {
+        self.api.rename_playlist(uuid, name).await.map_err(error)
+    }
+
+    pub async fn delete_playlist(&self, uuid: &str) -> Result<()> {
+        self.api.delete_playlist(uuid).await.map_err(error)
+    }
+
+    pub async fn add_track_to_playlist(&self, uuid: &str, id: &TrackId) -> Result<()> {
+        self.api.add_track_to_playlist(uuid, &id.0).await.map_err(error)
+    }
+
+    pub async fn remove_track_from_playlist(&self, uuid: &str, id: &TrackId) -> Result<()> {
+        self.api.remove_track_from_playlist(uuid, &id.0).await.map_err(error)
+    }
+
     pub async fn playlists(&self) -> Result<Vec<Playlist>> {
         let lists = self.api.playlists().await.map_err(error)?;
         Ok(lists.into_iter().map(playlist).collect())

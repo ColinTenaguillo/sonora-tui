@@ -102,7 +102,7 @@ const BINDINGS: &[Binding] = &[
     },
     Binding {
         keys: "x",
-        what: "in the queue: take the highlighted track out",
+        what: "in the queue, or a playlist of yours: take the highlighted track out",
     },
     Binding {
         keys: "i",
@@ -115,6 +115,27 @@ const BINDINGS: &[Binding] = &[
     Binding {
         keys: "E",
         what: "queue it after the rest",
+    },
+    Binding { keys: "", what: "" },
+    Binding {
+        keys: "",
+        what: "Your playlists",
+    },
+    Binding {
+        keys: "P",
+        what: "add the selected track to one, or to a new one",
+    },
+    Binding {
+        keys: "N",
+        what: "new playlist",
+    },
+    Binding {
+        keys: "m",
+        what: "rename the one open or selected",
+    },
+    Binding {
+        keys: "D",
+        what: "delete it, after a y",
     },
     Binding { keys: "", what: "" },
     Binding {
