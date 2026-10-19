@@ -936,6 +936,11 @@ pub struct App {
     /// Explore's own rows. The same shape as the home page's, drawn by the
     /// same renderer — it is a page of card rows like any other.
     pub explore: home::HomeState,
+    /// The service answered its home page with nothing -- Deezer does --
+    /// so the Music page is built from the collection as it loads.
+    pub home_from_collection: bool,
+    /// The service has no Explore page: said on it, rather than blank.
+    pub explore_empty: bool,
     /// The activity feed as it came back: releases from the artists the
     /// user follows, newest first and ungrouped. Kept beside the rows so a
     /// filter can be applied without asking for the feed again.
@@ -1276,6 +1281,35 @@ impl App {
         } else {
             at.saturating_sub(SEEK_STEP)
         })
+    }
+
+    /// The Music page from the collection, for a service whose home page
+    /// is empty. Rebuilt as each list arrives; a row keeps its place when
+    /// it was already there.
+    fn refresh_collection_home(&mut self) {
+        if !self.home_from_collection {
+            return;
+        }
+        let rows = [
+            ("Playlists", self.playlists.iter().map(carousel::playlist_card).collect::<Vec<_>>()),
+            ("Favourite albums", self.albums.iter().map(carousel::album_card).collect()),
+            ("Artists", self.artists.iter().map(carousel::artist_card).collect()),
+        ];
+        let mut old = std::mem::take(&mut self.home.rows);
+        self.home.rows = rows
+            .into_iter()
+            .filter(|(_, cards)| !cards.is_empty())
+            .map(|(heading, cards)| home::Row {
+                heading: heading.into(),
+                kind: crate::browse::RowKind::Carousel,
+                cards,
+                state: old
+                    .iter_mut()
+                    .find(|r| r.heading == heading)
+                    .map(|r| std::mem::take(&mut r.state))
+                    .unwrap_or_default(),
+            })
+            .collect();
     }
 
     /// Write the config where it was read from. Nowhere in a test, which
@@ -2574,26 +2608,31 @@ impl App {
                         state: carousel::CarouselState::default(),
                     })
                     .collect();
+                self.explore_empty = self.explore.rows.is_empty();
                 None
             }
             Action::PlaylistsLoaded(playlists) => {
                 self.playlists = playlists;
                 self.playlist_grid.clamp(self.playlists.len());
+                self.refresh_collection_home();
                 None
             }
             Action::AlbumsLoaded(albums) => {
                 self.albums = albums;
                 self.album_grid.clamp(self.albums.len());
+                self.refresh_collection_home();
                 None
             }
             Action::ArtistsLoaded(artists) => {
                 self.followed = artists.iter().map(|a| a.id.clone()).collect();
                 self.artists = artists;
                 self.artist_grid.clamp(self.artists.len());
+                self.refresh_collection_home();
                 None
             }
             Action::HomeLoaded(home) => {
                 let home = *home;
+                self.home_from_collection = home.rows.is_empty();
                 self.home.rows = home
                     .rows
                     .into_iter()
@@ -2604,6 +2643,7 @@ impl App {
                         state: carousel::CarouselState::default(),
                     })
                     .collect();
+                self.refresh_collection_home();
                 None
             }
             Action::CarouselNext => self.move_horizontal(Dir::Right),
@@ -5319,6 +5359,25 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                 // `artwork` needs &mut to cache what it decodes, and the closure
                 // is handed to a renderer that also borrows `app` — so take it out
                 // for the duration and put it back.
+                if section == sidebar::Section::Explore && app.explore_empty {
+                    frame.render_widget(
+                        ratatui::widgets::Paragraph::new(vec![
+                            ratatui::text::Line::from(format!(
+                                "{} has no Explore page.",
+                                app.service_name()
+                            )),
+                            ratatui::text::Line::from("Search (s) still covers its catalogue."),
+                        ])
+                        .style(palette.subtitle())
+                        .alignment(ratatui::layout::Alignment::Center),
+                        ratatui::layout::Rect {
+                            y: regions.main.y + regions.main.height / 3,
+                            height: 2.min(regions.main.height),
+                            ..regions.main
+                        },
+                    );
+                    return;
+                }
                 let mut art = app.artwork.take();
                 let state = if section == sidebar::Section::Explore {
                     &app.explore
@@ -10397,6 +10456,55 @@ mod tests {
     /// network until a fetch is awaited.
     fn sample_session() -> std::sync::Arc<crate::catalogue::Session> {
         crate::catalogue::Session::sample()
+    }
+
+    #[test]
+    fn an_empty_home_is_built_from_the_collection_as_it_loads() {
+        // Deezer answers its home page with no rows at all, so the Music
+        // page was blank while Playlists and Albums had plenty.
+        let mut app = signed_in(sidebar::Section::Music);
+        app.update(Action::HomeLoaded(Box::new(crate::browse::Home { rows: Vec::new() })));
+        assert!(app.home.rows.is_empty());
+        app.update(Action::PlaylistsLoaded(vec![crate::library::Playlist {
+            uuid: "p1".into(),
+            title: "Mine".into(),
+            track_count: 3,
+            duration: None,
+            creator: "me".into(),
+            cover: None,
+        }]));
+        app.update(Action::AlbumsLoaded(vec![crate::library::Album {
+            id: "a1".into(),
+            title: "Blue".into(),
+            artist: "Miles".into(),
+            year: Some("1959".into()),
+            cover: None,
+            track_count: 5,
+            duration: None,
+        }]));
+        let headings: Vec<&str> = app.home.rows.iter().map(|r| r.heading.as_str()).collect();
+        assert_eq!(headings, ["Playlists", "Favourite albums"]);
+        assert_eq!(app.home.rows[1].cards[0].title, "Blue");
+
+        // A home page with rows of its own is left alone.
+        app.update(Action::HomeLoaded(Box::new(crate::browse::Home {
+            rows: vec![crate::browse::HomeRow {
+                heading: "Picks".into(),
+                kind: Default::default(),
+                cards: vec![carousel::Card::new("x", "y")],
+                more: None,
+            }],
+        })));
+        app.update(Action::AlbumsLoaded(Vec::new()));
+        assert_eq!(app.home.rows.len(), 1);
+        assert_eq!(app.home.rows[0].heading, "Picks");
+    }
+
+    #[test]
+    fn an_empty_explore_is_remembered_as_such() {
+        let mut app = signed_in(sidebar::Section::Explore);
+        app.update(Action::ExploreLoaded(Box::new(crate::browse::Home { rows: Vec::new() })));
+        assert!(app.explore_empty);
     }
 
     #[test]
