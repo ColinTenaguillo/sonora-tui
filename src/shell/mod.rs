@@ -3096,6 +3096,16 @@ impl App {
                             return Some(fetch);
                         }
                     }
+                    crate::playback::PlaybackEvent::Length(length) => {
+                        // A track that came without a duration -- YouTube
+                        // Music's quick picks -- drew a clock over an
+                        // empty bar. The stream knows how long it is.
+                        if let Some(track) = self.now_playing.track.as_mut() {
+                            if track.duration.is_zero() {
+                                track.duration = length;
+                            }
+                        }
+                    }
                     crate::playback::PlaybackEvent::Started {
                         bit_depth,
                         sample_rate,
@@ -6149,6 +6159,24 @@ mod tests {
             delivered: crate::domain::Quality::High,
         }));
         assert_eq!(app.now_playing.quality.as_deref(), Some("44.1kHz"));
+    }
+
+    #[test]
+    fn a_track_without_a_duration_takes_the_streams() {
+        use std::time::Duration;
+        let mut app = App::default();
+        app.now_playing.track = Some(crate::domain::Track::sample("t", "a", Duration::ZERO));
+        app.update(Action::Playback(crate::playback::PlaybackEvent::Length(
+            Duration::from_secs(200),
+        )));
+        assert_eq!(app.now_playing.track.as_ref().unwrap().duration, Duration::from_secs(200));
+        // One that knows its own keeps it: the card's figure is the
+        // catalogue's, the stream's can be a second off.
+        app.now_playing.track = Some(crate::domain::Track::sample("t", "a", Duration::from_secs(100)));
+        app.update(Action::Playback(crate::playback::PlaybackEvent::Length(
+            Duration::from_secs(200),
+        )));
+        assert_eq!(app.now_playing.track.as_ref().unwrap().duration, Duration::from_secs(100));
     }
 
     #[test]
