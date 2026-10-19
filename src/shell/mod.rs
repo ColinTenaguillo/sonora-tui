@@ -4287,6 +4287,12 @@ async fn finish_edit(
             if let Ok(p) = client.playlists().await {
                 let _ = tx.send(Action::PlaylistsLoaded(p));
             }
+            // The hearts too: a new playlist of the account's own is
+            // among its favourites on TIDAL, and the grid draws it from
+            // this list, which was still the one from sign-in.
+            if let Ok(ids) = client.favourite_ids().await {
+                let _ = tx.send(Action::FavouriteIdsLoaded(ids));
+            }
             let _ = tx.send(Action::PlaylistEdited {
                 message,
                 uuid,
