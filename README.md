@@ -274,9 +274,20 @@ The keyboard's media keys work too — play/pause, next, previous — and they
 reach the app whether or not the terminal has focus, since the desktop
 delivers them rather than the terminal.
 
+## Settings
+
+Settings (`8`) edits `config.toml` in place, row by row: the service, the
+sound, the content filters, the look, the scrobbling accounts, the Discord
+application, the Subsonic server, the music folders and your own TIDAL
+credentials. `h`/`l` step a value, Enter opens a box on a text row and
+saves on Enter, `x` drops the last music folder. A secret is drawn as dots
+and never shown back. What something reads live follows at once: the
+colours, the scrobblers (linked again, through the browser where needed),
+the Discord presence, the library of local files.
+
 ## Sound
 
-Settings (`8`) has three rows the engine reads, all written to the config:
+Three rows the engine reads, all written to the config:
 
 ```toml
 [audio]
