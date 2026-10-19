@@ -50,6 +50,7 @@ pub mod sidebar;
 pub mod theme;
 pub mod trackgrid;
 pub mod tracklist;
+pub mod waiting;
 
 use std::time::Duration;
 
@@ -5722,7 +5723,7 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                     );
                 } else if state.rows.is_empty() {
                     let line = match loaded {
-                        false => "Loading…".to_string(),
+                        false => waiting::animated("Loading…").into_owned(),
                         true => format!("{} has nothing to show here yet.", app.service_name()),
                     };
                     notice(frame, regions.main, &palette, vec![ratatui::text::Line::from(line)]);
@@ -5965,7 +5966,10 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
             height: 1,
         };
         frame.render_widget(
-            Paragraph::new(Line::styled(format!(" {status} "), palette.notice())),
+            Paragraph::new(Line::styled(
+                format!(" {} ", waiting::animated(status)),
+                palette.notice(),
+            )),
             notice,
         );
     }
