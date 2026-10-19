@@ -150,6 +150,10 @@ pub enum PlaybackEvent {
         delivered: crate::domain::Quality,
     },
     Position(Duration),
+    /// How long the stream is, once opened. The only word on it for a
+    /// track that came without a duration, as YouTube Music's quick
+    /// picks do: the bar had a running clock over nothing to fill.
+    Length(Duration),
     /// The engine that just started, and its spectrum: one per attach.
     Spectrum(Bands),
     /// The whole of this track has arrived, so the next can be fetched
@@ -391,13 +395,13 @@ fn translate(
         Engine::Refused => Some(PlaybackEvent::Error(
             "the audio output refused the stream".into(),
         )),
-        // The engine reopens the output itself; a resume, a seek, a
-        // pause and a length are things the shell already knows.
+        Engine::Length { duration, .. } => Some(PlaybackEvent::Length(duration)),
+        // The engine reopens the output itself; a resume, a seek and a
+        // pause are things the shell already knows.
         Engine::Playing { .. }
         | Engine::Loading { .. }
         | Engine::Paused { .. }
         | Engine::Seeked { .. }
-        | Engine::Length { .. }
         | Engine::Downloaded { id: None }
         | Engine::Unavailable { id: None }
         | Engine::Throttled { id: None }
@@ -416,6 +420,20 @@ fn failed(id: &str, message: String) -> PlaybackEvent {
 mod tests {
     use super::*;
     use crate::domain::Quality;
+
+    #[test]
+    fn the_length_of_a_stream_reaches_the_shell() {
+        let mut announced = None;
+        let got = translate(
+            music::PlaybackEvent::Length {
+                id: Some("t".into()),
+                duration: Duration::from_secs(90),
+            },
+            &mut announced,
+            &NoMeta,
+        );
+        assert!(matches!(got, Some(PlaybackEvent::Length(d)) if d == Duration::from_secs(90)));
+    }
 
     fn fetch() -> TidalFetch {
         TidalFetch::new(crate::domain::Quality::Lossless).unwrap()
