@@ -4321,7 +4321,19 @@ pub async fn run(
         });
 
         if app.take_repaint() {
-            terminal.clear()?;
+            // Not `Terminal::clear`: since ratatui 0.30 it reads the cursor
+            // position back from the terminal first, and with the event
+            // stream holding stdin that read times out after two seconds
+            // and the error ends the run. The screen is wiped and the
+            // buffer the next draw diffs against is emptied, which is the
+            // rest of what `clear` does.
+            use ratatui::backend::Backend as _;
+            terminal
+                .backend_mut()
+                .clear_region(ratatui::backend::ClearType::All)?;
+            terminal.swap_buffers();
+            terminal.current_buffer_mut().reset();
+            terminal.swap_buffers();
         }
         terminal.draw(|frame| draw(frame, &mut app))?;
 
@@ -7042,7 +7054,9 @@ mod tests {
             .nth(1)
             .expect("the event loop");
         let take = loop_body.find("take_repaint()").expect("the flag is read");
-        let clear = loop_body.find("terminal.clear()").expect("and acted on");
+        let clear = loop_body
+            .find(".clear_region(ratatui::backend::ClearType::All)")
+            .expect("and acted on");
         let draw = loop_body.find("terminal.draw(").expect("before the draw");
         assert!(take < clear, "the clear follows from the flag");
         assert!(clear < draw, "and happens before the frame it is for");
