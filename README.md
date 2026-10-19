@@ -211,6 +211,10 @@ Press `?` in the app for the full list.
 | `Space` | Pause / resume |
 | `A` | Favourite the track, or take it out again |
 | `F` | Favourite the artist, album, playlist or mix under the cursor, or the one whose view is open; again to take it out |
+| `P` | Add the selected track to one of your playlists, or to a new one named on the spot |
+| `N` | New playlist |
+| `m` / `D` | Rename, or delete after a `y`, the playlist open or under the cursor — yours only |
+| `x` | In a playlist of yours: take the highlighted track out |
 | `n` / `p` | Next / previous in the queue |
 | `.` / `,` | Ten seconds forward / back in the track |
 | `e` / `E` | Queue the selected track next, or after the rest |
@@ -362,7 +366,9 @@ moved under the new name on the first start.
 - **Not bit-perfect.** The device's physical format is left alone, so content
   is resampled to whatever rate it is already at. The quality badge reports
   what the service delivered, not what reached the speakers.
-- **Read-only.** No playlist editing.
+- **TIDAL playlists are read-only for now.** The other six services create,
+  rename, delete and edit the account's own playlists; TIDAL's endpoints
+  are next.
 - **No videos.** This plays audio, so the video rows on genre pages are left
   out.
 - **Failed scrobbles are dropped**, with a line in the log; there is no retry

@@ -114,7 +114,9 @@ pub fn parse(query: &str, body: &str) -> Results {
             .playlists
             .items
             .into_iter()
-            .map(crate::library::playlist_from_dto)
+            // Search has no user in hand: a found playlist is read-only
+            // here, and the account's own again once opened from the library.
+            .map(|p| crate::library::playlist_from_dto(p, 0))
             .collect(),
     }
 }

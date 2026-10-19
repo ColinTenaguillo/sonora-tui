@@ -78,7 +78,7 @@ pub fn playlist(p: library::Playlist) -> Playlist {
         // TIDAL's editorial playlists have no user behind them; anything
         // with a name is someone's, and the only someone this account
         // lists is itself.
-        owned: p.creator != "TIDAL",
+        owned: p.owned,
         owner: p.creator,
         owner_id: String::new(),
         collaborative: false,
@@ -281,9 +281,12 @@ mod tests {
 
     #[test]
     fn an_editorial_playlist_is_not_the_users_own() {
+        // The library says whose it is -- the creator's id against the
+        // account's -- and the word is carried, not guessed from a name.
         let mut p = library::Playlist::sample("Jazz", 10);
         p.uuid = "u-1".into();
-        assert!(playlist(p.clone()).owned, "a named creator owns it");
+        assert!(playlist(p.clone()).owned);
+        p.owned = false;
         p.creator = "TIDAL".into();
         assert!(!playlist(p).owned);
     }

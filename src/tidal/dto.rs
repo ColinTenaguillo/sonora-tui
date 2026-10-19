@@ -94,6 +94,8 @@ pub struct PlaylistCreator {
     /// Absent for TIDAL's own editorial playlists, which have no user behind
     /// them; the web client labels those "TIDAL".
     pub name: Option<String>,
+    /// The user's id when a user made it: ours, and it can be edited.
+    pub id: Option<u64>,
 }
 
 /// A favourited album. Unlike `AlbumRef`, which is the stub embedded in a

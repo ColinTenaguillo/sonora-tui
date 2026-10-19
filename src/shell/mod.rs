@@ -42,6 +42,7 @@ pub fn spawn_media_keys(
 }
 pub mod login;
 pub mod nowplaying;
+pub mod playlistedit;
 pub mod scrollbar;
 pub mod searchview;
 pub mod settings;
@@ -90,6 +91,21 @@ pub enum Action {
     /// A setting typed on the sign-in screen, to check and write to the
     /// config: the local folder, the Subsonic server or user.
     Typed(login::Field, String),
+    /// A playlist edit the user confirmed in its prompt: the loop sends
+    /// it to the service.
+    Edit(playlistedit::Edit),
+    /// `x` in a playlist of the account's own: the track out of it.
+    RemoveFromPlaylist {
+        uuid: String,
+        track: crate::domain::TrackId,
+    },
+    /// The service took an edit. The playlists are reloaded alongside;
+    /// an open playlist that was edited is reloaded, a deleted one closed.
+    PlaylistEdited {
+        message: String,
+        uuid: String,
+        deleted: bool,
+    },
     /// Signed in, or a stored session resumed.
     SessionOpened(std::sync::Arc<crate::catalogue::Session>),
     BeginLogin,
@@ -999,6 +1015,8 @@ pub struct App {
     pub showing_help: bool,
     /// How far the key list is scrolled, on a terminal too short for it.
     pub help_scroll: u16,
+    /// A playlist edit's question, while it is up. It takes the keys.
+    pub prompt: Option<playlistedit::Prompt>,
     /// The lyrics, on "L".
     pub lyrics: lyricsview::Pane,
     /// Where listens are reported, once the config's services are linked.
@@ -1321,6 +1339,32 @@ impl App {
                     .unwrap_or_default(),
             })
             .collect();
+    }
+
+    /// The playlist the edit keys act on: the one open, else the one under
+    /// the selection in a grid of them.
+    fn playlist_in_hand(&self) -> Option<&crate::library::Playlist> {
+        let uuid = match self.open.as_ref().and_then(|o| o.target.clone()) {
+            Some(Collection::Playlist(uuid)) => uuid,
+            Some(_) => return None,
+            None => match self.selected_collection()? {
+                Collection::Playlist(uuid) => uuid,
+                _ => return None,
+            },
+        };
+        self.playlists.iter().find(|p| p.uuid == uuid)
+    }
+
+    /// The open playlist's id, when it is the account's own.
+    fn open_owned_playlist(&self) -> Option<String> {
+        match self.open.as_ref()?.target.as_ref()? {
+            Collection::Playlist(uuid)
+                if self.playlists.iter().any(|p| &p.uuid == uuid && p.owned) =>
+            {
+                Some(uuid.clone())
+            }
+            _ => None,
+        }
     }
 
     /// Write the config where it was read from. Nowhere in a test, which
@@ -3040,6 +3084,21 @@ impl App {
                 None
             }
             Action::SeeAll => None,
+            // The edits are requests the loop makes; the answer comes
+            // back as `PlaylistEdited` or `Error`.
+            Action::Edit(_) | Action::RemoveFromPlaylist { .. } => None,
+            Action::PlaylistEdited {
+                message,
+                uuid,
+                deleted,
+            } => {
+                self.say(message);
+                let open_is_it = matches!(
+                    self.open.as_ref().and_then(|o| o.target.as_ref()),
+                    Some(Collection::Playlist(open)) if *open == uuid
+                );
+                (deleted && open_is_it).then_some(Action::CloseCollection)
+            }
             Action::FavouriteChanged { id, favourite } => {
                 if favourite {
                     self.favourites.insert(id);
@@ -3595,6 +3654,27 @@ impl App {
     /// buffer out. Reaching past this and calling the handlers directly is
     /// how a hint has twice been drawn for a key that did nothing.
     pub fn on_key(&mut self, key: KeyEvent) -> Option<Action> {
+        // A playlist prompt owns the keyboard while it is up: what is
+        // typed into it is a name, `q` included, and the keymap does not
+        // apply to text.
+        if let Some(prompt) = self.prompt.as_mut() {
+            let owned: Vec<crate::library::Playlist> =
+                self.playlists.iter().filter(|p| p.owned).cloned().collect();
+            let outcome = playlistedit::on_key(prompt, key.code, &owned);
+            return match outcome {
+                playlistedit::Outcome::Kept => None,
+                playlistedit::Outcome::Closed => {
+                    self.prompt = None;
+                    self.needs_repaint = true;
+                    None
+                }
+                playlistedit::Outcome::Done(edit) => {
+                    self.prompt = None;
+                    self.needs_repaint = true;
+                    Some(Action::Edit(edit))
+                }
+            };
+        }
         // Read before the keymap: the map knows keys, not modifiers, and
         // would translate the `d` of ctrl-d as a bare `d`. Not while a box
         // has the keyboard, where nothing is a command.
@@ -4084,6 +4164,43 @@ impl App {
             }
             // Favouriting the highlighted track, both ways: pressing it on
             // one that is already a favourite takes it out again.
+            // Playlist edits. Each opens its question; `x` asks none.
+            KeyCode::Char('P') if self.session.is_some() => {
+                if let Some(track) = self.selected_track() {
+                    self.prompt = Some(playlistedit::Prompt::AddTo {
+                        track: track.id,
+                        title: track.title,
+                        selected: 0,
+                        naming: None,
+                    });
+                }
+                None
+            }
+            KeyCode::Char('N') if self.session.is_some() => {
+                self.prompt = Some(playlistedit::Prompt::NewPlaylist {
+                    name: String::new(),
+                });
+                None
+            }
+            KeyCode::Char('m') | KeyCode::Char('D') if self.session.is_some() => {
+                match self.playlist_in_hand() {
+                    Some(p) if p.owned => {
+                        let (uuid, title) = (p.uuid.clone(), p.title.clone());
+                        self.prompt = Some(match key.code {
+                            KeyCode::Char('m') => playlistedit::Prompt::Rename { uuid, name: title },
+                            _ => playlistedit::Prompt::Delete { uuid, title },
+                        });
+                    }
+                    Some(_) => self.say("not one of your playlists"),
+                    None => {}
+                }
+                None
+            }
+            KeyCode::Char('x') if self.open_owned_playlist().is_some() => {
+                let uuid = self.open_owned_playlist()?;
+                let track = self.selected_track()?.id;
+                Some(Action::RemoveFromPlaylist { uuid, track })
+            }
             KeyCode::Char('A') if self.session.is_some() => Some(Action::ToggleFavourite),
             // The collections' own `A`: the artist, album, playlist or mix
             // under the cursor. Not `A` itself: on an artist's page that
@@ -4151,6 +4268,30 @@ fn first_artist(credited: &str) -> String {
         .unwrap_or(credited)
         .trim()
         .to_string()
+}
+
+/// The tail of every playlist edit: the playlists again, so the grid and
+/// the pick list are current, then the word for the status line.
+async fn finish_edit(
+    client: &std::sync::Arc<crate::catalogue::Session>,
+    tx: &tokio::sync::mpsc::UnboundedSender<Action>,
+    done: crate::catalogue::Result<(String, String, bool)>,
+) {
+    match done {
+        Ok((message, uuid, deleted)) => {
+            if let Ok(p) = client.playlists().await {
+                let _ = tx.send(Action::PlaylistsLoaded(p));
+            }
+            let _ = tx.send(Action::PlaylistEdited {
+                message,
+                uuid,
+                deleted,
+            });
+        }
+        Err(e) => {
+            let _ = tx.send(Action::Error(e.to_string()));
+        }
+    }
 }
 
 fn open_collection(
@@ -4721,6 +4862,72 @@ pub async fn run(
                                 }
                             }
                         });
+                    }
+                }
+                Action::Edit(edit) => {
+                    if let Some(session) = &app.session {
+                        let (client, tx) = (std::sync::Arc::clone(session), action_tx.clone());
+                        let edit = edit.clone();
+                        tokio::spawn(async move {
+                            use playlistedit::Edit;
+                            let done = match edit {
+                                Edit::AddTo { uuid, title, track } => client
+                                    .add_track_to_playlist(&uuid, &track)
+                                    .await
+                                    .map(|()| (format!("added to {title}"), uuid, false)),
+                                Edit::Create { name, then_add } => {
+                                    match client.create_playlist(&name).await {
+                                        Ok(uuid) => match then_add {
+                                            Some(track) => client
+                                                .add_track_to_playlist(&uuid, &track)
+                                                .await
+                                                .map(|()| (format!("added to {name}"), uuid, false)),
+                                            None => Ok((format!("created {name}"), uuid, false)),
+                                        },
+                                        Err(e) => Err(e),
+                                    }
+                                }
+                                Edit::Rename { uuid, name } => client
+                                    .rename_playlist(&uuid, &name)
+                                    .await
+                                    .map(|()| (format!("renamed to {name}"), uuid, false)),
+                                Edit::Delete { uuid } => client
+                                    .delete_playlist(&uuid)
+                                    .await
+                                    .map(|()| ("playlist deleted".to_string(), uuid, true)),
+                            };
+                            finish_edit(&client, &tx, done).await;
+                        });
+                    }
+                }
+                Action::RemoveFromPlaylist { uuid, track } => {
+                    if let Some(session) = &app.session {
+                        let (client, tx) = (std::sync::Arc::clone(session), action_tx.clone());
+                        let (uuid, track) = (uuid.clone(), track.clone());
+                        tokio::spawn(async move {
+                            let done = client
+                                .remove_track_from_playlist(&uuid, &track)
+                                .await
+                                .map(|()| ("taken out of the playlist".to_string(), uuid, false));
+                            finish_edit(&client, &tx, done).await;
+                        });
+                    }
+                }
+                // The open playlist shows the edit: its tracks again.
+                Action::PlaylistEdited {
+                    uuid,
+                    deleted: false,
+                    ..
+                } => {
+                    if let Some(open) = app.open.as_ref() {
+                        if matches!(&open.target, Some(Collection::Playlist(o)) if o == uuid) {
+                            open_collection(
+                                &app,
+                                Some(Collection::Playlist(uuid.clone())),
+                                open.title.clone(),
+                                &action_tx,
+                            );
+                        }
                     }
                 }
                 Action::ToggleFavourite => {
@@ -5735,6 +5942,11 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     }
 
     // Last, so it covers whatever is underneath.
+    if let Some(prompt) = &app.prompt {
+        let owned: Vec<crate::library::Playlist> =
+            app.playlists.iter().filter(|p| p.owned).cloned().collect();
+        playlistedit::render(frame, frame.area(), &palette, prompt, &owned);
+    }
     if app.showing_help {
         // Clamped here, where the height is known: the key handler only
         // counts.
@@ -5821,6 +6033,7 @@ mod tests {
                         duration: None,
                         creator: "TIDAL".into(),
                         cover: None,
+                        owned: false,
                     })
                     .collect();
                 app.albums = (0..20)
@@ -5966,6 +6179,7 @@ mod tests {
                 duration: None,
                 creator: "TIDAL".into(),
                 cover: None,
+                owned: false,
             })
             .collect();
 
@@ -7792,6 +8006,7 @@ mod tests {
                     duration: None,
                     creator: "TIDAL".into(),
                     cover: None,
+                    owned: false,
                 })
                 .collect(),
         }
@@ -10564,6 +10779,7 @@ mod tests {
             duration: None,
             creator: "me".into(),
             cover: None,
+            owned: false,
         }]));
         app.update(Action::AlbumsLoaded(vec![crate::library::Album {
             id: "a1".into(),
@@ -10612,6 +10828,84 @@ mod tests {
         let mut app = signed_in(sidebar::Section::Explore);
         app.update(Action::ExploreLoaded(Box::new(crate::browse::Home { rows: Vec::new() })));
         assert!(app.explore_empty);
+    }
+
+    fn owned_playlist(uuid: &str, title: &str, owned: bool) -> crate::library::Playlist {
+        let mut p = crate::library::Playlist::sample(title, 3);
+        p.uuid = uuid.into();
+        p.owned = owned;
+        p
+    }
+
+    fn with_open_playlist(app: &mut App, uuid: &str) {
+        app.open = Some(OpenCollection {
+            title: "Road".into(),
+            subtitle: String::new(),
+            detail: String::new(),
+            cover: None,
+            round_cover: false,
+            came_from: sidebar::Section::Playlists,
+            target: Some(Collection::Playlist(uuid.into())),
+        });
+    }
+
+    #[test]
+    fn the_playlist_keys_open_their_prompts_and_x_takes_a_track_out() {
+        let mut app = signed_in(sidebar::Section::Tracks);
+        app.tracks = vec![crate::domain::Track::sample("A Song", "Someone", std::time::Duration::ZERO)];
+        app.playlists = vec![owned_playlist("mine", "Mine", true), owned_playlist("theirs", "Theirs", false)];
+
+        assert!(key(&mut app, KeyCode::Char('P')).is_none());
+        assert!(matches!(&app.prompt, Some(playlistedit::Prompt::AddTo { title, .. }) if title == "A Song"));
+        // The prompt has the keyboard: q is a letter in a name, Esc closes.
+        assert!(key(&mut app, KeyCode::Enter).is_none());
+        assert!(key(&mut app, KeyCode::Char('q')).is_none());
+        assert!(matches!(&app.prompt, Some(playlistedit::Prompt::AddTo { naming: Some(n), .. }) if n == "q"));
+        match key(&mut app, KeyCode::Enter) {
+            Some(Action::Edit(playlistedit::Edit::Create { name, then_add })) => {
+                assert_eq!(name, "q");
+                assert!(then_add.is_some());
+            }
+            other => panic!("expected a create, got {other:?}"),
+        }
+        assert!(app.prompt.is_none(), "the prompt closes on its answer");
+
+        key(&mut app, KeyCode::Char('N'));
+        assert!(matches!(app.prompt, Some(playlistedit::Prompt::NewPlaylist { .. })));
+        key(&mut app, KeyCode::Esc);
+        assert!(app.prompt.is_none());
+
+        // m and D act on the open playlist, and only on the account's own.
+        with_open_playlist(&mut app, "theirs");
+        assert!(key(&mut app, KeyCode::Char('m')).is_none());
+        assert!(app.prompt.is_none(), "not yours: no prompt");
+        assert!(key(&mut app, KeyCode::Char('x')).is_none(), "nor a removal");
+        with_open_playlist(&mut app, "mine");
+        key(&mut app, KeyCode::Char('m'));
+        assert!(matches!(&app.prompt, Some(playlistedit::Prompt::Rename { uuid, name }) if uuid == "mine" && name == "Mine"));
+        key(&mut app, KeyCode::Esc);
+        key(&mut app, KeyCode::Char('D'));
+        assert!(matches!(&app.prompt, Some(playlistedit::Prompt::Delete { uuid, .. }) if uuid == "mine"));
+        key(&mut app, KeyCode::Char('n'));
+        assert!(app.prompt.is_none(), "anything but y keeps it");
+        assert!(matches!(
+            key(&mut app, KeyCode::Char('x')),
+            Some(Action::RemoveFromPlaylist { uuid, .. }) if uuid == "mine"
+        ));
+
+        // A deleted playlist that was open closes; an edited one stays.
+        let next = app.update(Action::PlaylistEdited {
+            message: "renamed".into(),
+            uuid: "mine".into(),
+            deleted: false,
+        });
+        assert!(next.is_none() && app.open.is_some());
+        let next = app.update(Action::PlaylistEdited {
+            message: "playlist deleted".into(),
+            uuid: "mine".into(),
+            deleted: true,
+        });
+        assert!(matches!(next, Some(Action::CloseCollection)));
     }
 
     #[test]
