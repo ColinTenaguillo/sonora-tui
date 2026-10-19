@@ -152,6 +152,8 @@ pub struct View<'a> {
     /// The heart on a favourited result.
     pub liked: carousel::Liked<'a>,
     pub typing: bool,
+    /// A query has been sent and nothing has come back yet.
+    pub pending: bool,
     pub results: &'a Results,
     pub tab: usize,
     /// The state of whichever view this tab reuses.
@@ -214,6 +216,22 @@ pub fn render<F>(
         palette,
         view.tab,
     );
+    // While the previous results are still up, the wait for the next
+    // shows at the end of the tab row; with none up, the body says it.
+    if view.pending && !view.results.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::styled(
+                super::waiting::animated("Searching…").into_owned(),
+                palette.subtitle(),
+            ))
+                .alignment(ratatui::layout::Alignment::Right),
+            Rect {
+                y: area.y + under_box,
+                height: 1,
+                ..area
+            },
+        );
+    }
 
     let body_y = area.y + HEADER_ROWS;
     if body_y >= bottom {
@@ -234,7 +252,7 @@ pub fn render<F>(
     if tab.is_tracks() {
         let tracks = track_rows(view.results, tab);
         if tracks.is_empty() {
-            render_empty(frame, body, palette, view.results);
+            render_empty(frame, body, palette, view.results, view.pending);
             return;
         }
         // The app's own track list, without the heading and filter box it
@@ -262,7 +280,7 @@ pub fn render<F>(
     } else {
         let all = cards(view.results, tab);
         if all.is_empty() {
-            render_empty(frame, body, palette, view.results);
+            render_empty(frame, body, palette, view.results, view.pending);
             return;
         }
         // And the app's own card grid, likewise bare.
@@ -336,7 +354,7 @@ fn render_top<F>(
 {
     let results = view.results;
     if results.is_empty() {
-        render_empty(frame, area, palette, results);
+        render_empty(frame, area, palette, results, view.pending);
         return;
     }
 
@@ -458,14 +476,17 @@ fn render_top<F>(
     }
 }
 
-/// Say nothing before a search has run, and say so after one that found
-/// nothing — "Nothing found" over an empty box would be a lie.
-fn render_empty(frame: &mut Frame, area: Rect, palette: &Palette, results: &Results) {
-    if results.query.is_empty() {
-        return;
-    }
+/// Say nothing before a search has run, that one is running while it is,
+/// and so after one that found nothing — "Nothing found" over an empty
+/// box, or over a query still out, would be a lie.
+fn render_empty(frame: &mut Frame, area: Rect, palette: &Palette, results: &Results, pending: bool) {
+    let word = match (pending, results.query.is_empty()) {
+        (true, _) => super::waiting::animated("Searching…").into_owned(),
+        (false, true) => return,
+        (false, false) => "Nothing found".to_string(),
+    };
     frame.render_widget(
-        Paragraph::new(Line::styled("Nothing found", palette.subtitle())),
+        Paragraph::new(Line::styled(word, palette.subtitle())),
         Rect { height: 1, ..area },
     );
 }
@@ -540,6 +561,7 @@ mod tests {
                 View {
                     query: "daft punk",
                     typing: false,
+                    pending: false,
                     results: &r,
                     tab,
                     tracks: &tracks,
@@ -581,6 +603,56 @@ mod tests {
             text.contains("Daft Punk"),
             "with its artist under it:\n{text}"
         );
+    }
+
+    #[test]
+    fn a_search_still_out_says_so() {
+        // Before the reply the body was blank, or showed "Nothing found"
+        // for a query that had not been answered yet.
+        let empty = Results {
+            query: "daft".into(),
+            ..Results::default()
+        };
+        let full = results();
+        let tracks = tracklist::TrackListState::default();
+        let g = grid::GridState::default();
+        let c = carousel::CarouselState::default();
+        let favourites: std::collections::HashSet<crate::domain::TrackId> =
+            std::collections::HashSet::new();
+        let draw = |r: &Results, pending: bool| {
+            let buf = geometry::draw(100, 30, |f, area, p| {
+                render(
+                    f,
+                    area,
+                    p,
+                    View {
+                        query: "daft",
+                        typing: false,
+                        pending,
+                        results: r,
+                        tab: 1,
+                        tracks: &tracks,
+                        grid: &g,
+                        liked: &carousel::nobody,
+                        artists: &c,
+                        albums: &c,
+                        top: TopSection::default(),
+                        scroll: 0,
+                        favourites: &favourites,
+                        playing: None,
+                        tier: super::super::nowplaying::Tier::Low,
+                    },
+                    |_, _, _, _| false,
+                )
+            });
+            geometry::text(&buf)
+        };
+        let text = draw(&empty, true);
+        assert!(text.contains("Searching.") && !text.contains("Nothing found"), "{text}");
+        let text = draw(&empty, false);
+        assert!(text.contains("Nothing found"), "{text}");
+        let text = draw(&full, true);
+        assert!(text.contains("Searching.") && text.contains("Daft"), "old results stay up:\n{text}");
     }
 
     #[test]
@@ -634,6 +706,7 @@ mod tests {
                         View {
                             query: "daft punk",
                             typing: false,
+                            pending: false,
                             results: &r,
                             tab,
                             tracks: &tracks,
@@ -681,6 +754,7 @@ mod tests {
                 View {
                     query: "daft punk",
                     typing: false,
+                    pending: false,
                     results: &r,
                     tab,
                     tracks: &tracks,
@@ -746,6 +820,7 @@ mod tests {
                 View {
                     query: "daft punk",
                     typing: false,
+                    pending: false,
                     results: &r,
                     tab: 0,
                     tracks: &tracks,
@@ -918,6 +993,7 @@ mod tests {
                 View {
                     query: "daft punk",
                     typing,
+                    pending: false,
                     results: &r,
                     tab: 0,
                     tracks: &tracks,
@@ -1032,6 +1108,7 @@ mod tests {
                     query: "zzz",
                     liked: &carousel::nobody,
                     typing: false,
+                    pending: false,
                     results: &empty,
                     tab: 0,
                     tracks: &tracks,
@@ -1066,6 +1143,7 @@ mod tests {
                     query: "",
                     liked: &carousel::nobody,
                     typing: true,
+                    pending: false,
                     results: &Results::default(),
                     tab: 0,
                     tracks: &tracks,
@@ -1106,6 +1184,7 @@ mod tests {
                         query: "q",
                         liked: &carousel::nobody,
                         typing: true,
+                        pending: false,
                         results: &r,
                         tab: 0,
                         tracks: &tracks,
