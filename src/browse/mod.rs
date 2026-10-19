@@ -1004,6 +1004,9 @@ struct ItemDto {
     uuid: Option<String>,
     #[serde(rename = "numberOfTracks")]
     number_of_tracks: Option<u32>,
+    /// An album's, `YYYY-MM-DD`: the year on its card.
+    #[serde(rename = "releaseDate")]
+    release_date: Option<String>,
     #[serde(rename = "cover")]
     cover: Option<String>,
     #[serde(rename = "squareImage")]
@@ -1188,15 +1191,24 @@ impl ItemDto {
             title,
             subtitle,
             cover_url: cover,
-            // A track's album, for the row and the player. Only a track
+            // A track's album, for the row and the player; an album's
+            // year, as the card draws it everywhere else. Only a track
             // carries a nested album — that is what `target` tells them
             // apart by — so this is empty on everything else without
             // needing to ask which kind it is.
-            detail: self
-                .album
-                .as_ref()
-                .map(|a| a.title.clone())
-                .unwrap_or_default(),
+            detail: match &target {
+                Some(crate::shell::carousel::Target::Album(_)) => self
+                    .release_date
+                    .as_deref()
+                    .and_then(|d| d.get(..4))
+                    .unwrap_or_default()
+                    .to_string(),
+                _ => self
+                    .album
+                    .as_ref()
+                    .map(|a| a.title.clone())
+                    .unwrap_or_default(),
+            },
             // Only a track's duration means anything to the player; a
             // playlist's is the sum of its contents.
             duration: match (&target, self.duration) {
@@ -1406,7 +1418,7 @@ mod tests {
         let body = r#"{"items":[
           {"type":"SHORTCUT_LIST","title":"Shortcuts","items":[
             {"type":"ALBUM","data":{"id":20556792,"title":"good kid","numberOfTracks":17,
-              "cover":"db5f","artists":[{"name":"Kendrick Lamar"}]}}]},
+              "releaseDate":"2012-10-22","cover":"db5f","artists":[{"name":"Kendrick Lamar"}]}}]},
           {"type":"HORIZONTAL_LIST","title":"Suggested new albums for you",
             "viewAll":"home/pages/NEW_ALBUM_SUGGESTIONS/view-all","items":[
             {"type":"ALBUM","data":{"id":1,"title":"An Album","numberOfTracks":9,"cover":"c1",
@@ -1446,6 +1458,7 @@ mod tests {
             &home.rows[0].cards[0].target,
             Some(Target::Album(id)) if id == "20556792"
         ));
+        assert_eq!(home.rows[0].cards[0].detail, "2012", "the album's year is its third line");
         let home = Home {
             rows: home.rows.into_iter().skip(1).collect(),
         };
@@ -1940,15 +1953,24 @@ mod tests {
         // `detail` is the playlist grid's third line elsewhere, so an album
         // name on the wrong card would print under the card's own title. A
         // nested album is exactly what marks an item as a track, so the two
-        // cannot come apart — this holds that rule.
+        // cannot come apart — this holds that rule. An album's own third
+        // line is its year, four digits or nothing.
         let body = std::fs::read_to_string("tests/fixtures/json/pages-home.json").expect("fixture");
         let home = parse_home(&body);
 
         let mut tracks_with_album = 0;
         for card in home.rows.iter().flat_map(|r| r.cards.iter()) {
             let is_track = matches!(card.target, Some(crate::shell::carousel::Target::Track(_)));
+            let is_album = matches!(card.target, Some(crate::shell::carousel::Target::Album(_)));
             if is_track {
                 tracks_with_album += usize::from(!card.detail.is_empty());
+            } else if is_album {
+                assert!(
+                    card.detail.is_empty() || card.detail.parse::<u32>().is_ok(),
+                    "{:?} carries {:?}, not a year",
+                    card.title,
+                    card.detail
+                );
             } else {
                 assert!(
                     card.detail.is_empty(),
