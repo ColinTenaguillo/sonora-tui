@@ -173,7 +173,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
             ]),
             Line::from(""),
             Line::from(format!(
-                "{}, Tab to change service, Esc to quit.",
+                "{}, Tab to change service, Esc to cancel.",
                 field.enter()
             )),
         ],
@@ -203,7 +203,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
                 ),
             ]),
             Line::from(""),
-            Line::from("Enter to send, Esc to quit."),
+            Line::from("Enter to send, Esc to cancel."),
         ],
         LoginState::Accounts { choices, selected } => {
             let mut lines = vec![Line::from("Which account?"), Line::from("")];
@@ -225,13 +225,13 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
                 )));
             }
             lines.push(Line::from(""));
-            lines.push(Line::from("j/k to choose, Enter to pick, Esc to quit."));
+            lines.push(Line::from("j/k to choose, Enter to pick, Esc to cancel."));
             lines
         }
         LoginState::Busy(what) => vec![
             Line::from(what.clone()),
             Line::from(""),
-            Line::from("Esc to quit."),
+            Line::from("Esc to cancel."),
         ],
         LoginState::Waiting { code, url } => vec![
             // The browser is opened for them, but the link stays visible: the
@@ -270,7 +270,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
                 ),
             ]),
             Line::from(""),
-            Line::from("Enter to connect, Tab to change service, Esc to quit."),
+            Line::from("Enter to connect, Tab to change service, Esc to cancel."),
         ],
         LoginState::Failed(reason) => vec![
             Line::from("Sign-in failed"),

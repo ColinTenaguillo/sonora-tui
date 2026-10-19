@@ -199,7 +199,7 @@ Press `?` in the app for the full list.
 | `J` / `K` | Move through the sidebar |
 | `1` – `8` | Straight to a nav entry — `1` is Music, `8` is Settings |
 | `Enter` | Open a playlist, album or artist, or play a track |
-| `Esc`, `[` | Back one view, or out of the filter or the bio |
+| `Esc`, `[` | Back one view, or out of the filter or the bio; on the sign-in screen, out of the sign-in under way |
 | `]` | Forward again, through views and sections |
 | `/` | Filter the current view: case and accents ignored, words in any order, letters in order will do ("kdl" finds Kendrick Lamar, below exact hits) |
 | `s` | Search the catalogue |

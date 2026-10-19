@@ -83,6 +83,10 @@ pub enum Action {
     /// Settings row would pick it, without going through Settings -- which
     /// a screen stuck on "retry or quit" could not reach.
     NextService,
+    /// Esc on the sign-in screen: the sign-in under way is dropped and
+    /// the screen goes back to its start. Esc is a step back everywhere
+    /// else in the app; quitting from it was the one place it was not.
+    CancelLogin,
     /// A setting typed on the sign-in screen, to check and write to the
     /// config: the local folder, the Subsonic server or user.
     Typed(login::Field, String),
@@ -2361,6 +2365,17 @@ impl App {
             // for every service passed on the way to the wanted one would
             // open seven browser tabs. The new service waits for Enter --
             // except a folder of files, which has nothing to ask.
+            Action::CancelLogin => {
+                if let Some(task) = self.login_task.take() {
+                    task.abort();
+                }
+                if let Some(provider) = &self.provider {
+                    provider.abandon();
+                }
+                self.login_input = None;
+                self.login = login::LoginState::Idle;
+                None
+            }
             Action::NextService => {
                 settings::cycle(&mut self.config, settings::Setting::Service, true);
                 self.save_config();
@@ -3813,7 +3828,7 @@ impl App {
                             return Some(Action::Connect(std::mem::take(typed)));
                         }
                         KeyCode::Tab => return Some(Action::NextService),
-                        KeyCode::Esc => return Some(Action::Quit),
+                        KeyCode::Esc => return Some(Action::CancelLogin),
                         _ => {}
                     }
                     return None;
@@ -3828,7 +3843,7 @@ impl App {
                             return Some(Action::Typed(*field, typed.trim().to_owned()));
                         }
                         KeyCode::Tab => return Some(Action::NextService),
-                        KeyCode::Esc => return Some(Action::Quit),
+                        KeyCode::Esc => return Some(Action::CancelLogin),
                         _ => {}
                     }
                     return None;
@@ -3842,7 +3857,7 @@ impl App {
                         KeyCode::Enter if !typed.0.trim().is_empty() => {
                             return Some(Action::Answer(std::mem::take(typed).0));
                         }
-                        KeyCode::Esc => return Some(Action::Quit),
+                        KeyCode::Esc => return Some(Action::CancelLogin),
                         _ => {}
                     }
                     return None;
@@ -3858,7 +3873,7 @@ impl App {
                         KeyCode::Enter => {
                             return choices.get(*selected).map(|c| Action::Answer(c.id.clone()));
                         }
-                        KeyCode::Esc => return Some(Action::Quit),
+                        KeyCode::Esc => return Some(Action::CancelLogin),
                         _ => {}
                     }
                     return None;
@@ -3869,7 +3884,7 @@ impl App {
                 | login::LoginState::Url(_)
                 | login::LoginState::Waiting { .. } => {
                     return match key.code {
-                        KeyCode::Esc => Some(Action::Quit),
+                        KeyCode::Esc => Some(Action::CancelLogin),
                         // The sign-in under way is abandoned: a service
                         // waiting on a browser that will never confirm
                         // was a screen with no way out but quitting.
@@ -10908,7 +10923,12 @@ mod tests {
         )));
         assert!(matches!(app.login, login::LoginState::Url(_)));
         assert!(key(&mut app, KeyCode::Enter).is_none(), "nothing to do but wait");
-        assert!(matches!(key(&mut app, KeyCode::Esc), Some(Action::Quit)));
+        // Esc steps back to the start of the screen, as everywhere else;
+        // it quit the app, which nothing else in it does.
+        assert!(matches!(key(&mut app, KeyCode::Esc), Some(Action::CancelLogin)));
+        app.update(Action::CancelLogin);
+        assert!(matches!(app.login, login::LoginState::Idle));
+        assert!(matches!(key(&mut app, KeyCode::Char('q')), Some(Action::Quit)), "q still quits");
 
         // `g` is a guest sign-in only where the service has one.
         let mut app = App::default();
