@@ -385,13 +385,53 @@ fn clear_round_corners(
 
 /// How a cover is fitted to its cells.
 ///
-/// Always `Fit`, which keeps the image's proportions. Cropping was tried to
-/// square up a card's shading and it discards real artwork: the cell area is
-/// only square when a cell is exactly twice as tall as it is wide, and on a
-/// terminal whose cells are 19x30 it takes 22% off the height of every
-/// cover. A margin that is a column out is worth less than that.
+/// `Scale` keeps the image's proportions and, unlike `Fit`, enlarges a
+/// picture smaller than its cells: YouTube Music hands its home shelves
+/// 60 and 120 pixel thumbnails, which `Fit` left as postage stamps in the
+/// corner of the card. Cropping was tried to square up a card's shading and
+/// it discards real artwork: the cell area is only square when a cell is
+/// exactly twice as tall as it is wide, and on a terminal whose cells are
+/// 19x30 it takes 22% off the height of every cover. A margin that is a
+/// column out is worth less than that.
 fn cover_resize() -> ratatui_image::Resize {
-    ratatui_image::Resize::Fit(None)
+    ratatui_image::Resize::Scale(Some(image::imageops::FilterType::Triangle))
+}
+
+/// The URL to fetch for a cover: the same one, asked at a size worth drawing.
+///
+/// Google's image host encodes the size in the URL, and YouTube Music names
+/// the thumbnail its own web page would draw at that spot -- 60 pixels for
+/// a row of quick picks. Asking for 544 costs the same request and gives a
+/// card that is not a blur.
+fn sized(url: &str) -> std::borrow::Cow<'_, str> {
+    if !url.contains("googleusercontent.com") {
+        return url.into();
+    }
+    let Some(start) = url.rfind("=w") else {
+        return url.into();
+    };
+    let rest = &url[start + 2..];
+    let digits = |s: &str| s.bytes().take_while(u8::is_ascii_digit).count();
+    let w = digits(rest);
+    if w == 0 || !rest[w..].starts_with("-h") {
+        return url.into();
+    }
+    let h = digits(&rest[w + 2..]);
+    if h == 0 {
+        return url.into();
+    }
+    format!("{}=w544-h544{}", &url[..start], &rest[w + 2 + h..]).into()
+}
+
+/// The middle square of a picture: a video's 16:9 still is drawn as the
+/// square card every other cover gets, rather than as a letterboxed strip.
+fn squared(image: image::DynamicImage) -> image::DynamicImage {
+    let (w, h) = (image.width(), image.height());
+    let side = w.min(h);
+    match side == w && side == h {
+        true => image,
+        false => image.crop_imm((w - side) / 2, (h - side) / 2, side, side),
+    }
 }
 
 /// How many rows a square cover `cols` wide fills, at this cell size.
@@ -457,12 +497,12 @@ async fn fetch_and_decode(
     url: &str,
     shape: Shape,
 ) -> Option<Decoded> {
-    let bytes = http.get(url).send().await.ok()?.bytes().await.ok()?;
+    let bytes = http.get(sized(url).as_ref()).send().await.ok()?.bytes().await.ok()?;
     let picker = picker.clone();
 
     // Decoding is CPU-bound and would stall the runtime's worker otherwise.
     tokio::task::spawn_blocking(move || {
-        let image = image::load_from_memory(&bytes).ok()?;
+        let image = squared(image::load_from_memory(&bytes).ok()?);
         let image = match shape {
             Shape::Square => image,
             // Half blocks carry no alpha, and the encoder blends the cleared
@@ -528,9 +568,53 @@ mod tests {
         // as it is wide; on a 19x30 cell it costs 22% of every cover's
         // height, and the round ones came out flattened along the bottom.
         assert!(
-            matches!(cover_resize(), ratatui_image::Resize::Fit(_)),
+            !matches!(cover_resize(), ratatui_image::Resize::Crop(_)),
             "covers keep their proportions"
         );
+    }
+
+    #[test]
+    fn a_small_cover_fills_its_cells() {
+        // YouTube Music's quick picks come as 60 pixel thumbnails. `Fit`
+        // drew them at one pixel per pixel, a stamp in the card's corner.
+        let tiny = image::DynamicImage::ImageRgb8(image::RgbImage::new(60, 60));
+        let cell = ratatui_image::FontSize::from((10, 20));
+        let size = cover_resize().size_for(&tiny, cell, Size::new(20, 10));
+        assert_eq!(size, Size::new(20, 10));
+    }
+
+    #[test]
+    fn a_wide_picture_is_cut_to_its_middle_square() {
+        let mut img = image::RgbImage::new(160, 90);
+        for (x, _, px) in img.enumerate_pixels_mut() {
+            *px = image::Rgb([x as u8, 0, 0]);
+        }
+        let square = squared(image::DynamicImage::ImageRgb8(img));
+        assert_eq!((square.width(), square.height()), (90, 90));
+        let rgb = square.to_rgb8();
+        assert_eq!(rgb.get_pixel(0, 0).0[0], 35, "the strip starts 35 pixels in");
+        let same = squared(image::DynamicImage::ImageRgb8(image::RgbImage::new(50, 50)));
+        assert_eq!((same.width(), same.height()), (50, 50));
+    }
+
+    #[test]
+    fn google_thumbnails_are_asked_for_at_card_size() {
+        assert_eq!(
+            sized("https://lh3.googleusercontent.com/abc=w60-h60-l90-rj"),
+            "https://lh3.googleusercontent.com/abc=w544-h544-l90-rj"
+        );
+        assert_eq!(
+            sized("https://lh3.googleusercontent.com/abc=w226-h226"),
+            "https://lh3.googleusercontent.com/abc=w544-h544"
+        );
+        for untouched in [
+            "https://i.ytimg.com/vi/x/hqdefault.jpg",
+            "https://resources.tidal.com/images/a/640x640.jpg?w=60-h",
+            "https://lh3.googleusercontent.com/abc=w60",
+            "https://lh3.googleusercontent.com/abc",
+        ] {
+            assert_eq!(sized(untouched), untouched);
+        }
     }
 
     #[test]
