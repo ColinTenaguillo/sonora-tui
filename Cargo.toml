@@ -52,9 +52,14 @@ quick-xml = "0.42.0"
 # far an open biography can scroll. Unstable in name; pinned here.
 ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
 ratatui-image = { version = "11", default-features = false, features = ["crossterm"] }
-# `rustls` is the feature name in reqwest 0.13 (it was `rustls-tls` in 0.12).
+# `rustls-no-provider` rather than `rustls`: the latter pins aws-lc-rs, and
+# sonora's crates pin ring (librespot's hyper-rustls still brings aws-lc-rs
+# in). With both in the tree rustls cannot pick a process default and the
+# first TLS handshake that asks for one panics -- Spotify's did. `main`
+# installs ring before anything, which settles it whatever the tree holds.
 # `blocking` is required: SegmentReader runs on the audio thread, not the runtime.
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "blocking", "form", "query"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls-no-provider", "blocking", "form", "query"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 # Pinned EXACTLY: 0.22.0/0.22.1 ship a buffer-size regression that produces
 # silence. Do not relax this pin without testing that audio still comes out.
 # 0.22 also renamed the public API (Sink->Player, OutputStream->MixerDeviceSink),

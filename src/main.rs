@@ -42,6 +42,10 @@ fn host_cdm() -> bool {
 }
 
 fn app() -> anyhow::Result<()> {
+    // The one TLS crypto provider for the process, before any client is
+    // built: reqwest and librespot both leave the choice to this, and
+    // rustls panics at the first handshake if nothing chose.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     // File logging: a TUI cannot be debugged with println!.
     if let Some(dir) = sonora_tui::config::paths::cache_dir() {
         std::fs::create_dir_all(&dir)?;

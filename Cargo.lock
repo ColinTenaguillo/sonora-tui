@@ -5269,6 +5269,7 @@ dependencies = [
  "ratatui-image",
  "reqwest 0.13.4",
  "rodio 0.22.2",
+ "rustls 0.23.44",
  "serde",
  "serde_json",
  "storage",
