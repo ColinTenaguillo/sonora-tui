@@ -868,6 +868,9 @@ pub struct App {
     /// Where an answer to the login prompt goes while a sign-in is running:
     /// the provider waits on the other end for the cookies or the account.
     pub login_input: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    /// The sign-in task under way, to stop when the service is left: a
+    /// session it opened afterwards would be the wrong service's.
+    pub login_task: Option<tokio::task::AbortHandle>,
     /// The equaliser the engine reads: a preset's gains, or flat and off.
     /// Shared with the engine, so a change reaches the output at once.
     pub equalizer: music::Equalizer,
@@ -1339,6 +1342,9 @@ impl App {
     /// stays: the config, the keys, the palette, the artwork cache, the
     /// window size, the history, the equaliser, Discord and the scrobblers.
     fn leave_service(&mut self) {
+        if let Some(task) = self.login_task.take() {
+            task.abort();
+        }
         let kept = std::mem::take(self);
         let history: Vec<crate::domain::Track> = kept.queue.history().cloned().collect();
         *self = App {
@@ -2344,6 +2350,7 @@ impl App {
             Action::SessionOpened(session) => {
                 self.session = Some(session.clone());
                 self.login_input = None;
+                self.login_task = None;
                 self.status = None;
                 self.status_since = None;
                 Some(Action::SessionReady)
@@ -3056,7 +3063,10 @@ impl App {
                         // 22050 Hz to "22.1".
                         let khz = format!("{:.2}", sample_rate as f64 / 1000.0);
                         let khz = khz.strip_suffix('0').unwrap_or(&khz);
-                        self.now_playing.quality = Some(format!("{bits}{khz}kHz"));
+                        // A file of your own reports no rate: no badge,
+                        // rather than "0.0kHz".
+                        self.now_playing.quality =
+                            (sample_rate > 0).then(|| format!("{bits}{khz}kHz"));
                         self.now_playing.tier =
                             nowplaying::Tier::of_quality(delivered, bit_depth, sample_rate);
                         // A new stream starts at the beginning. Without this
@@ -3772,7 +3782,14 @@ impl App {
                 login::LoginState::Busy(_)
                 | login::LoginState::Url(_)
                 | login::LoginState::Waiting { .. } => {
-                    return (key.code == KeyCode::Esc).then_some(Action::Quit);
+                    return match key.code {
+                        KeyCode::Esc => Some(Action::Quit),
+                        // The sign-in under way is abandoned: a service
+                        // waiting on a browser that will never confirm
+                        // was a screen with no way out but quitting.
+                        KeyCode::Tab => Some(Action::NextService),
+                        _ => None,
+                    };
                 }
                 login::LoginState::Idle | login::LoginState::Failed(_) => {
                     if key.code == KeyCode::Char(Self::GUEST_KEY) && self.guest_allowed() {
@@ -5071,7 +5088,8 @@ fn start_sign_in(
     if let Some(provider) = app.provider.clone() {
         let (typed, input) = tokio::sync::mpsc::unbounded_channel();
         app.login_input = Some(typed);
-        tokio::spawn(sign_in(provider, method, input, action_tx.clone()));
+        let task = tokio::spawn(sign_in(provider, method, input, action_tx.clone()));
+        app.login_task = Some(task.abort_handle());
     }
 }
 
@@ -6005,6 +6023,18 @@ mod tests {
             delivered: crate::domain::Quality::High,
         }));
         assert_eq!(app.now_playing.quality.as_deref(), Some("44.1kHz"));
+    }
+
+    #[test]
+    fn no_sample_rate_means_no_badge() {
+        // A local file reports none, and "0.0kHz" is not a quality.
+        let mut app = App::default();
+        app.update(Action::Playback(crate::playback::PlaybackEvent::Started {
+            bit_depth: None,
+            sample_rate: 0,
+            delivered: crate::domain::Quality::Lossless,
+        }));
+        assert_eq!(app.now_playing.quality, None);
     }
 
     #[test]
@@ -10402,6 +10432,14 @@ mod tests {
         assert_eq!(app.config.provider.kind, crate::config::ProviderKind::Spotify);
         assert!(matches!(app.login, login::LoginState::Idle), "{:?}", app.login);
         assert!(next.is_none(), "nothing signs in until Enter, got {next:?}");
+
+        // A sign-in waiting on the browser is left the same way.
+        app.login = login::LoginState::Waiting {
+            code: "ABCDE".into(),
+            url: "https://link.tidal.com/ABCDE".into(),
+        };
+        assert!(key(&mut app, KeyCode::Char('q')).is_none(), "q is swallowed while waiting");
+        assert!(matches!(key(&mut app, KeyCode::Tab), Some(Action::NextService)));
 
         // A folder of files already named is read at once.
         app.config.provider.kind = crate::config::ProviderKind::Subsonic;

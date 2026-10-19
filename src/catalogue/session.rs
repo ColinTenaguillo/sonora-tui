@@ -162,6 +162,20 @@ fn playlist(p: music::Playlist) -> Playlist {
     }
 }
 
+/// A shelf's title as text. The local provider names its shelves by the
+/// translation key sonora's own screens look up; this is the English of
+/// each, and any other title is already text.
+fn heading(title: String) -> String {
+    match title.as_str() {
+        "home-recently-added" => "Recently added".into(),
+        "home-playlists" => "Playlists".into(),
+        "home-favorite-albums" => "Favorite albums".into(),
+        "home-artists" => "Artists".into(),
+        "home-collection-albums" => "Albums from your collection".into(),
+        _ => title,
+    }
+}
+
 /// A shelf item as a card: what the home page and a genre page draw.
 fn card(item: GenreItem) -> Card {
     match item {
@@ -227,7 +241,7 @@ fn rows(sections: Vec<GenreSection>) -> Home {
                     _ => RowKind::Carousel,
                 };
                 HomeRow {
-                    heading: section.title,
+                    heading: heading(section.title),
                     kind,
                     cards,
                     more: None,
@@ -458,6 +472,12 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_shelf_named_by_a_translation_key_reads_as_english() {
+        assert_eq!(super::heading("home-recently-added".into()), "Recently added");
+        assert_eq!(super::heading("Quick picks".into()), "Quick picks");
+    }
+
     use std::time::Duration;
 
     use super::*;
