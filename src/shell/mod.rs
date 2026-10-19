@@ -105,6 +105,10 @@ pub enum Action {
         message: String,
         uuid: String,
         deleted: bool,
+        /// What the edit did to the playlist's track count: a track in or
+        /// out is applied here rather than by fetching every playlist
+        /// again, which was the slow part.
+        count_delta: i32,
     },
     /// Signed in, or a stored session resumed.
     SessionOpened(std::sync::Arc<crate::catalogue::Session>),
@@ -3085,14 +3089,33 @@ impl App {
             }
             Action::SeeAll => None,
             // The edits are requests the loop makes; the answer comes
-            // back as `PlaylistEdited` or `Error`.
-            Action::Edit(_) | Action::RemoveFromPlaylist { .. } => None,
+            // back as `PlaylistEdited` or `Error`. Said now, so the wait
+            // for the service -- several round trips on TIDAL -- is not
+            // silence.
+            Action::Edit(edit) => {
+                use playlistedit::Edit;
+                self.say(match edit {
+                    Edit::AddTo { title, .. } => format!("adding to {title}…"),
+                    Edit::Create { name, .. } => format!("creating {name}…"),
+                    Edit::Rename { name, .. } => format!("renaming to {name}…"),
+                    Edit::Delete { .. } => "deleting the playlist…".to_string(),
+                });
+                None
+            }
+            Action::RemoveFromPlaylist { .. } => {
+                self.say("taking the track out…");
+                None
+            }
             Action::PlaylistEdited {
                 message,
                 uuid,
                 deleted,
+                count_delta,
             } => {
                 self.say(message);
+                if let Some(p) = self.playlists.iter_mut().find(|p| p.uuid == uuid) {
+                    p.track_count = p.track_count.saturating_add_signed(count_delta);
+                }
                 let open_is_it = matches!(
                     self.open.as_ref().and_then(|o| o.target.as_ref()),
                     Some(Collection::Playlist(open)) if *open == uuid
@@ -4275,28 +4298,33 @@ fn first_artist(credited: &str) -> String {
         .to_string()
 }
 
-/// The tail of every playlist edit: the playlists again, so the grid and
-/// the pick list are current, then the word for the status line.
+/// The tail of every playlist edit: the word for the status line, and
+/// the playlists again when the list itself changed -- made, renamed,
+/// deleted. A track in or out only moves a count, applied in place: the
+/// fetch of every playlist was most of the wait.
 async fn finish_edit(
     client: &std::sync::Arc<crate::catalogue::Session>,
     tx: &tokio::sync::mpsc::UnboundedSender<Action>,
-    done: crate::catalogue::Result<(String, String, bool)>,
+    done: crate::catalogue::Result<(String, String, bool, i32)>,
 ) {
     match done {
-        Ok((message, uuid, deleted)) => {
-            if let Ok(p) = client.playlists().await {
-                let _ = tx.send(Action::PlaylistsLoaded(p));
-            }
-            // The hearts too: a new playlist of the account's own is
-            // among its favourites on TIDAL, and the grid draws it from
-            // this list, which was still the one from sign-in.
-            if let Ok(ids) = client.favourite_ids().await {
-                let _ = tx.send(Action::FavouriteIdsLoaded(ids));
+        Ok((message, uuid, deleted, count_delta)) => {
+            if count_delta == 0 {
+                if let Ok(p) = client.playlists().await {
+                    let _ = tx.send(Action::PlaylistsLoaded(p));
+                }
+                // The hearts too: a new playlist of the account's own is
+                // among its favourites on TIDAL, and the grid draws it
+                // from this list, which was still the one from sign-in.
+                if let Ok(ids) = client.favourite_ids().await {
+                    let _ = tx.send(Action::FavouriteIdsLoaded(ids));
+                }
             }
             let _ = tx.send(Action::PlaylistEdited {
                 message,
                 uuid,
                 deleted,
+                count_delta,
             });
         }
         Err(e) => {
@@ -4885,15 +4913,15 @@ pub async fn run(
                                 Edit::AddTo { uuid, title, track } => client
                                     .add_track_to_playlist(&uuid, &track)
                                     .await
-                                    .map(|()| (format!("added to {title}"), uuid, false)),
+                                    .map(|()| (format!("added to {title}"), uuid, false, 1)),
                                 Edit::Create { name, then_add } => {
                                     match client.create_playlist(&name).await {
                                         Ok(uuid) => match then_add {
                                             Some(track) => client
                                                 .add_track_to_playlist(&uuid, &track)
                                                 .await
-                                                .map(|()| (format!("added to {name}"), uuid, false)),
-                                            None => Ok((format!("created {name}"), uuid, false)),
+                                                .map(|()| (format!("added to {name}"), uuid, false, 0)),
+                                            None => Ok((format!("created {name}"), uuid, false, 0)),
                                         },
                                         Err(e) => Err(e),
                                     }
@@ -4901,11 +4929,11 @@ pub async fn run(
                                 Edit::Rename { uuid, name } => client
                                     .rename_playlist(&uuid, &name)
                                     .await
-                                    .map(|()| (format!("renamed to {name}"), uuid, false)),
+                                    .map(|()| (format!("renamed to {name}"), uuid, false, 0)),
                                 Edit::Delete { uuid } => client
                                     .delete_playlist(&uuid)
                                     .await
-                                    .map(|()| ("playlist deleted".to_string(), uuid, true)),
+                                    .map(|()| ("playlist deleted".to_string(), uuid, true, 0)),
                             };
                             finish_edit(&client, &tx, done).await;
                         });
@@ -4919,7 +4947,7 @@ pub async fn run(
                             let done = client
                                 .remove_track_from_playlist(&uuid, &track)
                                 .await
-                                .map(|()| ("taken out of the playlist".to_string(), uuid, false));
+                                .map(|()| ("taken out of the playlist".to_string(), uuid, false, -1));
                             finish_edit(&client, &tx, done).await;
                         });
                     }
@@ -10913,13 +10941,23 @@ mod tests {
             message: "renamed".into(),
             uuid: "mine".into(),
             deleted: false,
+            count_delta: 0,
         });
         assert!(next.is_none());
         assert_eq!(app.open.as_ref().map(|o| o.title.as_str()), Some("Mine 2"));
+        // A track in moves the count in place, no reload needed.
+        app.update(Action::PlaylistEdited {
+            message: "added".into(),
+            uuid: "mine".into(),
+            deleted: false,
+            count_delta: 1,
+        });
+        assert_eq!(app.playlists[0].track_count, 4);
         let next = app.update(Action::PlaylistEdited {
             message: "playlist deleted".into(),
             uuid: "mine".into(),
             deleted: true,
+            count_delta: 0,
         });
         assert!(matches!(next, Some(Action::CloseCollection)));
     }
