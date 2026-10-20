@@ -331,6 +331,12 @@ pub fn describe(q: Quality) -> &'static str {
 #[derive(Debug, Default)]
 pub struct SettingsState {
     pub selected: usize,
+    /// The first row drawn. Set while drawing, since only the renderer
+    /// knows how many rows the pane holds, and kept between frames so the
+    /// window only moves when the selection leaves it: computed afresh each
+    /// frame, `k` from the bottom scrolled the list on every press with the
+    /// selection pinned to the last line.
+    pub first: std::cell::Cell<usize>,
 }
 
 impl SettingsState {
@@ -602,17 +608,18 @@ pub fn render(
         Rect { height: 1, ..area },
     );
 
+    // The bar's column is reserved like everywhere else: twenty-five rows
+    // three lines each overhang most panes, and the page gave no sign.
+    let area = super::scrollbar::reserve(area);
     let mut y = area.y + 2;
     let bottom = area.y + area.height;
     // Three lines a row. On a pane too short for them all, the list is
     // scrolled just far enough that the selected row is drawn: a setting
     // the keys can reach but the screen cannot show is a setting nobody
     // can read while changing it.
-    // The first row drawn: as far back from the selection as the pane
-    // holds, three lines a row and one more wherever a heading comes.
+    // Three lines a row and one more wherever a heading comes.
     let fits = area.height.saturating_sub(2) as usize;
-    let height_from = |first: usize| -> usize {
-        let rows = &Setting::ALL[first..=state.selected.min(Setting::ALL.len() - 1)];
+    let height_of = |rows: &[Setting]| -> usize {
         let headings = rows
             .windows(2)
             .filter(|w| w[0].group() != w[1].group())
@@ -620,15 +627,26 @@ pub fn render(
             + 1;
         rows.len() * 3 + headings
     };
-    let mut first = state.selected.min(Setting::ALL.len() - 1);
-    while first > 0 && height_from(first - 1) <= fits {
+    // The window moves only when the selection leaves it: up to the
+    // selection, or down just far enough that the selected row is whole.
+    // And back up when the pane has grown, rather than leave the bottom of
+    // the list hanging over blank lines.
+    let selected = state.selected.min(Setting::ALL.len() - 1);
+    let mut first = state.first.get().min(selected);
+    while first < selected && height_of(&Setting::ALL[first..=selected]) > fits {
+        first += 1;
+    }
+    while first > 0 && height_of(&Setting::ALL[first - 1..]) <= fits {
         first -= 1;
     }
+    state.first.set(first);
     let mut group: Option<&str> = None;
+    let mut shown = 0;
     for (i, setting) in Setting::ALL.iter().enumerate().skip(first) {
         if y >= bottom {
             break;
         }
+        shown += 1;
         // A heading where the group changes, so twenty-five rows read as
         // seven short lists.
         if group != Some(setting.group()) {
@@ -703,6 +721,19 @@ pub fn render(
             y += 2;
         }
     }
+
+    super::scrollbar::render(
+        frame,
+        Rect {
+            y: area.y + 2,
+            height: area.height.saturating_sub(2),
+            ..area
+        },
+        palette,
+        Setting::ALL.len(),
+        first,
+        shown,
+    );
 
     if y < bottom {
         frame.render_widget(
@@ -827,6 +858,59 @@ mod tests {
         let text = crate::shell::geometry::text(&buf);
         assert!(text.contains(last.label()), "the selected row is drawn:\n{text}");
         assert!(!text.contains(Setting::Quality.label()), "and the top scrolled off:\n{text}");
+    }
+
+    #[test]
+    fn the_window_moves_only_when_the_selection_leaves_it() {
+        // From the bottom, `k` scrolled the list on every press, with the
+        // selection pinned to the last line, instead of walking up the rows
+        // on screen and scrolling once the top one was reached.
+        let config = crate::config::Config::default();
+        let mut state = SettingsState::default();
+        let draw = |state: &SettingsState| {
+            crate::shell::geometry::draw(120, 24, |f, area, palette| {
+                render(f, area, palette, &config, state, true, &[]);
+            });
+            state.first.get()
+        };
+        for _ in 0..Setting::ALL.len() - 1 {
+            state.next();
+            draw(&state);
+        }
+        let at_bottom = draw(&state);
+        assert!(at_bottom > 0, "the last row needs a scrolled window");
+        state.previous();
+        assert_eq!(draw(&state), at_bottom, "one up stays in the window");
+        while state.selected > at_bottom {
+            state.previous();
+            assert_eq!(draw(&state), at_bottom, "still in the window at {}", state.selected);
+        }
+        state.previous();
+        assert_eq!(draw(&state), state.selected, "past the top, the window follows by one");
+    }
+
+    #[test]
+    fn a_short_pane_shows_a_scrollbar_and_a_tall_one_does_not() {
+        // The page overhangs most terminals and gave no sign of it: a list
+        // that ended because the pane did looked like one at its end.
+        let config = crate::config::Config::default();
+        let thumb = |state: &SettingsState, height: u16| -> Vec<u16> {
+            let buf = crate::shell::geometry::draw(120, height, |f, area, palette| {
+                render(f, area, palette, &config, state, true, &[]);
+            });
+            (0..height)
+                .filter(|y| buf[(119, *y)].symbol() == "\u{2588}")
+                .collect()
+        };
+        let mut state = SettingsState::default();
+        let top = thumb(&state, 24);
+        assert_eq!(top.first(), Some(&2), "the thumb starts under the title: {top:?}");
+        for _ in 0..Setting::ALL.len() {
+            state.next();
+        }
+        let bottom = thumb(&state, 24);
+        assert_eq!(bottom.last(), Some(&23), "and reaches the bottom at the last row: {bottom:?}");
+        assert!(thumb(&state, 100).is_empty(), "a pane that holds it all has no bar");
     }
 
     #[test]
