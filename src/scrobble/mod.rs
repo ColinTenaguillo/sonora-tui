@@ -85,9 +85,14 @@ pub fn configured(config: &ScrobbleConfig) -> bool {
 /// is kept, by `connect` otherwise -- which for Last.fm and Libre.fm opens
 /// the browser and waits for the approval, one after the other, since both
 /// listen on the same port for it. The accounts are written back.
-pub async fn link(config: &ScrobbleConfig, file: Option<&Path>) -> Vec<Linked> {
+///
+/// With the accounts come the refusals, in words for the status line: a
+/// token typed wrong in Settings showed "set" and nothing else, while the
+/// log alone knew it had been turned away.
+pub async fn link(config: &ScrobbleConfig, file: Option<&Path>) -> (Vec<Linked>, Vec<String>) {
     let stored = file.map(load).unwrap_or_default();
     let mut linked = Vec::new();
+    let mut refused = Vec::new();
     for service in music::scrobble::services() {
         let Some(secret) = secret_for(config, service.id()) else {
             continue;
@@ -105,7 +110,8 @@ pub async fn link(config: &ScrobbleConfig, file: Option<&Path>) -> Vec<Linked> {
                 linked.push(Linked { service, account });
             }
             Err(error) => {
-                tracing::warn!("scrobbling: could not link {}: {error:#}", service.id())
+                tracing::warn!("scrobbling: could not link {}: {error:#}", service.id());
+                refused.push(format!("{error:#}"));
             }
         }
     }
@@ -114,7 +120,7 @@ pub async fn link(config: &ScrobbleConfig, file: Option<&Path>) -> Vec<Linked> {
             tracing::warn!("scrobbling: could not keep the accounts: {error:#}");
         }
     }
-    linked
+    (linked, refused)
 }
 
 /// The accounts kept from the last run, by service id.
