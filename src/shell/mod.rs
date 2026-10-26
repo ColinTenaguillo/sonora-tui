@@ -288,7 +288,8 @@ pub enum Action {
         found: lyricsview::Found,
     },
     /// The scrobbling services the config names, linked at start-up.
-    ScrobblersLinked(Vec<crate::scrobble::Linked>),
+    /// The accounts linked, and what was refused, in words.
+    ScrobblersLinked(Vec<crate::scrobble::Linked>, Vec<String>),
     /// The Widevine module: search the machine, what was found, download
     /// Google's with its terms, what the user said to each question, and
     /// how it ended.
@@ -1442,18 +1443,7 @@ impl App {
             | settings::Setting::Discord
             | settings::Setting::SubsonicServer
             | settings::Setting::SubsonicUser
-            | settings::Setting::LocalFolders
-            | settings::Setting::TidalClientId
-            | settings::Setting::TidalClientSecret => None,
-            // The only setting that cannot show itself: the image protocol
-            // is probed before raw mode, so the picker the covers draw
-            // through was built before this row existed. Saying so is the
-            // difference between a setting that looks broken and one that
-            // is waiting.
-            settings::Setting::Halfblocks => {
-                self.say("covers change at the next start");
-                None
-            }
+            | settings::Setting::LocalFolders => None,
         }
     }
 
@@ -2863,16 +2853,21 @@ impl App {
                 self.lyrics.found.insert(id, found);
                 None
             }
-            Action::ScrobblersLinked(linked) => {
-                match linked.is_empty() {
-                    false => {
-                        let names: Vec<String> = linked.iter().map(|l| l.label()).collect();
-                        self.say(format!("scrobbling to {}", names.join(", ")));
-                    }
+            Action::ScrobblersLinked(linked, refused) => {
+                let mut words = Vec::new();
+                if !linked.is_empty() {
+                    let names: Vec<String> = linked.iter().map(|l| l.label()).collect();
+                    words.push(format!("scrobbling to {}", names.join(", ")));
+                } else if !self.scrobblers.is_empty() {
                     // Only worth a word when something was linked before:
                     // at start, no scrobbler is the ordinary case.
-                    true if !self.scrobblers.is_empty() => self.say("scrobbling off"),
-                    true => {}
+                    words.push("scrobbling off".to_string());
+                }
+                // A refusal is said whatever else happened: a token typed
+                // wrong in Settings read "set" and nothing else.
+                words.extend(refused);
+                if !words.is_empty() {
+                    self.say(words.join("; "));
                 }
                 self.scrobblers = linked;
                 None
@@ -4672,8 +4667,8 @@ pub async fn run(
         let (scrobble, tx) = (config.scrobble.clone(), action_tx.clone());
         tokio::spawn(async move {
             let file = crate::config::paths::scrobble_file();
-            let linked = crate::scrobble::link(&scrobble, file.as_deref()).await;
-            let _ = tx.send(Action::ScrobblersLinked(linked));
+            let (linked, refused) = crate::scrobble::link(&scrobble, file.as_deref()).await;
+            let _ = tx.send(Action::ScrobblersLinked(linked, refused));
         });
     }
     let (cmd_tx, mut playback_rx) = crate::playback::spawn();
@@ -5018,14 +5013,14 @@ pub async fn run(
                     let (scrobble, tx) = (app.config.scrobble.clone(), action_tx.clone());
                     app.say("linking the scrobblers…");
                     tokio::spawn(async move {
-                        let linked = match crate::scrobble::configured(&scrobble) {
+                        let (linked, refused) = match crate::scrobble::configured(&scrobble) {
                             true => {
                                 let file = crate::config::paths::scrobble_file();
                                 crate::scrobble::link(&scrobble, file.as_deref()).await
                             }
-                            false => Vec::new(),
+                            false => (Vec::new(), Vec::new()),
                         };
-                        let _ = tx.send(Action::ScrobblersLinked(linked));
+                        let _ = tx.send(Action::ScrobblersLinked(linked, refused));
                     });
                 }
                 Action::SettingChanged(settings::Setting::Discord) => {
@@ -6488,6 +6483,26 @@ mod tests {
             last_visible,
             app.tracklist.offset,
         );
+    }
+
+    #[test]
+    fn a_scrobbler_that_refused_its_token_is_said_in_the_status_line() {
+        // A token typed wrong in Settings read "set" and nothing else: the
+        // refusal went to the log, which nobody typing a token is reading.
+        let mut app = App::default();
+        app.update(Action::ScrobblersLinked(
+            Vec::new(),
+            vec!["listenbrainz refused the token".to_string()],
+        ));
+        assert_eq!(
+            app.status.as_deref(),
+            Some("listenbrainz refused the token"),
+            "the refusal is said even when nothing was linked before"
+        );
+        // Nothing refused and nothing linked, at start: nothing said.
+        let mut quiet = App::default();
+        quiet.update(Action::ScrobblersLinked(Vec::new(), Vec::new()));
+        assert_eq!(quiet.status, None);
     }
 
     #[test]
