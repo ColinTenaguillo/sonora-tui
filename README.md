@@ -278,8 +278,8 @@ delivers them rather than the terminal.
 
 Settings (`8`) edits `config.toml` in place, row by row: the service, the
 sound, the content filters, the look, the scrobbling accounts, the Discord
-application, the Subsonic server, the music folders and your own TIDAL
-credentials. `h`/`l` step a value, Enter opens a box on a text row and
+application, the Subsonic server and the music folders. `h`/`l` step a
+value, Enter opens a box on a text row and
 saves on Enter, `x` drops the last music folder. A secret is drawn as dots
 and never shown back. What something reads live follows at once: the
 colours, the scrobblers (linked again, through the browser where needed),

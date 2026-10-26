@@ -25,7 +25,6 @@ pub enum Setting {
     Explicit,
     Ai,
     NerdFont,
-    Halfblocks,
     Theme,
     LastfmKey,
     LastfmSecret,
@@ -38,8 +37,6 @@ pub enum Setting {
     SubsonicServer,
     SubsonicUser,
     LocalFolders,
-    TidalClientId,
-    TidalClientSecret,
 }
 
 /// How a row is changed: stepped with h and l, flipped, typed into,
@@ -57,7 +54,7 @@ pub enum Kind {
 }
 
 impl Setting {
-    pub const ALL: [Setting; 25] = [
+    pub const ALL: [Setting; 22] = [
         Setting::Service,
         Setting::Quality,
         Setting::Volume,
@@ -68,7 +65,6 @@ impl Setting {
         Setting::Explicit,
         Setting::Ai,
         Setting::NerdFont,
-        Setting::Halfblocks,
         Setting::Theme,
         Setting::LastfmKey,
         Setting::LastfmSecret,
@@ -81,8 +77,6 @@ impl Setting {
         Setting::SubsonicServer,
         Setting::SubsonicUser,
         Setting::LocalFolders,
-        Setting::TidalClientId,
-        Setting::TidalClientSecret,
     ];
 
     pub fn kind(&self) -> Kind {
@@ -94,12 +88,11 @@ impl Setting {
             | Setting::Explicit
             | Setting::Ai
             | Setting::NerdFont
-            | Setting::Halfblocks
             | Setting::Librefm => Kind::Toggle,
-            Setting::LastfmKey | Setting::MalojaUrl | Setting::Discord | Setting::SubsonicServer | Setting::SubsonicUser | Setting::TidalClientId => {
+            Setting::LastfmKey | Setting::MalojaUrl | Setting::Discord | Setting::SubsonicServer | Setting::SubsonicUser => {
                 Kind::Text { secret: false }
             }
-            Setting::LastfmSecret | Setting::ListenbrainzToken | Setting::MalojaKey | Setting::TidalClientSecret => {
+            Setting::LastfmSecret | Setting::ListenbrainzToken | Setting::MalojaKey => {
                 Kind::Text { secret: true }
             }
             Setting::LocalFolders => Kind::Folders,
@@ -112,12 +105,11 @@ impl Setting {
         match self {
             Setting::Service => "Streaming",
             Setting::Quality | Setting::Volume | Setting::Normalisation | Setting::Gapless | Setting::Equalizer | Setting::Autoplay | Setting::Explicit | Setting::Ai => "Playback",
-            Setting::NerdFont | Setting::Halfblocks | Setting::Theme => "Appearance",
+            Setting::NerdFont | Setting::Theme => "Appearance",
             Setting::LastfmKey | Setting::LastfmSecret | Setting::LastfmLink | Setting::Librefm | Setting::ListenbrainzToken | Setting::MalojaUrl | Setting::MalojaKey => "Scrobbling",
             Setting::Discord => "Discord",
             Setting::SubsonicServer | Setting::SubsonicUser => "Subsonic",
             Setting::LocalFolders => "Local files",
-            Setting::TidalClientId | Setting::TidalClientSecret => "TIDAL",
         }
     }
 
@@ -139,7 +131,6 @@ impl Setting {
             Setting::Explicit => "Allow explicit content",
             Setting::Ai => "Allow AI-generated content",
             Setting::NerdFont => "Nerd font icons",
-            Setting::Halfblocks => "Draw covers as half blocks",
             Setting::Theme => "Theme",
             Setting::LastfmKey => "Last.fm API key",
             Setting::LastfmSecret => "Last.fm API secret",
@@ -152,8 +143,6 @@ impl Setting {
             Setting::SubsonicServer => "Subsonic server",
             Setting::SubsonicUser => "Subsonic user",
             Setting::LocalFolders => "Music folders",
-            Setting::TidalClientId => "TIDAL client id",
-            Setting::TidalClientSecret => "TIDAL client secret",
         }
     }
 
@@ -172,11 +161,6 @@ impl Setting {
             Setting::Explicit => "Off, tracks marked E will not play.",
             Setting::Ai => "Off, tracks marked AI will not play.",
             Setting::NerdFont => "Needs a nerd font. Empty boxes mean you have none.",
-            // Named for the terminal it was added for: the setting is only
-            // worth finding if the row says what it is for.
-            Setting::Halfblocks => {
-                "On if your terminal draws covers in the wrong place. Takes effect at the next start."
-            }
             Setting::Theme => "h or l to pick one; the colours change at once.",
             Setting::LastfmKey => "From last.fm/api/account/create. Enter to type it.",
             Setting::LastfmSecret => "Its secret. Enter to type it; shown as dots.",
@@ -189,8 +173,6 @@ impl Setting {
             Setting::SubsonicServer => "Used at the next sign-in. Enter to type it.",
             Setting::SubsonicUser => "The password is asked on the sign-in screen. Enter to type it.",
             Setting::LocalFolders => "Enter adds a folder, x takes the last one out; the library is read again.",
-            Setting::TidalClientId => "Your own, instead of the shipped one. Enter to type it; empty keeps the default.",
-            Setting::TidalClientSecret => "Its secret. Enter to type it; shown as dots.",
         }
     }
 }
@@ -206,8 +188,6 @@ pub fn text_of(config: &crate::config::Config, setting: Setting) -> String {
         Setting::Discord => config.discord.application_id.clone(),
         Setting::SubsonicServer => config.subsonic.server.clone(),
         Setting::SubsonicUser => config.subsonic.username.clone(),
-        Setting::TidalClientId => config.auth.client_id.clone(),
-        Setting::TidalClientSecret => config.auth.client_secret.clone(),
         // A folder row opens on an empty box: the text is a new folder.
         _ => String::new(),
     }
@@ -241,13 +221,7 @@ pub fn set_text(config: &mut crate::config::Config, setting: Setting, text: &str
         Setting::Discord => config.discord.application_id = text.to_owned(),
         Setting::SubsonicServer => config.subsonic.server = text.to_owned(),
         Setting::SubsonicUser => config.subsonic.username = text.to_owned(),
-        Setting::LocalFolders => {
-            if !text.is_empty() {
-                config.local.folders.push(text.to_owned());
-            }
-        }
-        Setting::TidalClientId => config.auth.client_id = text.to_owned(),
-        Setting::TidalClientSecret => config.auth.client_secret = text.to_owned(),
+        Setting::LocalFolders if !text.is_empty() => config.local.folders.push(text.to_owned()),
         _ => {}
     }
 }
@@ -411,10 +385,6 @@ pub fn cycle(config: &mut crate::config::Config, setting: Setting, forward: bool
             // whether the font has them is the whole point of the row.
             super::icons::set_nerd_font(config.ui.nerd_font);
         }
-        // Not applied at once, unlike the icons above: the image protocol
-        // is probed before the terminal is put into raw mode, so the picker
-        // this would change was built before the app drew anything.
-        Setting::Halfblocks => config.ui.halfblocks = !config.ui.halfblocks,
         Setting::Theme => {
             let themes = super::theme::THEMES;
             let at = themes.iter().position(|t| *t == config.ui.theme).unwrap_or(0);
@@ -433,9 +403,7 @@ pub fn cycle(config: &mut crate::config::Config, setting: Setting, forward: bool
         | Setting::Discord
         | Setting::SubsonicServer
         | Setting::SubsonicUser
-        | Setting::LocalFolders
-        | Setting::TidalClientId
-        | Setting::TidalClientSecret => {}
+        | Setting::LocalFolders => {}
     }
 }
 
@@ -504,7 +472,7 @@ fn value_of(config: &crate::config::Config, setting: Setting, linked: &[(String,
             true => "default".to_string(),
             false => config.ui.theme.clone(),
         },
-        Setting::LastfmSecret | Setting::ListenbrainzToken | Setting::MalojaKey | Setting::TidalClientSecret => {
+        Setting::LastfmSecret | Setting::ListenbrainzToken | Setting::MalojaKey => {
             set_or_not(&text_of(config, setting))
         }
         Setting::LastfmLink => match config.scrobble.lastfm.is_some() {
@@ -523,10 +491,6 @@ fn value_of(config: &crate::config::Config, setting: Setting, linked: &[(String,
                 false => text,
             }
         }
-        Setting::TidalClientId => match config.auth.client_id.is_empty() {
-            true => "the shipped one".to_string(),
-            false => config.auth.client_id.clone(),
-        },
         Setting::LocalFolders => match config.local.folders.len() {
             0 => "none".to_string(),
             _ => config.local.folders.join(", "),
@@ -554,7 +518,6 @@ fn value_of(config: &crate::config::Config, setting: Setting, linked: &[(String,
                 "Off".to_string()
             }
         }
-        Setting::Halfblocks => on_off(config.ui.halfblocks),
     }
 }
 
@@ -964,26 +927,6 @@ mod tests {
             first > longest,
             "the value column starts at {first}, inside the longest label at {longest}"
         );
-    }
-
-    #[test]
-    fn the_halfblocks_row_toggles_and_is_off_by_default() {
-        // Added for WezTerm 20240203, which says it speaks iTerm2 and then
-        // draws the first row's covers somewhere other than where it was
-        // told -- that row is left blank while every row below it is fine.
-        // A terminal that draws images correctly should keep using them, so
-        // this is off until it is asked for.
-        let mut config = crate::config::Config::default();
-        assert!(!config.ui.halfblocks, "a working terminal draws images");
-
-        cycle(&mut config, Setting::Halfblocks, true);
-        assert!(config.ui.halfblocks, "the setting turned on");
-        assert_eq!(value_of(&config, Setting::Halfblocks, &[]), "On");
-
-        // Either direction flips it, as the other toggles do.
-        cycle(&mut config, Setting::Halfblocks, false);
-        assert!(!config.ui.halfblocks, "and back again");
-        assert_eq!(value_of(&config, Setting::Halfblocks, &[]), "Off");
     }
 
     #[test]
