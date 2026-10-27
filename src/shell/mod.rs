@@ -190,6 +190,11 @@ pub enum Action {
         name: String,
         following: bool,
     },
+    /// The playlist a station is, learnt as it opens: what `F` saves there.
+    RadioNamed {
+        seed: crate::domain::TrackId,
+        playlist: String,
+    },
     /// The ids of everything favourited, from the startup fetch.
     FavouriteIdsLoaded(crate::library::FavouriteIds),
     /// The user's favourites, from the startup fetch.
@@ -967,6 +972,10 @@ pub struct App {
     /// The same for albums and playlists.
     pub favourite_albums: std::collections::HashSet<String>,
     pub favourite_playlists: std::collections::HashSet<String>,
+    /// The playlist each station opened is, by seed. A radio's view is
+    /// keyed by its seed, and the service only names the playlist once
+    /// asked.
+    pub radio_playlists: std::collections::HashMap<crate::domain::TrackId, String>,
     pub now_playing: nowplaying::NowPlaying,
     pub home: home::HomeState,
     /// Explore's own rows. The same shape as the home page's, drawn by the
@@ -1817,8 +1826,18 @@ impl App {
         // The view itself: an album opened from a card, its tracks on
         // screen, is what someone pressing F there means.
         let open = self.open.as_ref()?;
-        let what = Favourable::of(open.target.clone()?)?;
-        Some((what, open.title.clone()))
+        Some((self.open_favourable()?, open.title.clone()))
+    }
+
+    /// What the open view is as a favourite. A radio is the playlist its
+    /// station is, once the service has named it.
+    fn open_favourable(&self) -> Option<Favourable> {
+        match self.open.as_ref()?.target.clone()? {
+            Collection::Radio(seed) => {
+                Some(Favourable::Playlist(self.radio_playlists.get(&seed)?.clone()))
+            }
+            target => Favourable::of(target),
+        }
     }
 
     /// Whether the account has this already, as far as the app knows.
@@ -3050,6 +3069,10 @@ impl App {
                     }
                 }
                 self.say(said);
+                None
+            }
+            Action::RadioNamed { seed, playlist } => {
+                self.radio_playlists.insert(seed, playlist);
                 None
             }
             Action::FavouriteIdsLoaded(ids) => {
@@ -4468,7 +4491,17 @@ fn open_collection(
                     Err(e) => Err(e),
                 }
             }
-            Collection::Radio(seed) => client.track_radio(seed).await,
+            // Named alongside, best-effort: a radio that cannot be saved
+            // still plays.
+            Collection::Radio(seed) => {
+                let (tracks, playlist) =
+                    tokio::join!(client.track_radio(seed), client.radio_playlist(seed));
+                if let Ok(Some(playlist)) = playlist {
+                    let seed = seed.clone();
+                    let _ = tx.send(Action::RadioNamed { seed, playlist });
+                }
+                tracks
+            }
             // A genre, a mood or a decade is a page of rows, not a list of
             // tracks — the same shape Explore itself is, so it comes back
             // as its own reply and takes the pane.
@@ -5991,11 +6024,7 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                             detail: &o.detail,
                             cover: o.cover.as_deref(),
                             round: o.round_cover,
-                            liked: o
-                                .target
-                                .clone()
-                                .and_then(Favourable::of)
-                                .is_some_and(|w| app.is_favourite(&w)),
+                            liked: app.open_favourable().is_some_and(|w| app.is_favourite(&w)),
                         }),
                     },
                     cover_drawer(&mut art),
@@ -11411,6 +11440,26 @@ mod tests {
         let next = app.update(Action::Playback(crate::playback::PlaybackEvent::Finished));
         assert!(next.is_none(), "got {next:?}");
         assert!(!app.now_playing.playing);
+    }
+
+    #[test]
+    fn f_on_an_open_radio_saves_the_playlist_it_is() {
+        let mut app = signed_in(sidebar::Section::Tracks);
+        let mut seed = crate::domain::Track::sample("Seed", "A", std::time::Duration::from_secs(1));
+        seed.id = crate::domain::TrackId::from(1);
+        app.now_playing.track = Some(seed);
+        app.update(Action::PlayTrackRadio);
+        assert_eq!(app.selected_favourable(), None, "not named yet: F has nothing to save");
+
+        app.update(Action::RadioNamed {
+            seed: crate::domain::TrackId::from(1),
+            playlist: "mix:0017".into(),
+        });
+        assert_eq!(
+            app.selected_favourable(),
+            Some((Favourable::Playlist("mix:0017".into()), "Seed Radio".to_string()))
+        );
+        assert!(matches!(key(&mut app, KeyCode::Char('F')), Some(Action::ToggleFollow)));
     }
 
     #[test]
