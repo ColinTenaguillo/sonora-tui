@@ -72,6 +72,12 @@ pub trait Provider: MusicProvider {
     async fn search_artists(&self, _query: &str) -> anyhow::Result<Vec<crate::library::Artist>> {
         Ok(Vec::new())
     }
+
+    /// The playlist id of the station built on a track, where the service
+    /// keeps stations as playlists: what `F` saves on an open radio.
+    async fn radio_playlist(&self, _track_id: &str) -> anyhow::Result<Option<String>> {
+        Ok(None)
+    }
 }
 
 impl Provider for music::subsonic::SubsonicProvider {}

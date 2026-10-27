@@ -100,6 +100,11 @@ impl Session {
         let (tracks, _) = self.api.track_radio(&seed.0, None).await.map_err(error)?;
         Ok(tracks.into_iter().map(track).collect())
     }
+
+    /// The playlist that station is, where the service keeps it as one.
+    pub async fn radio_playlist(&self, seed: &TrackId) -> Result<Option<String>> {
+        self.provider.radio_playlist(&seed.0).await.map_err(error)
+    }
 }
 
 /// sonora reports with `anyhow`; the shell matches on `Error`. The one

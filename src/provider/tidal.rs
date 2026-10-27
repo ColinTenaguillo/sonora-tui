@@ -722,6 +722,14 @@ impl crate::catalogue::Provider for TidalProvider {
         let client = self.inner.client().await?;
         Ok(browse::feed(&client).await?)
     }
+
+    /// The mix `track_radio` plays, under the prefix the library's own
+    /// mixes carry, so saving it goes through `add_playlist_to_library`.
+    async fn radio_playlist(&self, track_id: &str) -> Result<Option<String>> {
+        let client = self.inner.client().await?;
+        let track = library::track(&client, TrackId::from(track_id)).await?;
+        Ok(track.radio.map(|mix| format!("{}{mix}", map::MIX)))
+    }
 }
 
 #[cfg(test)]
