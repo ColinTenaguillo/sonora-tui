@@ -1,0 +1,24 @@
+# Maintainer: Colin Tenaguillo <tenaguillo.c@gmail.com>
+pkgname=sonora-tui-bin
+pkgver=0.7.0
+pkgrel=1
+pkgdesc="Terminal music player for TIDAL, Spotify, Apple Music, Deezer, YouTube Music, Subsonic and local files"
+arch=('x86_64' 'aarch64')
+url="https://github.com/ColinTenaguillo/sonora-tui"
+license=('GPL-3.0-or-later')
+depends=('alsa-lib' 'gcc-libs' 'glibc')
+provides=('sonora-tui')
+conflicts=('sonora-tui')
+options=('!strip' '!debug')
+_base="$url/releases/download/v$pkgver"
+source_x86_64=("$_base/sonora-tui-x86_64-unknown-linux-gnu.tar.xz")
+source_aarch64=("$_base/sonora-tui-aarch64-unknown-linux-gnu.tar.xz")
+sha256sums_x86_64=('0d5f6e0dd8b1bfa43a8242a694f5b78835402dd341ffb717fbbacde0cfb1818b')
+sha256sums_aarch64=('04f2d41b67e7e33966edc8901f476cd8974b8d8b6479059fe5d412cd120341ec')
+
+package() {
+  cd "sonora-tui-$CARCH-unknown-linux-gnu"
+  install -Dm755 sonora-tui -t "$pkgdir/usr/bin"
+  install -Dm644 README.md CHANGELOG.md -t "$pkgdir/usr/share/doc/sonora-tui"
+  install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
+}

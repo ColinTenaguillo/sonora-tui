@@ -1,0 +1,21 @@
+pkgbase = sonora-tui-bin
+	pkgdesc = Terminal music player for TIDAL, Spotify, Apple Music, Deezer, YouTube Music, Subsonic and local files
+	pkgver = 0.7.0
+	pkgrel = 1
+	url = https://github.com/ColinTenaguillo/sonora-tui
+	arch = x86_64
+	arch = aarch64
+	license = GPL-3.0-or-later
+	depends = alsa-lib
+	depends = gcc-libs
+	depends = glibc
+	provides = sonora-tui
+	conflicts = sonora-tui
+	options = !strip
+	options = !debug
+	source_x86_64 = https://github.com/ColinTenaguillo/sonora-tui/releases/download/v0.7.0/sonora-tui-x86_64-unknown-linux-gnu.tar.xz
+	sha256sums_x86_64 = 0d5f6e0dd8b1bfa43a8242a694f5b78835402dd341ffb717fbbacde0cfb1818b
+	source_aarch64 = https://github.com/ColinTenaguillo/sonora-tui/releases/download/v0.7.0/sonora-tui-aarch64-unknown-linux-gnu.tar.xz
+	sha256sums_aarch64 = 04f2d41b67e7e33966edc8901f476cd8974b8d8b6479059fe5d412cd120341ec
+
+pkgname = sonora-tui-bin
