@@ -7,7 +7,7 @@
 
 use ratatui::layout::{Alignment, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use super::theme::Palette;
@@ -259,6 +259,7 @@ pub fn render(frame: &mut Frame, area: Rect, palette: &Palette, scroll: u16) {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
                     .border_style(palette.rule())
                     .padding(ratatui::widgets::Padding::horizontal(1))
                     .title(" Keys ")

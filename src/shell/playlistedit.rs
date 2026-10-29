@@ -14,7 +14,7 @@ use crossterm::event::KeyCode;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::domain::TrackId;
@@ -245,6 +245,7 @@ const HEAD: u16 = 1 + 1 + 3 + 1;
 fn frame_block(palette: &Palette) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(palette.rule())
         .padding(ratatui::widgets::Padding::horizontal(1))
         .title(" Playlist ")
