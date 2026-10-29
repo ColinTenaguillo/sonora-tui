@@ -462,11 +462,11 @@ impl App {
                 .nth(self.history_list.selected)
                 .cloned(),
             Showing::Artist => {
-                let page = self.artist.as_ref()?;
-                if artistview::Section::from_index(self.artist_section)
+                let page = self.artist.page.as_ref()?;
+                if artistview::Section::from_index(self.artist.section)
                     == artistview::Section::Tracks
                 {
-                    page.top_tracks.get(self.artist_tracks.selected).cloned()
+                    page.top_tracks.get(self.artist.tracks.selected).cloned()
                 } else {
                     self.selected_card_track()
                 }
@@ -517,15 +517,15 @@ impl App {
             // Enter is the list's own key there, and never reaches this.
             Showing::Queue | Showing::History => (Vec::new(), 0, None),
             Showing::Artist => {
-                let Some(page) = self.artist.as_ref() else {
+                let Some(page) = self.artist.page.as_ref() else {
                     return (Vec::new(), 0, None);
                 };
-                if artistview::Section::from_index(self.artist_section)
+                if artistview::Section::from_index(self.artist.section)
                     == artistview::Section::Tracks
                 {
                     (
                         page.top_tracks.clone(),
-                        self.artist_tracks.selected,
+                        self.artist.tracks.selected,
                         Some(page.name.clone()),
                     )
                 } else {
@@ -766,6 +766,25 @@ impl App {
 
 pub use crate::catalogue::Favourable;
 
+/// Everything the account has favourited, as ids by kind.
+///
+/// Kept apart from the lists on screen because opening an album replaces
+/// `tracks`: the list cannot say what is a favourite once the user has gone
+/// anywhere else. What `F` and the heart badge read.
+#[derive(Debug, Default)]
+pub struct Favourites {
+    pub tracks: std::collections::HashSet<crate::domain::TrackId>,
+    /// The artists the user follows. Filled from the favourites' id list,
+    /// and from the Artists section's reply.
+    pub artists: std::collections::HashSet<String>,
+    pub albums: std::collections::HashSet<String>,
+    pub playlists: std::collections::HashSet<String>,
+    /// The playlist each station opened is, by seed. A radio's view is
+    /// keyed by its seed, and the service only names the playlist once
+    /// asked.
+    pub radios: std::collections::HashMap<crate::domain::TrackId, String>,
+}
+
 impl Favourable {
     /// The favourable behind a collection, when it is one: a page of rows
     /// or a home row has no list to be added to.
@@ -869,7 +888,7 @@ pub struct Level {
     /// behind them.
     search: Option<SearchState>,
     open: Option<OpenCollection>,
-    artist: Option<crate::library::ArtistPage>,
+    artist: artistview::Open,
     tracks: Vec<crate::domain::Track>,
     tracklist: tracklist::TrackListState,
     open_cards: Vec<carousel::Card>,
@@ -978,21 +997,8 @@ pub struct App {
     /// Where the settings are written. `None` in tests, which must not
     /// touch the real file — one that did left this machine on LOW.
     pub config_path: Option<std::path::PathBuf>,
-    /// The ids of the user's favourites, kept apart from `tracks` because
-    /// opening an album replaces that list — so it cannot say what is a
-    /// favourite once the user has gone anywhere else.
-    pub favourites: std::collections::HashSet<crate::domain::TrackId>,
-    /// The ids of the artists the user follows, so `F` knows which way to
-    /// go. Filled from the favourites' id list, and from the Artists
-    /// section's reply.
-    pub followed: std::collections::HashSet<String>,
-    /// The same for albums and playlists.
-    pub favourite_albums: std::collections::HashSet<String>,
-    pub favourite_playlists: std::collections::HashSet<String>,
-    /// The playlist each station opened is, by seed. A radio's view is
-    /// keyed by its seed, and the service only names the playlist once
-    /// asked.
-    pub radio_playlists: std::collections::HashMap<crate::domain::TrackId, String>,
+    /// What the account has favourited, by kind.
+    pub favourites: Favourites,
     pub now_playing: nowplaying::NowPlaying,
     pub home: home::HomeState,
     /// Explore's own rows. The same shape as the home page's, drawn by the
@@ -1014,26 +1020,11 @@ pub struct App {
     /// The same releases in four dated sections, drawn as the home page's
     /// rows are.
     pub feed: home::HomeState,
-    /// The artist whose page is open, if one is.
-    pub artist: Option<crate::library::ArtistPage>,
-    /// Which of that page's sections has the selection, and where in it.
-    pub artist_section: usize,
-    /// The first section of the artist page that is drawn. Five sections
-    /// and a portrait are taller than a terminal, so it scrolls.
-    pub artist_scroll: usize,
-    /// Whether the artist's blurb is open. TIDAL's run to a page of prose,
-    /// so the header shows the first paragraph and `b` opens the rest.
-    pub artist_bio_open: bool,
-    /// Lines of the open bio scrolled off the top; see `artist_move`.
-    pub artist_bio_scroll: u16,
+    /// The artist page that is open, if one is, and where the user is on it.
+    pub artist: artistview::Open,
     /// Where the history is kept between runs. Set by `run` alone, so a
     /// test that plays a track writes nothing to the user's cache.
     pub history_file: Option<std::path::PathBuf>,
-    pub artist_tracks: tracklist::TrackListState,
-    /// One carousel state per card section of an artist's page, indexed by
-    /// `Section::index` — a field each meant a new one to remember every
-    /// time a section was added, and two of the five went without.
-    pub artist_rows: [carousel::CarouselState; artistview::Section::ALL.len()],
     pub playlists: Vec<crate::library::Playlist>,
     pub albums: Vec<crate::library::Album>,
     pub artists: Vec<crate::library::Artist>,
@@ -1232,13 +1223,13 @@ impl App {
         match self.showing() {
             Showing::Queue | Showing::History => return None,
             Showing::Artist => {
-                let page = self.artist.as_ref()?;
-                let section = artistview::Section::from_index(self.artist_section);
+                let page = self.artist.page.as_ref()?;
+                let section = artistview::Section::from_index(self.artist.section);
                 if section == artistview::Section::Tracks {
                     return None;
                 }
                 let cards = artistview::cards(page, section);
-                let row = &self.artist_rows[section.index()];
+                let row = &self.artist.rows[section.index()];
                 return cards.get(row.selected).cloned();
             }
             // A search tab that draws cards has one too. It reuses the app's
@@ -1836,7 +1827,7 @@ impl App {
     /// page wins because the selection inside it is a track or a record,
     /// never the artist themself.
     pub fn selected_favourable(&self) -> Option<(Favourable, String)> {
-        if let Some(page) = self.artist.as_ref() {
+        if let Some(page) = self.artist.page.as_ref() {
             let what = match page.kind {
                 crate::library::PageKind::Artist => Favourable::Artist(page.id.clone()),
                 crate::library::PageKind::Album => Favourable::Album(page.id.clone()),
@@ -1859,7 +1850,7 @@ impl App {
     fn open_favourable(&self) -> Option<Favourable> {
         match self.open.as_ref()?.target.clone()? {
             Collection::Radio(seed) => {
-                Some(Favourable::Playlist(self.radio_playlists.get(&seed)?.clone()))
+                Some(Favourable::Playlist(self.favourites.radios.get(&seed)?.clone()))
             }
             target => Favourable::of(target),
         }
@@ -1868,9 +1859,9 @@ impl App {
     /// Whether the account has this already, as far as the app knows.
     pub fn is_favourite(&self, what: &Favourable) -> bool {
         match what {
-            Favourable::Artist(id) => self.followed.contains(id),
-            Favourable::Album(id) => self.favourite_albums.contains(id),
-            Favourable::Playlist(uuid) => self.favourite_playlists.contains(uuid),
+            Favourable::Artist(id) => self.favourites.artists.contains(id),
+            Favourable::Album(id) => self.favourites.albums.contains(id),
+            Favourable::Playlist(uuid) => self.favourites.playlists.contains(uuid),
         }
     }
 
@@ -2039,7 +2030,7 @@ impl App {
         // Read before anything is taken: the fields below are moved out as
         // the struct is built, so asking afterwards always says "nothing
         // was open".
-        let over_a_section = self.open.is_some() || self.artist.is_some();
+        let over_a_section = self.open.is_some() || self.artist.page.is_some();
         Level {
             section: self.sidebar.section(),
             showing_queue: std::mem::take(&mut self.showing_queue),
@@ -2049,7 +2040,7 @@ impl App {
             // tabs look as though enter did nothing at all.
             search: self.search.take(),
             open: self.open.take(),
-            artist: self.artist.take(),
+            artist: std::mem::take(&mut self.artist),
             // An opened collection's tracks go with it, but the Tracks
             // section's own favourites do not: they are the section's
             // contents, fetched once at startup, and taking them left the
@@ -2082,7 +2073,7 @@ impl App {
         self.sidebar.select(level.section);
         self.search = level.search;
         self.open = level.open;
-        self.artist = level.artist;
+        self.artist.page = level.artist.page;
         self.tracks = level.tracks;
         self.tracklist = level.tracklist;
         self.open_cards = level.open_cards;
@@ -2184,13 +2175,7 @@ impl App {
 
         // A page from the last artist would show under the new one's name
         // until its own reply arrived.
-        self.artist = None;
-        self.artist_section = 0;
-        self.artist_scroll = 0;
-        self.artist_bio_open = false;
-        self.artist_bio_scroll = 0;
-        self.artist_tracks = tracklist::TrackListState::default();
-        self.artist_rows = Default::default();
+        self.artist.page = Default::default();
 
         // The opened view is what the user is now looking at, so it gets
         // the keys. Leaving focus on the view behind it made the new one
@@ -2240,7 +2225,7 @@ impl App {
     /// steps back out. A key that would open what is showing does nothing.
     fn already_showing(&self, title: &str) -> bool {
         (!self.awaiting && self.open.as_ref().is_some_and(|o| o.title == title))
-            || self.artist.as_ref().is_some_and(|p| p.name == title)
+            || self.artist.page.as_ref().is_some_and(|p| p.name == title)
     }
 
     fn heading_only(&self, title: String) -> Option<OpenCollection> {
@@ -2309,7 +2294,7 @@ impl App {
         // show the last row's contents.
         self.open_cards.clear();
         self.open_grid = grid::GridState::default();
-        self.artist = None;
+        self.artist.page = None;
     }
 
     /// Columns and visible rows of the current grid, measured from the pane
@@ -2364,7 +2349,7 @@ impl App {
         if let Some(state) = self.search.as_ref() {
             return Showing::Search(searchview::Tab::from_index(state.tab));
         }
-        if self.artist.is_some() {
+        if self.artist.page.is_some() {
             return Showing::Artist;
         }
         // A list is a level of its own: opening anything from it puts it on
@@ -2417,7 +2402,7 @@ impl App {
         match self.showing() {
             // An artist page's card sections are grids; its track list is not.
             Showing::Artist => {
-                artistview::Section::from_index(self.artist_section) != artistview::Section::Tracks
+                artistview::Section::from_index(self.artist.section) != artistview::Section::Tracks
             }
             // Top is a grid while the selection is on one of its card rows
             // and a list while it is in the tracks — the keys follow what is
@@ -2671,7 +2656,7 @@ impl App {
                 // something else entirely.
                 // The favourites are the only list that says what is one,
                 // so they are remembered whether or not they are on screen.
-                self.favourites = tracks.iter().map(|t| t.id.clone()).collect();
+                self.favourites.tracks = tracks.iter().map(|t| t.id.clone()).collect();
                 if self.open.is_none() {
                     self.tracks = tracks;
                     self.tracklist.selected = 0;
@@ -2713,11 +2698,11 @@ impl App {
                         // The server's word on whether this account
                         // follows them, which is what `F` reads.
                         if page.following {
-                            self.followed.insert(page.id.clone());
+                            self.favourites.artists.insert(page.id.clone());
                         } else {
-                            self.followed.remove(&page.id);
+                            self.favourites.artists.remove(&page.id);
                         }
-                        self.artist = Some(*page);
+                        self.artist.page = Some(*page);
                     }
                     _ => tracing::info!("dropping the page for {:?}", page.name),
                 }
@@ -2794,7 +2779,7 @@ impl App {
                 None
             }
             Action::ArtistsLoaded(artists) => {
-                self.followed = artists.iter().map(|a| a.id.clone()).collect();
+                self.favourites.artists = artists.iter().map(|a| a.id.clone()).collect();
                 self.artists = artists;
                 self.artist_grid.clamp(self.artists.len());
                 self.refresh_collection_home();
@@ -3085,13 +3070,13 @@ impl App {
                 match &what {
                     Favourable::Artist(id) => {
                         if following {
-                            self.followed.insert(id.clone());
+                            self.favourites.artists.insert(id.clone());
                         } else {
-                            self.followed.remove(id);
+                            self.favourites.artists.remove(id);
                         }
                         // The page on screen says so too, count included,
                         // rather than waiting to be opened again.
-                        if let Some(page) = self.artist.as_mut().filter(|p| p.id == *id) {
+                        if let Some(page) = self.artist.page.as_mut().filter(|p| p.id == *id) {
                             page.following = following;
                             page.fans = page.fans.map(|n| {
                                 if following {
@@ -3104,14 +3089,15 @@ impl App {
                     }
                     Favourable::Album(id) => {
                         if following {
-                            self.favourite_albums.insert(id.clone());
+                            self.favourites.albums.insert(id.clone());
                         } else {
-                            self.favourite_albums.remove(id);
+                            self.favourites.albums.remove(id);
                         }
                         // The album's page, when it is up, shows the heart
                         // at once rather than on the next open.
                         if let Some(page) = self
                             .artist
+                            .page
                             .as_mut()
                             .filter(|p| p.kind == crate::library::PageKind::Album && p.id == *id)
                         {
@@ -3120,9 +3106,9 @@ impl App {
                     }
                     Favourable::Playlist(uuid) => {
                         if following {
-                            self.favourite_playlists.insert(uuid.clone());
+                            self.favourites.playlists.insert(uuid.clone());
                         } else {
-                            self.favourite_playlists.remove(uuid);
+                            self.favourites.playlists.remove(uuid);
                         }
                     }
                 }
@@ -3130,13 +3116,13 @@ impl App {
                 None
             }
             Action::RadioNamed { seed, playlist } => {
-                self.radio_playlists.insert(seed, playlist);
+                self.favourites.radios.insert(seed, playlist);
                 None
             }
             Action::FavouriteIdsLoaded(ids) => {
-                self.followed.extend(ids.artists);
-                self.favourite_albums = ids.albums.into_iter().collect();
-                self.favourite_playlists = ids.playlists.into_iter().collect();
+                self.favourites.artists.extend(ids.artists);
+                self.favourites.albums = ids.albums.into_iter().collect();
+                self.favourites.playlists = ids.playlists.into_iter().collect();
                 None
             }
             // Applied here rather than in the loop, for the same reason
@@ -3146,12 +3132,12 @@ impl App {
                 // An artist's sections are already in hand — the page came
                 // back with forty-odd albums and fifty singles — so this
                 // opens what is held rather than asking for it again.
-                let page = self.artist.as_ref()?;
+                let page = self.artist.page.as_ref()?;
                 // The section the selection is actually in: an artist with
                 // no top tracks starts on a section they do not have, and
                 // asking for its cards gave an empty list.
                 let present = artistview::Section::present(page);
-                let wanted = artistview::Section::from_index(self.artist_section);
+                let wanted = artistview::Section::from_index(self.artist.section);
                 let section = if present.contains(&wanted) {
                     wanted
                 } else {
@@ -3260,9 +3246,9 @@ impl App {
             }
             Action::FavouriteChanged { id, favourite } => {
                 if favourite {
-                    self.favourites.insert(id);
+                    self.favourites.tracks.insert(id);
                 } else {
-                    self.favourites.remove(&id);
+                    self.favourites.tracks.remove(&id);
                 }
                 None
             }
@@ -3702,18 +3688,18 @@ impl App {
     /// results does.
     fn artist_move(&mut self, dir: Dir) {
         let (width, height) = (self.last_main_width, self.last_main_height);
-        let Some(page) = self.artist.as_ref() else {
+        let Some(page) = self.artist.page.as_ref() else {
             return;
         };
         // With the bio open, the bio is the page: up and down scroll it,
         // and the sections under it wait until it closes. Without this the
         // first screen of a long blurb was all of it that could be read.
-        if self.artist_bio_open {
+        if self.artist.bio_open {
             let most = artistview::bio_overflow(page, width, height);
-            self.artist_bio_scroll = match dir {
-                Dir::Down => (self.artist_bio_scroll + 1).min(most),
-                Dir::Up => self.artist_bio_scroll.saturating_sub(1),
-                Dir::Left | Dir::Right => self.artist_bio_scroll,
+            self.artist.bio_scroll = match dir {
+                Dir::Down => (self.artist.bio_scroll + 1).min(most),
+                Dir::Up => self.artist.bio_scroll.saturating_sub(1),
+                Dir::Left | Dir::Right => self.artist.bio_scroll,
             };
             return;
         }
@@ -3721,7 +3707,7 @@ impl App {
         if present.is_empty() {
             return;
         }
-        let current = artistview::Section::from_index(self.artist_section);
+        let current = artistview::Section::from_index(self.artist.section);
         let current = if present.contains(&current) {
             current
         } else {
@@ -3733,8 +3719,8 @@ impl App {
         let tracks_visible = tracklist::visible_rows_of(
             artistview::tracks_height(
                 page,
-                self.artist_scroll,
-                self.artist_bio_open,
+                self.artist.scroll,
+                self.artist.bio_open,
                 width,
                 height,
             ),
@@ -3746,8 +3732,8 @@ impl App {
         let cards = artistview::cards(page, current).len();
         let in_view = artistview::sections_in_view(
             page,
-            self.artist_scroll,
-            self.artist_bio_open,
+            self.artist.scroll,
+            self.artist.bio_open,
             width,
             height,
         );
@@ -3761,24 +3747,24 @@ impl App {
                     .map(|i| {
                         (
                             i,
-                            &mut self.artist_tracks,
+                            &mut self.artist.tracks,
                             page.top_tracks.len(),
                             tracks_visible,
                         )
                     }),
                 row: (current != artistview::Section::Tracks).then(|| {
                     (
-                        &mut self.artist_rows[current.index()],
+                        &mut self.artist.rows[current.index()],
                         cards,
                         carousel::cards_to_land_in(scrollbar::content_width(width)),
                     )
                 }),
-                scroll: &mut self.artist_scroll,
+                scroll: &mut self.artist.scroll,
                 visible: in_view,
             },
             dir,
         );
-        self.artist_section = present[moved].index();
+        self.artist.section = present[moved].index();
     }
 
     /// What the section just moved to still needs fetching.
@@ -4259,8 +4245,8 @@ impl App {
             // a view, so back closes it first. Otherwise it popped the page
             // from under the reader, who landed on whatever the artist had
             // been opened from -- two views away from where they were.
-            KeyCode::Esc | KeyCode::Char('[') if self.on_artist() && self.artist_bio_open => {
-                self.artist_bio_open = false;
+            KeyCode::Esc | KeyCode::Char('[') if self.on_artist() && self.artist.bio_open => {
+                self.artist.bio_open = false;
                 None
             }
             // Escape steps back one view, the same as `[`: it is the key
@@ -4272,9 +4258,9 @@ impl App {
             KeyCode::Esc => None,
             // Only on an artist's page, where there is a blurb to open.
             KeyCode::Char('b') if self.on_artist() => {
-                self.artist_bio_open = !self.artist_bio_open;
+                self.artist.bio_open = !self.artist.bio_open;
                 // From the top each time it opens, as a page would.
-                self.artist_bio_scroll = 0;
+                self.artist.bio_scroll = 0;
                 None
             }
             // Queue the highlighted track by hand: `e` next, `E` last.
@@ -5157,7 +5143,7 @@ pub async fn run(
                         let (id, tx) = (track.id.clone(), action_tx.clone());
                         // What it should become, decided here so the request
                         // matches what the user saw when they pressed it.
-                        let wanted = !app.favourites.contains(&id);
+                        let wanted = !app.favourites.tracks.contains(&id);
                         tokio::spawn(async move {
                             match client.set_track_favourite(&id, wanted).await {
                                 // The reply carries the id, so a slow one
@@ -5740,7 +5726,7 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     // Borrowed by field, so the closure lives beside the artwork being
     // taken out and put back below.
     let (followed, fav_albums, fav_playlists) =
-        (&app.followed, &app.favourite_albums, &app.favourite_playlists);
+        (&app.favourites.artists, &app.favourites.albums, &app.favourites.playlists);
     let liked = |t: &carousel::Target| liked_in(t, followed, fav_albums, fav_playlists);
     let regions = layout::split(frame.area());
     let palette = app.palette;
@@ -5806,7 +5792,7 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                 albums: &search.top_albums,
                 top: search.top,
                 scroll: search.top_scroll,
-                favourites: &app.favourites,
+                favourites: &app.favourites.tracks,
                 playing: app.now_playing.track.as_ref().map(|t| t.id.clone()),
                 tier: app.now_playing.tier,
             },
@@ -5815,7 +5801,7 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         app.artwork = art;
     }
 
-    if let (Showing::Artist, Some(page)) = (showing, app.artist.as_ref()) {
+    if let (Showing::Artist, Some(page)) = (showing, app.artist.page.as_ref()) {
         let mut art = app.artwork.take();
         artistview::render(
             frame,
@@ -5823,14 +5809,14 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
             &palette,
             artistview::View {
                 page,
-                section: artistview::Section::from_index(app.artist_section),
-                tracks: &app.artist_tracks,
-                rows: &app.artist_rows,
-                scroll: app.artist_scroll,
-                bio_open: app.artist_bio_open,
-                bio_scroll: app.artist_bio_scroll,
+                section: artistview::Section::from_index(app.artist.section),
+                tracks: &app.artist.tracks,
+                rows: &app.artist.rows,
+                scroll: app.artist.scroll,
+                bio_open: app.artist.bio_open,
+                bio_scroll: app.artist.bio_scroll,
                 liked: &liked,
-                favourites: &app.favourites,
+                favourites: &app.favourites.tracks,
                 playing: app.now_playing.track.as_ref().map(|t| t.id.clone()),
                 tier: app.now_playing.tier,
             },
@@ -5913,7 +5899,7 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                         state,
                         main_focused,
                         trackgrid::Marks {
-                            favourites: &app.favourites,
+                            favourites: &app.favourites.tracks,
                             playing: app.now_playing.track.as_ref().map(|t| &t.id),
                             tier: app.now_playing.tier,
                             liked: &liked,
@@ -5956,7 +5942,7 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                         &app.feed,
                         main_focused,
                         trackgrid::Marks {
-                            favourites: &app.favourites,
+                            favourites: &app.favourites.tracks,
                             playing: app.now_playing.track.as_ref().map(|t| &t.id),
                             tier: app.now_playing.tier,
                             liked: &liked,
@@ -6041,7 +6027,7 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                     &palette,
                     tracklist::TrackList {
                         filtering: app.filtering,
-                        favourites: &app.favourites,
+                        favourites: &app.favourites.tracks,
                         chrome: tracklist::Chrome::Full,
                         tracks: &visible,
                         state: &app.tracklist,
@@ -6071,7 +6057,7 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     // act in.
     if matches!(showing, Showing::Queue | Showing::History) {
         let marks = trackgrid::Marks {
-            favourites: &app.favourites,
+            favourites: &app.favourites.tracks,
             playing: app.now_playing.track.as_ref().map(|t| &t.id),
             tier: app.now_playing.tier,
             liked: &liked,

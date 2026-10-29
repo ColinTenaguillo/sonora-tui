@@ -125,7 +125,7 @@ fn j_and_k_scroll_an_open_bio_that_runs_past_the_pane() {
         }
     };
     {
-        let page = app.artist.as_mut().unwrap();
+        let page = app.artist.page.as_mut().unwrap();
         page.picture = Some("pic".into());
         page.bio = Some(
             (0..600)
@@ -144,44 +144,44 @@ fn j_and_k_scroll_an_open_bio_that_runs_past_the_pane() {
             .collect::<String>()
     };
     key(&mut app, KeyCode::Char('b'));
-    assert!(app.artist_bio_open);
+    assert!(app.artist.bio_open);
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     assert!(
         text(&terminal).contains("w0 "),
         "the bio starts at its first line"
     );
     let most = artistview::bio_overflow(
-        app.artist.as_ref().unwrap(),
+        app.artist.page.as_ref().unwrap(),
         app.last_main_width,
         app.last_main_height,
     );
     assert!(most > 0, "the bio runs past the pane");
 
     press(&mut app, KeyCode::Char('j'));
-    assert_eq!(app.artist_bio_scroll, 1);
+    assert_eq!(app.artist.bio_scroll, 1);
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     assert!(
         !text(&terminal).contains("w0 "),
         "the first line scrolled off"
     );
-    assert!(app.artist.is_some(), "the page is still up");
+    assert!(app.artist.page.is_some(), "the page is still up");
 
     for _ in 0..1000 {
         press(&mut app, KeyCode::Char('j'));
     }
-    assert_eq!(app.artist_bio_scroll, most, "no further than the last line");
+    assert_eq!(app.artist.bio_scroll, most, "no further than the last line");
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     assert!(
         text(&terminal).contains("w599"),
         "the last line is on screen"
     );
     press(&mut app, KeyCode::Char('k'));
-    assert_eq!(app.artist_bio_scroll, most - 1);
+    assert_eq!(app.artist.bio_scroll, most - 1);
 
     // Closed and opened again, it starts from the top.
     key(&mut app, KeyCode::Char('b'));
     key(&mut app, KeyCode::Char('b'));
-    assert_eq!(app.artist_bio_scroll, 0);
+    assert_eq!(app.artist.bio_scroll, 0);
 }
 
 #[test]
@@ -194,14 +194,14 @@ fn esc_closes_an_open_bio_before_leaving_the_artist() {
         let mut app = with_artist_open();
         let depth = app.back.len();
         key(&mut app, KeyCode::Char('b'));
-        assert!(app.artist_bio_open, "b opens the bio");
+        assert!(app.artist.bio_open, "b opens the bio");
 
         assert!(
             key(&mut app, code).is_none(),
             "{code:?} is spent on the bio"
         );
-        assert!(!app.artist_bio_open, "{code:?} closed the bio");
-        assert!(app.artist.is_some(), "{code:?} left the artist's page up");
+        assert!(!app.artist.bio_open, "{code:?} closed the bio");
+        assert!(app.artist.page.is_some(), "{code:?} left the artist's page up");
         assert_eq!(app.back.len(), depth, "{code:?} popped nothing");
 
         // With the bio closed, the same key leaves the page as before.
@@ -224,7 +224,7 @@ fn an_artists_page_is_drawn_over_the_view_behind_it() {
 #[test]
 fn a_similar_artist_opens_their_own_page() {
     let mut app = with_artist_open();
-    app.artist_section = artistview::Section::Similar.index();
+    app.artist.section = artistview::Section::Similar.index();
     assert!(matches!(
         app.selected_collection(),
         Some(Collection::Artist(id)) if id == "100"
@@ -236,10 +236,10 @@ fn opening_another_artist_clears_the_last_ones_page() {
     // Left behind, it would show under the new artist's name until
     // their own reply arrived.
     let mut app = with_artist_open();
-    app.artist_section = artistview::Section::Albums.index();
+    app.artist.section = artistview::Section::Albums.index();
     app.update(Action::ActivateSelection);
-    assert!(app.artist.is_none(), "the old page is gone");
-    assert_eq!(app.artist_section, 0, "and its selection with it");
+    assert!(app.artist.page.is_none(), "the old page is gone");
+    assert_eq!(app.artist.section, 0, "and its selection with it");
 }
 
 #[test]
@@ -254,7 +254,7 @@ fn a_page_for_an_artist_the_user_has_left_is_dropped() {
         page: Box::new(other),
     });
     assert_eq!(
-        app.artist.as_ref().map(|p| p.name.as_str()),
+        app.artist.page.as_ref().map(|p| p.name.as_str()),
         Some("Daft Punk"),
         "not shown under the wrong heading"
     );
@@ -477,16 +477,16 @@ fn f_follows_the_artist_whose_page_is_open_whatever_is_selected() {
         app.selected_favourable(),
         Some((Favourable::Artist("42".into()), "Daft Punk".to_string()))
     );
-    assert!(!app.followed.contains("42"), "the page said not followed");
+    assert!(!app.favourites.artists.contains("42"), "the page said not followed");
 
     // The reply keeps the page in step: flag and count.
-    app.artist.as_mut().unwrap().fans = Some(100);
+    app.artist.page.as_mut().unwrap().fans = Some(100);
     app.update(Action::FollowChanged {
         what: Favourable::Artist("42".into()),
         name: "Daft Punk".into(),
         following: true,
     });
-    let page = app.artist.as_ref().unwrap();
+    let page = app.artist.page.as_ref().unwrap();
     assert!(
         page.following && page.fans == Some(101),
         "{:?} {:?}",
@@ -554,7 +554,7 @@ fn an_album_opens_as_a_page_in_the_artists_shape() {
         request: open_request(&app),
         page: Box::new(page),
     });
-    assert!(app.artist.is_some(), "the page took the pane");
+    assert!(app.artist.page.is_some(), "the page took the pane");
 
     assert_eq!(
         app.selected_favourable(),
@@ -575,7 +575,7 @@ fn an_album_opens_as_a_page_in_the_artists_shape() {
         name: "good kid".into(),
         following: false,
     });
-    assert!(!app.artist.as_ref().unwrap().following);
+    assert!(!app.artist.page.as_ref().unwrap().following);
 }
 
 #[test]
@@ -586,7 +586,7 @@ fn the_reply_marks_the_artist_and_says_so() {
         name: "Daft Punk".into(),
         following: true,
     });
-    assert!(app.followed.contains("42"), "followed");
+    assert!(app.favourites.artists.contains("42"), "followed");
     assert_eq!(app.status.as_deref(), Some("Following Daft Punk"));
 
     app.update(Action::FollowChanged {
@@ -594,7 +594,7 @@ fn the_reply_marks_the_artist_and_says_so() {
         name: "Daft Punk".into(),
         following: false,
     });
-    assert!(!app.followed.contains("42"), "and not any more");
+    assert!(!app.favourites.artists.contains("42"), "and not any more");
     assert_eq!(app.status.as_deref(), Some("Unfollowed Daft Punk"));
 
     // The Artists section's reply is the account's list of them.
@@ -604,7 +604,7 @@ fn the_reply_marks_the_artist_and_says_so() {
         picture: None,
     }]));
     assert_eq!(
-        app.followed,
+        app.favourites.artists,
         std::collections::HashSet::from(["9".to_string()])
     );
 }

@@ -646,7 +646,7 @@ fn enter_plays_a_track_and_opens_an_album_from_the_page() {
     assert_eq!(track.title, "One More Time", "the page's own track");
 
     // In a card section, it reaches that section's cards.
-    app.artist_section = artistview::Section::Albums.index();
+    app.artist.section = artistview::Section::Albums.index();
     assert!(app.on_grid(), "a card section moves like a grid");
     assert!(matches!(
         app.selected_collection(),
@@ -948,13 +948,13 @@ fn the_reply_marks_the_track_it_was_for() {
         id: id.clone(),
         favourite: true,
     });
-    assert!(app.favourites.contains(&id), "added");
+    assert!(app.favourites.tracks.contains(&id), "added");
 
     app.update(Action::FavouriteChanged {
         id: id.clone(),
         favourite: false,
     });
-    assert!(!app.favourites.contains(&id), "and taken out again");
+    assert!(!app.favourites.tracks.contains(&id), "and taken out again");
 }
 
 #[test]
@@ -984,11 +984,11 @@ fn a_late_reply_marks_its_own_track_not_the_selected_one() {
     });
 
     assert!(
-        app.favourites.contains(&crate::domain::TrackId::from(0)),
+        app.favourites.tracks.contains(&crate::domain::TrackId::from(0)),
         "the track the reply was for"
     );
     assert!(
-        !app.favourites.contains(&crate::domain::TrackId::from(2)),
+        !app.favourites.tracks.contains(&crate::domain::TrackId::from(2)),
         "and not the one now selected"
     );
 }

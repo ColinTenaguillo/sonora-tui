@@ -479,8 +479,8 @@ fn every_way_of_opening_a_view_leaves_the_same_state_behind() {
             state: carousel::CarouselState::default(),
         });
         // State the view being left had, which must not survive it.
-        app.artist_scroll = 4;
-        app.artist_bio_open = true;
+        app.artist.scroll = 4;
+        app.artist.bio_open = true;
         app.tracklist.offset = 9;
         app.tracklist.filter = "leftover".into();
 
@@ -495,9 +495,9 @@ fn every_way_of_opening_a_view_leaves_the_same_state_behind() {
             before + 1,
             "{what}: nothing went on the history, so back has nothing to pop"
         );
-        assert!(app.artist.is_none(), "{what}: an artist page survived");
-        assert_eq!(app.artist_scroll, 0, "{what}: the artist scroll survived");
-        assert!(!app.artist_bio_open, "{what}: an open bio survived");
+        assert!(app.artist.page.is_none(), "{what}: an artist page survived");
+        assert_eq!(app.artist.scroll, 0, "{what}: the artist scroll survived");
+        assert!(!app.artist.bio_open, "{what}: an open bio survived");
         // The track list and its tracks are not asserted here: the level
         // takes them on its way out, so they are already empty whatever
         // `open_view` does with them. The artist fields are the ones it

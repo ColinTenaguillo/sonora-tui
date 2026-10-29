@@ -593,38 +593,38 @@ fn moving_down_the_page_walks_out_of_one_section_into_the_next() {
     // Every section is drawn, so every section has to take the keys —
     // the fault that has come back five times now.
     let mut app = with_artist_open();
-    assert_eq!(app.artist_section, artistview::Section::Tracks.index());
+    assert_eq!(app.artist.section, artistview::Section::Tracks.index());
 
     // Two tracks: one press moves within them, the next leaves.
     app.update(Action::TrackNext);
     assert_eq!(
-        app.artist_section,
+        app.artist.section,
         artistview::Section::Tracks.index(),
         "still in the tracks"
     );
-    assert_eq!(app.artist_tracks.selected, 1, "on the second of them");
+    assert_eq!(app.artist.tracks.selected, 1, "on the second of them");
     app.update(Action::TrackNext);
     assert_eq!(
-        app.artist_section,
+        app.artist.section,
         artistview::Section::Albums.index(),
         "off the end of the tracks and into the albums"
     );
     app.update(Action::TrackNext);
     assert_eq!(
-        app.artist_section,
+        app.artist.section,
         artistview::Section::Similar.index(),
         "and on to the similar artists"
     );
 
     // And back up.
     app.update(Action::TrackPrevious);
-    assert_eq!(app.artist_section, artistview::Section::Albums.index());
+    assert_eq!(app.artist.section, artistview::Section::Albums.index());
 }
 
 #[test]
 fn h_and_l_run_along_the_pages_card_rows() {
     let mut app = with_artist_open();
-    app.artist_section = artistview::Section::Albums.index();
+    app.artist.section = artistview::Section::Albums.index();
 
     assert!(matches!(
         key(&mut app, KeyCode::Char('l')),
@@ -632,13 +632,13 @@ fn h_and_l_run_along_the_pages_card_rows() {
     ));
     app.update(Action::ArtistRight);
     assert_eq!(
-        app.artist_rows[artistview::Section::Albums.index()].selected,
+        app.artist.rows[artistview::Section::Albums.index()].selected,
         1,
         "along the album row"
     );
     app.update(Action::ArtistLeft);
     assert_eq!(
-        app.artist_rows[artistview::Section::Albums.index()].selected,
+        app.artist.rows[artistview::Section::Albums.index()].selected,
         0
     );
 }

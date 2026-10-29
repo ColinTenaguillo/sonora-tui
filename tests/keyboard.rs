@@ -112,11 +112,11 @@ fn see_all_on_an_artists_section_opens_it() {
     // The hint was drawn and the key did nothing: `SeeAll` only knew about
     // the home page's rows, and an artist's sections are not those.
     let mut app = app();
-    app.artist = Some(an_artist());
+    app.artist.page = Some(an_artist());
     // On the albums, said rather than assumed: the first section is Top
     // Tracks, and which one the selection starts on is not what this is
     // about.
-    app.artist_section = 1;
+    app.artist.section = 1;
 
     let before = screen(&mut app);
     assert!(before.contains("See all"), "the page offers it:\n{before}");
@@ -364,7 +364,7 @@ fn every_key_the_help_lists_does_something_somewhere() {
     // A key that is documented and inert is worse than one that is neither.
     // This does not check what each does — only that the app answers.
     let mut app = app();
-    app.artist = Some(an_artist());
+    app.artist.page = Some(an_artist());
 
     for code in [
         KeyCode::Char('j'),
@@ -410,7 +410,7 @@ fn an_artists_page_draws_every_top_track_it_has() {
             )
         })
         .collect();
-    app.artist = Some(page);
+    app.artist.page = Some(page);
 
     // The pane of a 61-row terminal, which is where this was seen.
     let text = screen_sized(&mut app, 199, 61);
@@ -434,7 +434,7 @@ fn the_last_section_of_an_artists_page_is_cut_not_dropped() {
     let mut app = app();
     let mut page = an_artist();
     page.picture = Some("http://x".into());
-    app.artist = Some(page);
+    app.artist.page = Some(page);
 
     // A height that lands part-way through the second section: it must
     // still name itself rather than leaving the pane empty below the first.
@@ -716,8 +716,8 @@ fn see_all_on_top_tracks_opens_the_list() {
     // section, and `cards` has none for tracks -- it builds covers -- so
     // the empty list it got back made the key a no-op.
     let mut app = app();
-    app.artist = Some(an_artist());
-    app.artist_section = 0; // Top Tracks
+    app.artist.page = Some(an_artist());
+    app.artist.section = 0; // Top Tracks
 
     let before = screen(&mut app);
     assert!(
@@ -859,8 +859,8 @@ fn h_never_closes_the_view_it_is_pressed_in() {
     // other than a direction, and reaching for the left of a row left the
     // album. It is "left" everywhere now, and escape is the way out.
     let mut app = app();
-    app.artist = Some(an_artist());
-    app.artist_section = 1;
+    app.artist.page = Some(an_artist());
+    app.artist.section = 1;
     press(&mut app, KeyCode::Char('o'));
     let opened = screen(&mut app);
     assert!(
