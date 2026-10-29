@@ -903,3 +903,36 @@ fn tab_cycles_round_the_result_tabs() {
     app.update(Action::NextSearchTab);
     assert_eq!(app.search.as_ref().unwrap().tab, 0, "round to the first");
 }
+
+#[test]
+fn o_on_the_search_tracks_tab_walks_only_the_columns_the_results_draw() {
+    let mut app = signed_in(sidebar::Section::Music);
+    app.update(Action::BeginSearch);
+    for c in "daft punk".chars() {
+        key(&mut app, KeyCode::Char(c));
+    }
+    let mut results = some_results();
+    for (i, t) in results.tracks.iter_mut().enumerate() {
+        t.album = format!("Album {i}");
+    }
+    app.update(Action::SearchLoaded(Box::new(results)));
+    app.search.as_mut().unwrap().typing = false;
+    app.update(Action::NextSearchTab); // Tracks
+
+    for _ in 0..3 {
+        key(&mut app, KeyCode::Char('O'));
+    }
+    let sort = app.search.as_ref().unwrap().tracks.sort;
+    assert_eq!(
+        sort,
+        Some(tracklist::Column::Album),
+        "results span albums, so the album column is there"
+    );
+    key(&mut app, KeyCode::Char('O'));
+    let sort = app.search.as_ref().unwrap().tracks.sort;
+    assert_eq!(
+        sort,
+        Some(tracklist::Column::Duration),
+        "but no result carries an added date, so that column is skipped"
+    );
+}

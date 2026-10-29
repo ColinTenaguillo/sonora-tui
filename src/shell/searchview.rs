@@ -257,7 +257,7 @@ pub fn render<F>(
         }
         // The app's own track list, without the heading and filter box it
         // draws for the Tracks section — this view has its own.
-        let refs: Vec<&Track> = tracks.iter().collect();
+        let refs = tracklist::visible(&tracks, view.tracks);
         tracklist::render(
             frame,
             body,
@@ -398,7 +398,7 @@ fn render_top<F>(
                     false,
                 );
                 let tracks = track_rows(results, Tab::Top);
-                let refs: Vec<&Track> = tracks.iter().collect();
+                let refs = tracklist::visible(&tracks, view.tracks);
                 tracklist::render(
                     frame,
                     Rect {

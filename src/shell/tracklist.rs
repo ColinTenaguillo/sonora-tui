@@ -56,15 +56,81 @@ const RING_WIDTH: u16 = 1;
 /// 16 columns it spans, plus a blank line under it.
 const BANNER_ROWS: u16 = 9;
 
+/// A column the rows can be ordered by, in the order the sort key walks
+/// them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Column {
+    Title,
+    Artist,
+    Album,
+    Added,
+    Duration,
+}
+
+impl Column {
+    /// Every column, in the order the sort key walks them.
+    pub const ALL: [Column; 5] = [
+        Column::Title,
+        Column::Artist,
+        Column::Album,
+        Column::Added,
+        Column::Duration,
+    ];
+}
+
+/// The columns a list of these tracks draws, so the sort key walks only
+/// those: an album's tracks share one album and carry no date, and the
+/// renderer drops both columns -- a sort by a column that is not there
+/// would look like a key that does nothing.
+pub fn sortable(tracks: &[Track]) -> Vec<Column> {
+    let refs: Vec<&Track> = tracks.iter().collect();
+    let (album, added) = (!one_album(&refs), any_added(&refs));
+    Column::ALL
+        .into_iter()
+        .filter(|c| match c {
+            Column::Album => album,
+            Column::Added => added,
+            _ => true,
+        })
+        .collect()
+}
+
 #[derive(Debug, Default)]
 pub struct TrackListState {
     pub selected: usize,
     /// First visible track.
     pub offset: usize,
     pub filter: String,
+    /// The column the rows are ordered by, or none for the order the list
+    /// came in: an album's track numbers, a playlist's own sequence.
+    pub sort: Option<Column>,
+    pub descending: bool,
 }
 
 impl TrackListState {
+    /// Order by the next of `available`, starting at the first and ending
+    /// back at the list's own order. The direction stays: reversed once,
+    /// every column walked after is reversed too. A column the list does
+    /// not have -- chosen on a wider one -- starts the walk over.
+    pub fn next_sort(&mut self, available: &[Column]) {
+        let at = self
+            .sort
+            .and_then(|current| available.iter().position(|c| *c == current));
+        self.sort = match at {
+            None => available.first().copied(),
+            Some(at) => available.get(at + 1).copied(),
+        };
+    }
+
+    /// Flip the direction. With no column chosen yet, it is the title
+    /// reversed rather than nothing.
+    pub fn reverse_sort(&mut self) {
+        if self.sort.is_none() {
+            self.sort = Some(Column::Title);
+        }
+        self.descending = !self.descending;
+    }
+
     /// Move down through `len` rows, clamped to the last, and keep the
     /// selection within the `visible` rows drawn.
     pub fn next(&mut self, len: usize, visible: usize) {
@@ -111,6 +177,31 @@ pub fn filter<'a>(tracks: &'a [Track], needle: &str) -> Vec<&'a Track> {
     .into_iter()
     .map(|(_, t)| t)
     .collect()
+}
+
+/// The rows the list shows: what the filter keeps, in the order the sort
+/// asks for. Every reader of the list goes through here, or the keys would
+/// move through one order while the screen showed another.
+pub fn visible<'a>(tracks: &'a [Track], state: &TrackListState) -> Vec<&'a Track> {
+    let mut kept = filter(tracks, &state.filter);
+    if let Some(column) = state.sort {
+        let text = |s: &str| super::fuzzy::fold(s);
+        kept.sort_by(|a, b| {
+            let order = match column {
+                Column::Title => text(&a.title).cmp(&text(&b.title)),
+                Column::Artist => text(&a.artist).cmp(&text(&b.artist)),
+                Column::Album => text(&a.album).cmp(&text(&b.album)),
+                Column::Added => a.added.cmp(&b.added),
+                Column::Duration => a.duration.cmp(&b.duration),
+            };
+            if state.descending {
+                order.reverse()
+            } else {
+                order
+            }
+        });
+    }
+    kept
 }
 
 /// Column widths for a given pane width.
@@ -329,6 +420,7 @@ pub fn render<F>(
                 },
                 palette,
                 &cols,
+                state,
             );
         }
         Chrome::Full => {
@@ -376,6 +468,7 @@ pub fn render<F>(
                     },
                     palette,
                     &cols,
+                    state,
                 );
             }
         }
@@ -535,8 +628,21 @@ fn render_banner<F>(
     }
 }
 
-fn render_header(frame: &mut Frame, area: Rect, palette: &Palette, cols: &Columns) {
+fn render_header(
+    frame: &mut Frame,
+    area: Rect,
+    palette: &Palette,
+    cols: &Columns,
+    state: &TrackListState,
+) {
     let style = palette.subtitle();
+    // The sorted column says so, and which way.
+    let label = |text: &str, column: Column| match state.sort {
+        Some(sorted) if sorted == column => {
+            format!("{text} {}", if state.descending { '▼' } else { '▲' })
+        }
+        _ => text.to_string(),
+    };
     // Over the rows' own columns, which sit inside the selection ring.
     let mut x = area.x + RING_WIDTH;
     let mut put = |frame: &mut Frame, text: &str, width: u16, align: ratatui::layout::Alignment| {
@@ -559,12 +665,17 @@ fn render_header(frame: &mut Frame, area: Rect, palette: &Palette, cols: &Column
     let (left, centre) = (Alignment::Left, Alignment::Center);
     put(frame, "#", cols.number, left);
     put(frame, "", cols.thumb, left);
-    put(frame, "TITLE", cols.title, left);
-    put(frame, "ARTIST", cols.artist, left);
-    put(frame, "ALBUM", cols.album, left);
-    put(frame, "ADDED", cols.added, left);
+    put(frame, &label("TITLE", Column::Title), cols.title, left);
+    put(frame, &label("ARTIST", Column::Artist), cols.artist, left);
+    put(frame, &label("ALBUM", Column::Album), cols.album, left);
+    put(frame, &label("ADDED", Column::Added), cols.added, left);
     // Centred, so the header sits over the times rather than off to one side.
-    put(frame, "TIME", cols.duration, centre);
+    put(
+        frame,
+        &label("TIME", Column::Duration),
+        cols.duration,
+        centre,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -803,7 +914,7 @@ mod tests {
         let mut s = TrackListState {
             selected: 90,
             offset: 80,
-            filter: String::new(),
+            ..Default::default()
         };
         s.clamp(4);
         assert_eq!(s.selected, 3);
@@ -1782,5 +1893,157 @@ mod tests {
         {
             println!("PROBE {i:2} |{}|", l.trim_end());
         }
+    }
+
+    fn titles<'a>(v: &[&'a Track]) -> Vec<&'a str> {
+        v.iter().map(|t| t.title.as_str()).collect()
+    }
+
+    #[test]
+    fn sorting_orders_the_filtered_tracks_by_the_chosen_column() {
+        let all = vec![
+            Track::sample("Beta", "Zed", Duration::from_secs(1)),
+            Track::sample("Alpha", "Yan", Duration::from_secs(2)),
+            Track::sample("Gamma", "Xu", Duration::from_secs(3)),
+            Track::sample("Other", "Wu", Duration::from_secs(4)),
+        ];
+        let mut s = TrackListState::default();
+        assert_eq!(
+            titles(&visible(&all, &s)),
+            ["Beta", "Alpha", "Gamma", "Other"],
+            "until a sort is asked for, the list keeps its own order"
+        );
+        s.next_sort(&Column::ALL);
+        assert_eq!(
+            titles(&visible(&all, &s)),
+            ["Alpha", "Beta", "Gamma", "Other"]
+        );
+        s.reverse_sort();
+        assert_eq!(
+            titles(&visible(&all, &s)),
+            ["Other", "Gamma", "Beta", "Alpha"]
+        );
+        // The filter narrows, then the sort orders what is left.
+        s.filter = "a".into();
+        assert_eq!(titles(&visible(&all, &s)), ["Gamma", "Beta", "Alpha"]);
+        // Duration, descending: the longest first.
+        s.sort = Some(Column::Duration);
+        assert_eq!(titles(&visible(&all, &s)), ["Gamma", "Alpha", "Beta"]);
+    }
+
+    #[test]
+    fn the_sort_key_walks_the_columns_from_title_and_back_to_none() {
+        let mut s = TrackListState::default();
+        assert_eq!(s.sort, None);
+        let walk = [
+            Some(Column::Title),
+            Some(Column::Artist),
+            Some(Column::Album),
+            Some(Column::Added),
+            Some(Column::Duration),
+            None,
+        ];
+        for want in walk {
+            s.next_sort(&Column::ALL);
+            assert_eq!(s.sort, want);
+            assert!(!s.descending, "nothing has reversed it yet");
+        }
+        s.reverse_sort();
+        assert_eq!(
+            s.sort,
+            Some(Column::Title),
+            "reversing nothing sorts by title"
+        );
+        assert!(s.descending);
+        s.reverse_sort();
+        assert!(!s.descending);
+        s.next_sort(&Column::ALL);
+        s.reverse_sort();
+        assert!(s.descending);
+        s.next_sort(&Column::ALL);
+        assert!(s.descending, "moving on keeps the direction");
+    }
+
+    #[test]
+    fn the_header_marks_the_sorted_column_and_its_direction() {
+        let all = tracks(2);
+        let favourites = std::collections::HashSet::new();
+        let draw = |state: &TrackListState| {
+            crate::shell::geometry::draw(80, 10, |f, area, palette| {
+                let refs: Vec<&Track> = all.iter().collect();
+                render(
+                    f,
+                    area,
+                    palette,
+                    TrackList {
+                        filtering: false,
+                        favourites: &favourites,
+                        tracks: &refs,
+                        state,
+                        focused: false,
+                        playing: None,
+                        tier: super::super::nowplaying::Tier::Low,
+                        banner: None,
+                        chrome: Chrome::Bare,
+                    },
+                    |_, _, _, _| true,
+                )
+            })
+        };
+        let mut state = TrackListState::default();
+        let text = crate::shell::geometry::text(&draw(&state));
+        assert!(!text.contains('▲') && !text.contains('▼'), "{text}");
+
+        state.sort = Some(Column::Title);
+        let text = crate::shell::geometry::text(&draw(&state));
+        assert!(text.contains("TITLE ▲"), "{text}");
+
+        state.descending = true;
+        let text = crate::shell::geometry::text(&draw(&state));
+        assert!(text.contains("TITLE ▼"), "{text}");
+
+        state.sort = Some(Column::Duration);
+        let text = crate::shell::geometry::text(&draw(&state));
+        assert!(text.contains("TIME ▼"), "{text}");
+    }
+
+    #[test]
+    fn the_sort_walks_only_the_columns_the_list_draws() {
+        // An album's tracks share one album and carry no date, so the list
+        // draws neither column -- and O must not stop on a column that is
+        // not there.
+        let one_album = vec![
+            Track::sample("B", "y", Duration::from_secs(1)),
+            Track::sample("A", "x", Duration::from_secs(2)),
+        ];
+        assert_eq!(
+            sortable(&one_album),
+            [Column::Title, Column::Artist, Column::Duration]
+        );
+        let mut mixed = one_album.clone();
+        mixed[0].album = "X".into();
+        mixed[1].album = "Y".into();
+        mixed[0].added = Some("2020-01-01T00:00:00".into());
+        assert_eq!(sortable(&mixed), Column::ALL);
+
+        let cols = sortable(&one_album);
+        let mut s = TrackListState::default();
+        s.next_sort(&cols);
+        assert_eq!(s.sort, Some(Column::Title));
+        s.next_sort(&cols);
+        assert_eq!(s.sort, Some(Column::Artist));
+        s.next_sort(&cols);
+        assert_eq!(
+            s.sort,
+            Some(Column::Duration),
+            "album and added are skipped"
+        );
+        s.next_sort(&cols);
+        assert_eq!(s.sort, None);
+        // A column chosen on a wider list, then the list changed under it:
+        // the walk goes on from the first column it does have.
+        s.sort = Some(Column::Album);
+        s.next_sort(&cols);
+        assert_eq!(s.sort, Some(Column::Title));
     }
 }

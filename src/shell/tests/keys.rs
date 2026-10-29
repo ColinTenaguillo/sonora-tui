@@ -316,3 +316,48 @@ fn an_account_prompt_is_walked_with_j_and_k_and_picked_with_enter() {
         other => panic!("Enter picks the account, got {other:?}"),
     }
 }
+
+#[test]
+fn o_sorts_the_track_list_by_a_column_and_i_reverses_it_over_the_filter() {
+    let mut app = signed_in(sidebar::Section::Tracks);
+    app.tracks = ["Beta", "Alpha", "Gamma", "Other"]
+        .iter()
+        .map(|t| crate::domain::Track::sample(t, "Zed", std::time::Duration::from_secs(1)))
+        .collect();
+    let first = |app: &App| app.selected_track().expect("a track").title;
+    assert_eq!(first(&app), "Beta", "until O, the list is in its own order");
+
+    key(&mut app, KeyCode::Char('O'));
+    assert_eq!(first(&app), "Alpha", "O sorts by title");
+    key(&mut app, KeyCode::Char('I'));
+    assert_eq!(first(&app), "Other", "I reverses it");
+
+    // The filter narrows the list; the sort orders what is left.
+    app.set_filter("a".into());
+    assert_eq!(app.list_len(), 3, "Other has no a");
+    assert_eq!(first(&app), "Gamma");
+
+    // Every key that moves through the list moves through the sorted one.
+    app.tracklist.selected = 2;
+    assert_eq!(first(&app), "Alpha");
+}
+
+#[test]
+fn o_sorts_an_opened_album_too() {
+    let mut app = with_albums(3);
+    app.update(Action::ActivateSelection);
+    let request = app.open.as_ref().expect("an album is opening").request;
+    app.update(Action::CollectionLoaded {
+        request,
+        tracks: some_tracks(&["Beta", "Alpha", "Gamma"]),
+    });
+    assert_eq!(app.showing(), Showing::Tracks);
+    let first = |app: &App| app.selected_track().expect("a track").title;
+    assert_eq!(
+        first(&app),
+        "Beta",
+        "an album keeps its track order until O"
+    );
+    key(&mut app, KeyCode::Char('O'));
+    assert_eq!(first(&app), "Alpha", "O sorts the album by title");
+}

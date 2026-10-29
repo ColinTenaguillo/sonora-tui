@@ -727,3 +727,95 @@ fn the_reply_marks_the_artist_and_says_so() {
         std::collections::HashSet::from(["9".to_string()])
     );
 }
+
+#[test]
+fn o_sorts_an_album_page_by_title_and_keeps_track_order_until_then() {
+    // Reported: O sorted the Tracks section and a playlist but not an
+    // album. An album is a page, like an artist's, with the tracks in
+    // `top_tracks` and the cursor in `artist.tracks` -- neither of which
+    // the sort reached.
+    let mut app = signed_in(sidebar::Section::Albums);
+    app.open = Some(OpenCollection {
+        title: "good kid".into(),
+        subtitle: String::new(),
+        detail: String::new(),
+        cover: None,
+        round_cover: false,
+        came_from: sidebar::Section::Albums,
+        request: RequestId::default(),
+        target: Some(Collection::Album("20556792".into())),
+    });
+    let mut page = an_artist_page();
+    page.kind = crate::library::PageKind::Album;
+    page.top_tracks = some_tracks(&["Beta", "Alpha", "Gamma"]);
+    app.update(Action::ArtistLoaded {
+        request: open_request(&app),
+        page: Box::new(page),
+    });
+    app.artist.section = artistview::Section::Tracks.index();
+    assert_eq!(app.showing(), Showing::Artist, "an album is a page");
+
+    let first = |app: &App| app.selected_track().expect("a track").title;
+    assert_eq!(
+        first(&app),
+        "Beta",
+        "the album keeps its track order until O"
+    );
+    key(&mut app, KeyCode::Char('O'));
+    assert_eq!(first(&app), "Alpha", "O sorts the album by title");
+    key(&mut app, KeyCode::Char('I'));
+    assert_eq!(first(&app), "Gamma", "I reverses it");
+    // Enter plays from the same order the screen shows.
+    let (list, at, _) = app.selected_list();
+    assert_eq!(list[at].title, "Gamma");
+}
+
+fn an_album_page_of(titles: &[&str]) -> App {
+    let mut app = signed_in(sidebar::Section::Albums);
+    app.open = Some(OpenCollection {
+        title: "good kid".into(),
+        subtitle: String::new(),
+        detail: String::new(),
+        cover: None,
+        round_cover: false,
+        came_from: sidebar::Section::Albums,
+        request: RequestId::default(),
+        target: Some(Collection::Album("20556792".into())),
+    });
+    let mut page = an_artist_page();
+    page.kind = crate::library::PageKind::Album;
+    page.top_tracks = some_tracks(titles);
+    app.update(Action::ArtistLoaded {
+        request: open_request(&app),
+        page: Box::new(page),
+    });
+    app.artist.section = artistview::Section::Tracks.index();
+    app
+}
+
+#[test]
+fn the_filter_narrows_an_album_page_and_o_walks_only_its_columns() {
+    // `/` on an album page typed into the Tracks section's filter, which
+    // the page never read: the box took the keys and nothing changed.
+    let mut app = an_album_page_of(&["Beta", "Alpha", "Gamma"]);
+    let first = |app: &App| app.selected_track().expect("a track").title;
+
+    key(&mut app, KeyCode::Char('/'));
+    assert!(app.filtering);
+    key(&mut app, KeyCode::Char('g'));
+    assert_eq!(app.filter_text(), "g", "the page has a filter of its own");
+    assert_eq!(first(&app), "Gamma", "and the keys act on what it keeps");
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.filter_text(), "");
+    assert_eq!(first(&app), "Beta");
+
+    // One album, no dates: the album and added columns are not drawn, so
+    // the walk goes title, artist, time and back.
+    key(&mut app, KeyCode::Char('O'));
+    key(&mut app, KeyCode::Char('O'));
+    assert_eq!(app.artist.tracks.sort, Some(tracklist::Column::Artist));
+    key(&mut app, KeyCode::Char('O'));
+    assert_eq!(app.artist.tracks.sort, Some(tracklist::Column::Duration));
+    key(&mut app, KeyCode::Char('O'));
+    assert_eq!(app.artist.tracks.sort, None);
+}
