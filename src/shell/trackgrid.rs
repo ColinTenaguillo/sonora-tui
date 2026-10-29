@@ -17,11 +17,11 @@ use ratatui::Frame;
 use super::carousel::{truncate, Card};
 use super::theme::Palette;
 
-/// Columns of cells, as the web client's three.
-pub const COLUMNS: usize = 3;
-/// Rows of cells, as the web client's three. Counted off the running
-/// client: a track row there holds nine, three across and three down.
-pub const ROWS: usize = 3;
+/// Columns of cells. The browse module owns the number: it is how many
+/// cards a row is asked for, before any of them is drawn.
+pub const COLUMNS: usize = crate::browse::GRID_COLUMNS;
+/// Rows of cells, likewise.
+pub const ROWS: usize = crate::browse::GRID_ROWS;
 /// A thumbnail is three rows tall; how many columns that is depends on the
 /// shape of a terminal cell, the same as a card's own cover. Anything
 /// shorter shrinks on both axes, and looked like a mistake next to a

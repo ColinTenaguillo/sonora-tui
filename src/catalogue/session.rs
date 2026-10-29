@@ -15,7 +15,7 @@ use crate::domain::{Quality, Track, TrackId};
 use crate::library::{Album, Artist, ArtistPage, FavouriteIds, PageKind, Playlist};
 use crate::playback::StreamMeta;
 use crate::search::Results;
-use crate::shell::carousel::{Card, Target};
+use crate::domain::{Card, Target};
 use super::Error;
 
 pub struct Session {
@@ -599,8 +599,8 @@ mod tests {
     #[test]
     fn a_listen_again_row_that_repeats_the_quick_picks_is_recognised() {
         let track = |id: &str| {
-            crate::provider::map::item(crate::shell::carousel::Card {
-                target: Some(crate::shell::carousel::Target::Track(id.into())),
+            crate::provider::map::item(crate::domain::Card {
+                target: Some(crate::domain::Target::Track(id.into())),
                 ..Default::default()
             })
             .expect("a track card")
@@ -614,8 +614,8 @@ mod tests {
     #[test]
     fn the_artists_behind_a_search_come_once_each_most_frequent_first() {
         let track = |artists: &[(&str, Option<&str>)]| {
-            let item = crate::provider::map::item(crate::shell::carousel::Card {
-                target: Some(crate::shell::carousel::Target::Track("t".into())),
+            let item = crate::provider::map::item(crate::domain::Card {
+                target: Some(crate::domain::Target::Track("t".into())),
                 ..Default::default()
             })
             .expect("a track card");
