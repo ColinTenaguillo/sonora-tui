@@ -128,12 +128,19 @@ pub async fn link(
             }
         }
     }
+    store(file, &linked);
+    (linked, refused)
+}
+
+/// Write the accounts back, as they are now: linked afresh, or switched
+/// off and on from the settings row. A failure is logged and no more --
+/// the accounts still stand for this run.
+pub fn store(file: Option<&Path>, linked: &[Linked]) {
     if let Some(file) = file {
-        if let Err(error) = save(file, &linked) {
+        if let Err(error) = save(file, linked) {
             tracing::warn!("scrobbling: could not keep the accounts: {error:#}");
         }
     }
-    (linked, refused)
 }
 
 /// The accounts kept from the last run, by service id.
