@@ -383,10 +383,9 @@ fn favourites_landing_late_do_not_replace_an_open_album() {
     // silently swap the album's tracks for the user's whole library.
     let mut app = with_albums(3);
     app.update(Action::ActivateSelection);
-    let title = app.open.as_ref().unwrap().title.clone();
 
     app.update(Action::CollectionLoaded {
-        for_title: title,
+        request: open_request(&app),
         tracks: some_tracks(&["Album track"]),
     });
     assert_eq!(app.tracks.len(), 1);
@@ -410,11 +409,11 @@ fn a_reply_for_an_album_that_was_left_is_dropped() {
     // must not appear under whatever is on screen now.
     let mut app = with_albums(5);
     app.update(Action::ActivateSelection);
-    let first = app.open.as_ref().unwrap().title.clone();
+    let first = open_request(&app);
     app.update(Action::CloseCollection);
 
     app.update(Action::CollectionLoaded {
-        for_title: first,
+        request: first,
         tracks: some_tracks(&["Late", "Reply"]),
     });
 
@@ -428,25 +427,25 @@ fn a_reply_for_an_album_that_was_left_is_dropped() {
 fn a_reply_for_the_previous_album_does_not_fill_the_current_one() {
     let mut app = with_albums(5);
     app.update(Action::ActivateSelection);
-    let first = app.open.as_ref().unwrap().title.clone();
+    let first = open_request(&app);
 
     // Straight on to another album.
     app.update(Action::CloseCollection);
     app.album_grid.selected = 2;
     app.update(Action::ActivateSelection);
-    let second = app.open.as_ref().unwrap().title.clone();
+    let second = open_request(&app);
     assert_ne!(first, second);
 
     // The first album's reply arrives now.
     app.update(Action::CollectionLoaded {
-        for_title: first,
+        request: first,
         tracks: some_tracks(&["Wrong album"]),
     });
     assert!(app.tracks.is_empty(), "the stale reply is dropped");
 
     // And the right one still fills it.
     app.update(Action::CollectionLoaded {
-        for_title: second,
+        request: second,
         tracks: some_tracks(&["Right album"]),
     });
     assert_eq!(app.tracks[0].title, "Right album");
@@ -604,7 +603,7 @@ fn the_rows_tracks_arrive_under_its_heading() {
     let mut app = home_with_a_track_row();
     app.update(Action::SeeAll);
     app.update(Action::CollectionLoaded {
-        for_title: "New Tracks".into(),
+        request: open_request(&app),
         tracks: some_tracks(&["One", "Two", "Three"]),
     });
     assert_eq!(app.tracks.len(), 3, "the row's tracks are shown");
@@ -615,8 +614,9 @@ fn a_reply_for_a_row_the_user_has_left_is_dropped() {
     // Same race as an album: the reply names what it was for.
     let mut app = home_with_a_track_row();
     app.update(Action::SeeAll);
+    let other_row = RequestId(open_request(&app).0 + 1);
     app.update(Action::CollectionLoaded {
-        for_title: "Some Other Row".into(),
+        request: other_row,
         tracks: some_tracks(&["One", "Two"]),
     });
     assert!(app.tracks.is_empty(), "not shown under the wrong heading");
@@ -637,7 +637,7 @@ fn a_key_that_would_open_what_is_showing_does_nothing() {
     let open = key(&mut app, KeyCode::Char('c')).expect("opens the album");
     app.update(open);
     app.update(Action::CollectionLoaded {
-        for_title: "Single".into(),
+        request: open_request(&app),
         tracks: vec![track],
     });
     assert_eq!(app.showing(), Showing::Tracks);

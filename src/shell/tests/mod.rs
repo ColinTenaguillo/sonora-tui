@@ -218,6 +218,11 @@ fn an_artist_page() -> crate::library::ArtistPage {
     }
 }
 
+/// The request the open view waits on: what a reply names to be taken.
+fn open_request(app: &App) -> RequestId {
+    app.open.as_ref().expect("something is open").request
+}
+
 fn with_artist_open() -> App {
     let mut app = signed_in(sidebar::Section::Profiles);
     app.open = Some(OpenCollection {
@@ -227,9 +232,13 @@ fn with_artist_open() -> App {
         cover: None,
         round_cover: false,
         came_from: sidebar::Section::Profiles,
+        request: RequestId::default(),
         target: None,
     });
-    app.update(Action::ArtistLoaded(Box::new(an_artist_page())));
+    app.update(Action::ArtistLoaded {
+        request: open_request(&app),
+        page: Box::new(an_artist_page()),
+    });
     app.last_main_width = 100;
     app.last_main_height = 40;
     app
@@ -256,6 +265,7 @@ fn with_open_playlist(app: &mut App, uuid: &str) {
         cover: None,
         round_cover: false,
         came_from: sidebar::Section::Playlists,
+        request: RequestId::default(),
         target: Some(Collection::Playlist(uuid.into())),
     });
 }

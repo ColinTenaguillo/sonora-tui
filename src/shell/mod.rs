@@ -204,10 +204,9 @@ pub enum Action {
     /// overwrite what the user is looking at — they are two different lists
     /// that happened to share an action.
     CollectionLoaded {
-        /// What was open when the request went out. A reply for something
-        /// the user has since left is dropped rather than shown under the
-        /// wrong heading.
-        for_title: String,
+        /// The request this answers. A reply for a view the user has since
+        /// left is dropped rather than shown under the wrong heading.
+        request: RequestId,
         tracks: Vec<crate::domain::Track>,
     },
     PlaylistsLoaded(Vec<crate::library::Playlist>),
@@ -217,11 +216,15 @@ pub enum Action {
     ExploreLoaded(Box<crate::browse::Home>),
     /// A genre, mood or decade page, opened from Explore.
     PageLoaded {
+        request: RequestId,
         title: String,
         home: Box<crate::browse::Home>,
     },
     /// An artist's page. Boxed: three sections of items.
-    ArtistLoaded(Box<crate::library::ArtistPage>),
+    ArtistLoaded {
+        request: RequestId,
+        page: Box<crate::library::ArtistPage>,
+    },
     ArtistLeft,
     ArtistRight,
     /// Fetch the Explore page. Its own request, since nothing else needs it.
@@ -793,7 +796,7 @@ pub enum Sleep {
 const SLEEP_STEPS: [u64; 4] = [15, 30, 45, 60];
 
 /// What opening a card in a grid loads.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Collection {
     Playlist(String),
     Album(String),
@@ -809,6 +812,16 @@ pub enum Collection {
         path: String,
     },
 }
+
+/// Which request an opened view is waiting on.
+///
+/// A reply names the request it answers, and is dropped unless that is the
+/// one the view on screen is waiting for. Replies used to name the title
+/// they were for, which two records can share: a late reply for one album
+/// filled the other, and a view opened from inside itself could not be
+/// told from the one it was opened from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RequestId(u64);
 
 /// A playlist or album the user opened, shown in place of the section the
 /// sidebar points at.
@@ -832,6 +845,10 @@ pub struct OpenCollection {
     /// What was opened, when the view knows: an album, a playlist, a mix
     /// or an artist. What `F` favourites while the view is up.
     pub target: Option<Collection>,
+    /// The request this view waits on. Stamped as the view opens; the
+    /// loop fetches the target of any open it has not fetched yet, and
+    /// the reply carries it back.
+    pub request: RequestId,
 }
 
 /// A view escape goes back to.
@@ -1084,6 +1101,8 @@ pub struct App {
     /// The playlist or album being viewed, if the user opened one. While this
     /// is set the main pane shows it rather than the sidebar's section.
     pub open: Option<OpenCollection>,
+    /// How many requests have been stamped; the next is one more.
+    pub requests: u64,
     /// The user's rebound keys, applied before anything else reads a
     /// keystroke. Empty unless the config names some.
     pub keymap: keymap::Keymap,
@@ -1293,6 +1312,7 @@ impl App {
             cover: card.cover_url,
             round_cover: card.round,
             came_from: self.sidebar.section(),
+            request: RequestId::default(),
             target,
         })
     }
@@ -1481,6 +1501,11 @@ impl App {
             scrobblers: kept.scrobblers,
             settings: kept.settings,
             sidebar: kept.sidebar,
+            // The loop remembers the last request it sent and fetches an
+            // open stamped after it. A counter back at zero would stamp
+            // every open on the new service below that mark, and none of
+            // them would ever be fetched.
+            requests: kept.requests,
             needs_repaint: true,
             ..App::default()
         };
@@ -1855,15 +1880,11 @@ impl App {
     /// then the collection — and a test that filled the reply in by hand
     /// could pass while the fetch never started. It is one question now, so
     /// a test can ask exactly what the loop asks.
-    pub fn what_enter_opens(&self) -> Option<(Collection, String)> {
+    pub fn what_enter_opens(&self) -> Option<Collection> {
         if !(self.on_grid() || self.on_home()) {
             return None;
         }
-        // The heading comes from the selected card rather than `open`: the
-        // loop asks before `update` runs, so `open` is still whatever was
-        // open before — the previous album, or nothing.
-        let for_title = self.selected_card().map(|c| c.title).unwrap_or_default();
-        Some((self.selected_collection()?, for_title))
+        self.selected_collection()
     }
 
     /// The album of the selected track, and what to head it with.
@@ -2148,7 +2169,10 @@ impl App {
         // with it, and an identity read off the card underneath is gone by
         // then. Callers hand it in for the same reason.
         self.push_level();
-        self.open = identity;
+        self.open = identity.map(|mut open| {
+            open.request = self.next_request();
+            open
+        });
         // Nothing has arrived yet. Without this the pane drew whatever the
         // opened view would eventually be -- an empty track list, columns
         // and filter box and all -- for as long as the request took, which
@@ -2180,14 +2204,33 @@ impl App {
     ///
     /// An artist opens into a moment of the collection view before their
     /// page arrives, so their cover -- when there is one -- is round there.
-    fn open_for(&mut self, round: bool, title: String, subtitle: String, cover: Option<String>) {
+    /// Take the pane for `target`, headed by what the row knows of it.
+    ///
+    /// The target is what the loop fetches once the view is open. `None`
+    /// when the row carries no id: the track is fetched first, and what it
+    /// names arrives as `OpenTarget` and fills the target in.
+    fn open_for(
+        &mut self,
+        target: Option<Collection>,
+        round: bool,
+        title: String,
+        subtitle: String,
+        cover: Option<String>,
+    ) {
         let mut identity = self.heading_only(title);
         if let Some(open) = identity.as_mut() {
             open.subtitle = subtitle;
             open.cover = cover;
             open.round_cover = round;
+            open.target = target;
         }
         self.open_view(identity, Vec::new());
+    }
+
+    /// A request id no reply has carried yet.
+    fn next_request(&mut self) -> RequestId {
+        self.requests += 1;
+        RequestId(self.requests)
     }
 
     /// Whether `title` is the view already on screen, filled.
@@ -2208,6 +2251,7 @@ impl App {
             cover: None,
             round_cover: false,
             came_from: self.sidebar.section(),
+            request: RequestId::default(),
             target: None,
         })
     }
@@ -2234,6 +2278,7 @@ impl App {
             cover,
             round_cover: round,
             came_from: self.sidebar.section(),
+            request: RequestId::default(),
             target: Some(Collection::Radio(seed)),
         })
     }
@@ -2633,13 +2678,13 @@ impl App {
                 }
                 None
             }
-            Action::CollectionLoaded { for_title, tracks } => {
-                // The reply is here, so the pane stops waiting. Outside the
-                // match: a reply for a view already closed still ends the
-                // wait, or the next thing opened inherits it.
-                self.awaiting = false;
+            Action::CollectionLoaded { request, tracks } => {
                 match self.open.as_ref() {
-                    Some(open) if open.title == for_title => {
+                    Some(open) if open.request == request => {
+                        // The reply that was waited for: the pane stops
+                        // waiting. A stray one for a view already left
+                        // must not end the wait of the view on screen.
+                        self.awaiting = false;
                         // The banner's own line, from the tracks that just
                         // arrived: they carry their durations, so it needs
                         // no second request and works for a playlist as
@@ -2654,17 +2699,17 @@ impl App {
                     }
                     // Closed, or already moved on to another album: this
                     // reply is for a view that is no longer on screen.
-                    _ => tracing::info!("dropping tracks for {for_title:?}, no longer open"),
+                    _ => tracing::info!("dropping tracks for {request:?}, no longer open"),
                 }
                 None
             }
-            Action::ArtistLoaded(page) => {
-                // The reply is here, so the pane stops waiting.
-                self.awaiting = false;
+            Action::ArtistLoaded { request, page } => {
                 // Same rule as any other reply: one for a view the user has
-                // since left would arrive under the wrong heading.
+                // since left would arrive under the wrong heading, and must
+                // not end the wait of the one on screen.
                 match self.open.as_ref() {
-                    Some(open) if open.title == page.name => {
+                    Some(open) if open.request == request => {
+                        self.awaiting = false;
                         // The server's word on whether this account
                         // follows them, which is what `F` reads.
                         if page.following {
@@ -2678,8 +2723,17 @@ impl App {
                 }
                 None
             }
-            Action::PageLoaded { title, home } => {
-                // The reply is here, so the pane stops waiting.
+            Action::PageLoaded {
+                request,
+                title,
+                home,
+            } => {
+                // Same rule as any other reply.
+                if self.open.as_ref().is_none_or(|open| open.request != request) {
+                    tracing::info!("dropping the page {title:?}, no longer open");
+                    return None;
+                }
+                // The reply that was waited for: the pane stops waiting.
                 self.awaiting = false;
                 // A genre is a page of rows, so it is drawn by the rows
                 // renderer under its own heading -- not by `open`, which
@@ -2959,12 +3013,12 @@ impl App {
                 } else {
                     track.album.clone()
                 };
-                self.open_for(false, title, track.artist.clone(), track.cover.clone());
+                self.open_for(None, false, title, track.artist.clone(), track.cover.clone());
                 None
             }
             Action::FetchTrackArtist(_) => {
                 let track = self.selected_track()?;
-                self.open_for(true, first_artist(&track.artist), String::new(), None);
+                self.open_for(None, true, first_artist(&track.artist), String::new(), None);
                 None
             }
             // What the fetch found. The pane is already waiting under the
@@ -2980,12 +3034,16 @@ impl App {
             } => {
                 let round = matches!(target, Collection::Artist(_));
                 let awaiting = self.awaiting;
+                let request = self.next_request();
                 match self.open.as_mut() {
                     Some(open) if awaiting => {
                         open.title = title;
                         open.subtitle = subtitle;
                         open.cover = cover;
                         open.round_cover = round;
+                        // Now known, and not yet fetched: the loop does.
+                        open.target = Some(target);
+                        open.request = request;
                     }
                     // The wait was left before the track came back: the
                     // same rule as any other late reply.
@@ -3187,10 +3245,15 @@ impl App {
                 // heading takes the name they now carry, so a rename shows
                 // without reopening.
                 if open_is_it && !deleted {
-                    if let Some(name) = self.playlists.iter().find(|p| p.uuid == uuid).map(|p| p.title.clone()) {
-                        if let Some(open) = self.open.as_mut() {
+                    let name = self.playlists.iter().find(|p| p.uuid == uuid).map(|p| p.title.clone());
+                    // A fresh request: its tracks are fetched again, so
+                    // the edit shows.
+                    let request = self.next_request();
+                    if let Some(open) = self.open.as_mut() {
+                        if let Some(name) = name {
                             open.title = name;
                         }
+                        open.request = request;
                     }
                 }
                 (deleted && open_is_it).then_some(Action::CloseCollection)
@@ -3473,14 +3536,14 @@ impl App {
             // the target before this runs, so it sees the same selection.
             Action::OpenTrackAlbum => {
                 let track = self.selected_track()?;
-                let (_, title) = album_of(&track)?;
-                self.open_for(false, title, track.artist.clone(), track.cover.clone());
+                let (target, title) = album_of(&track)?;
+                self.open_for(Some(target), false, title, track.artist.clone(), track.cover.clone());
                 None
             }
             Action::OpenTrackArtist => {
                 let track = self.selected_track()?;
-                let (_, name) = artist_of(&track)?;
-                self.open_for(true, name, String::new(), None);
+                let (target, name) = artist_of(&track)?;
+                self.open_for(Some(target), true, name, String::new(), None);
                 None
             }
             // Both change what is playing, which only the loop can do: it
@@ -4394,7 +4457,7 @@ impl App {
 ///
 /// Shared by opening a card and by "See all", so an album reached either way
 /// arrives through the same path — and a reply for a view the user has since
-/// left is dropped by `for_title` rather than shown under the wrong heading.
+/// left is dropped by its request id rather than shown under the wrong heading.
 /// The album a track names, as something a key can open.
 fn album_of(track: &crate::domain::Track) -> Option<(Collection, String)> {
     Some((Collection::Album(track.album_id.clone()?), track.album.clone()))
@@ -4459,20 +4522,19 @@ async fn finish_edit(
 
 fn open_collection(
     app: &App,
-    target: Option<Collection>,
-    for_title: String,
+    target: Collection,
+    title: String,
+    request: RequestId,
     action_tx: &tokio::sync::mpsc::UnboundedSender<Action>,
 ) {
-    // Both halves used to fall out of here without a word, and a session
-    // that expired while the app was running made every open do exactly
+    // This used to fall out of here without a word, and a session that
+    // expired while the app was running made every open do exactly
     // nothing: no request, no error, no line in the log.
-    let (Some(session), Some(target)) = (&app.session, target) else {
-        if app.session.is_none() {
-            tracing::warn!("cannot open a collection: there is no session");
-            let _ = action_tx.send(Action::Error(
-                "the session has expired — restart to sign in again".into(),
-            ));
-        }
+    let Some(session) = &app.session else {
+        tracing::warn!("cannot open a collection: there is no session");
+        let _ = action_tx.send(Action::Error(
+            "the session has expired — restart to sign in again".into(),
+        ));
         return;
     };
     let (client, tx) = (std::sync::Arc::clone(session), action_tx.clone());
@@ -4483,9 +4545,10 @@ fn open_collection(
             // and, under them, the rows the web draws -- more by the
             // artist, other versions, related records.
             Collection::Album(id) => {
-                match client.album_page(id, &for_title).await {
+                match client.album_page(id, &title).await {
                     Ok(page) => {
-                        let _ = tx.send(Action::ArtistLoaded(Box::new(page)));
+                        let page = Box::new(page);
+                        let _ = tx.send(Action::ArtistLoaded { request, page });
                         return;
                     }
                     Err(e) => Err(e),
@@ -4509,6 +4572,7 @@ fn open_collection(
                 match client.page_of_rows(path).await {
                     Ok(home) => {
                         let _ = tx.send(Action::PageLoaded {
+                            request,
                             title: title.clone(),
                             home: Box::new(home),
                         });
@@ -4521,7 +4585,8 @@ fn open_collection(
             // one list — so it comes back as its own reply.
             Collection::Artist(id) => match client.artist_page(id).await {
                 Ok(page) => {
-                    let _ = tx.send(Action::ArtistLoaded(Box::new(page)));
+                    let page = Box::new(page);
+                    let _ = tx.send(Action::ArtistLoaded { request, page });
                     return;
                 }
                 Err(e) => Err(e),
@@ -4529,7 +4594,7 @@ fn open_collection(
         };
         match loaded {
             Ok(tracks) => {
-                let _ = tx.send(Action::CollectionLoaded { for_title, tracks });
+                let _ = tx.send(Action::CollectionLoaded { request, tracks });
             }
             Err(crate::catalogue::Error::Unauthorized) => {
                 let _ = tx.send(Action::SessionExpired);
@@ -4739,6 +4804,8 @@ pub async fn run(
     // one left off rather than at full whatever the setting says.
     let _ = cmd_tx.send(crate::playback::Cmd::Volume(app.config.audio.volume));
 
+    // The last request the loop sent; an open stamped after it is fetched.
+    let mut fetched = RequestId::default();
     while !app.should_quit {
         // A modal that covered the artwork leaves its text there: the image
         // cells are marked `Skip`, so the next frame writes nothing over
@@ -4885,19 +4952,6 @@ pub async fn run(
                         load_collection(std::sync::Arc::clone(session), action_tx.clone());
                     }
                 }
-                // Read before `update` clears the page: the same reason an
-                // opened card's title is.
-                Action::PlayTrackRadio => {
-                    if let Some(id) = app.track_radio() {
-                        let title = app.track_radio_title();
-                        open_collection(
-                            &app,
-                            Some(Collection::Radio(id)),
-                            format!("{title} Radio"),
-                            &action_tx,
-                        );
-                    }
-                }
                 // The card is a track whose radio the page did not send.
                 // Fetch the track for it, then open the radio the same way
                 // the key would have.
@@ -4944,17 +4998,11 @@ pub async fn run(
                         });
                     }
                 }
-                Action::OpenTarget { target, title, .. } => {
-                    open_collection(&app, Some(target.clone()), title.clone(), &action_tx);
-                }
                 // A card that opens something: a playlist, an album, an
                 // artist, a mix, a genre page. Anything else falls through
-                // to the arm below, which plays a track.
-                Action::ActivateSelection if app.what_enter_opens().is_some() => {
-                    if let Some((target, for_title)) = app.what_enter_opens() {
-                        open_collection(&app, Some(target), for_title, &action_tx);
-                    }
-                }
+                // to the arm below, which plays a track. The fetch follows
+                // `update`, off what it leaves open.
+                Action::ActivateSelection if app.what_enter_opens().is_some() => {}
                 // Taking a track out of the queue. Only the loop can do
                 // it: dropping what is playing has to stop the audio
                 // thread, and `update` has no channel to it.
@@ -4983,18 +5031,6 @@ pub async fn run(
                     if let Some(track) = app.queue.jump_to(*at).cloned() {
                         app.queue_list.selected = *at;
                         start_track(&mut app, Some(track), &cmd_tx);
-                    }
-                }
-                // The album or the artist behind the highlighted track,
-                // opened the same way enter opens a card.
-                Action::OpenTrackAlbum => {
-                    if let Some((target, title)) = app.selected_track_album() {
-                        open_collection(&app, Some(target), title, &action_tx);
-                    }
-                }
-                Action::OpenTrackArtist => {
-                    if let Some((target, title)) = app.selected_track_artist() {
-                        open_collection(&app, Some(target), title, &action_tx);
                     }
                 }
                 Action::ToggleFollow => {
@@ -5112,23 +5148,6 @@ pub async fn run(
                                 .map(|()| ("taken out of the playlist".to_string(), uuid, false, -1));
                             finish_edit(&client, &tx, done).await;
                         });
-                    }
-                }
-                // The open playlist shows the edit: its tracks again.
-                Action::PlaylistEdited {
-                    uuid,
-                    deleted: false,
-                    ..
-                } => {
-                    if let Some(open) = app.open.as_ref() {
-                        if matches!(&open.target, Some(Collection::Playlist(o)) if o == uuid) {
-                            open_collection(
-                                &app,
-                                Some(Collection::Playlist(uuid.clone())),
-                                open.title.clone(),
-                                &action_tx,
-                            );
-                        }
                     }
                 }
                 Action::ToggleFavourite => {
@@ -5413,6 +5432,17 @@ pub async fn run(
                 _ => {}
             }
             next = app.update(action);
+            // Whatever that opened is fetched now, off the view it left
+            // on screen: one site, reading the state rather than guessing
+            // it from the action before `update` had run. A view opened
+            // from cards already in hand carries no target and asks for
+            // nothing.
+            if let Some(open) = app.open.as_ref().filter(|o| o.request > fetched) {
+                fetched = open.request;
+                if let Some(target) = open.target.clone() {
+                    open_collection(&app, target, open.title.clone(), open.request, &action_tx);
+                }
+            }
         }
         // What the actions above put in the outbox goes out now, off the
         // loop: a service that is slow must not hold the keys.
