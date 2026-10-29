@@ -1082,6 +1082,11 @@ pub struct App {
     pub lyrics: lyricsview::Pane,
     /// Where listens are reported, once the config's services are linked.
     pub scrobblers: Vec<crate::scrobble::Linked>,
+    /// The linking under way, to stop before another starts: Last.fm and
+    /// Libre.fm wait up to five minutes on the browser, holding the
+    /// callback port, so a second Enter on the row found it taken and
+    /// was refused until the first gave up.
+    pub link_task: Option<tokio::task::AbortHandle>,
     /// The listen in progress: the track playing, as a service files it.
     pub listen: Option<music::scrobble::Play>,
     /// What the loop sends on: the track that started, the listens that
@@ -1515,6 +1520,7 @@ impl App {
             equalizer: kept.equalizer,
             presence: kept.presence,
             scrobblers: kept.scrobblers,
+            link_task: kept.link_task,
             settings: kept.settings,
             sidebar: kept.sidebar,
             // The loop remembers the last request it sent and fetches an
