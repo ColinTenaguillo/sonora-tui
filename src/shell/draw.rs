@@ -288,10 +288,10 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                 }
             }
             sidebar::Section::Settings => {
-                let linked: Vec<(String, String)> = app
+                let linked: Vec<(String, String, bool)> = app
                     .scrobblers
                     .iter()
-                    .map(|l| (l.service.id().to_string(), l.label()))
+                    .map(|l| (l.service.id().to_string(), l.label(), l.account.enabled))
                     .collect();
                 settings::render(
                     frame,

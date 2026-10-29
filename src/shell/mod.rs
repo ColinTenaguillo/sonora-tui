@@ -3518,7 +3518,26 @@ impl App {
                         });
                         None
                     }
-                    (_, settings::Kind::Link) => Some(Action::SettingChanged(which)),
+                    // Linked already, Enter switches the account off and
+                    // on, keeping its session: there is no other way to
+                    // stop Last.fm short of clearing the key. Otherwise
+                    // it links.
+                    (_, settings::Kind::Link) => {
+                        let Some(linked) = which
+                            .scrobbler()
+                            .and_then(|id| self.scrobblers.iter_mut().find(|l| l.service.id() == id))
+                        else {
+                            return Some(Action::SettingChanged(which));
+                        };
+                        linked.account.enabled = !linked.account.enabled;
+                        let said = match linked.account.enabled {
+                            true => format!("scrobbling to {} again", linked.label()),
+                            false => format!("{} off", linked.label()),
+                        };
+                        crate::scrobble::store(crate::config::paths::scrobble_file().as_deref(), &self.scrobblers);
+                        self.say(said);
+                        None
+                    }
                     (_, settings::Kind::Toggle) => self.change_setting(true),
                     (_, settings::Kind::Cycle) => None,
                 }

@@ -176,7 +176,7 @@ impl Setting {
             Setting::Theme => "h or l to pick one; the colours change at once.",
             Setting::LastfmKey => "From last.fm/api/account/create. Enter to type it.",
             Setting::LastfmSecret => "Its secret. Enter to type it; shown as dots.",
-            Setting::LastfmLink => "Enter to approve the account in the browser, once the key and secret are set.",
+            Setting::LastfmLink => "Enter to approve the account in the browser, once the key and secret are set. Linked, Enter switches it off and on.",
             Setting::Librefm => "On, the account is approved in the browser at the next link.",
             Setting::ListenbrainzToken => "The user token from listenbrainz.org/settings. Enter to type it.",
             Setting::MalojaUrl => "Your Maloja server, with its scheme. Enter to type it.",
@@ -471,13 +471,17 @@ fn set_or_not(text: &str) -> String {
     }
 }
 
-/// `linked` is each scrobbler linked right now, as (service id, label).
-fn value_of(config: &crate::config::Config, setting: Setting, linked: &[(String, String)]) -> String {
+/// `linked` is each scrobbler linked right now, as (service id, label,
+/// whether it is on).
+fn value_of(config: &crate::config::Config, setting: Setting, linked: &[(String, String, bool)]) -> String {
     let linked_as = |id: &str| {
         linked
             .iter()
-            .find(|(service, _)| service == id)
-            .map(|(_, label)| format!("linked as {label}"))
+            .find(|(service, _, _)| service == id)
+            .map(|(_, label, on)| match on {
+                true => format!("linked as {label}"),
+                false => format!("linked as {label}, off"),
+            })
     };
     match setting {
         Setting::Theme => match config.ui.theme.is_empty() {
@@ -572,7 +576,7 @@ pub fn render(
     config: &crate::config::Config,
     state: &SettingsState,
     focused: bool,
-    linked: &[(String, String)],
+    linked: &[(String, String, bool)],
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -739,8 +743,10 @@ mod tests {
         assert_eq!(config.scrobble.lastfm.as_ref().map(|k| k.secret.as_str()), Some("s3"));
         assert_eq!(value_of(&config, Setting::LastfmSecret, &[]), "set", "a secret is never shown");
         assert_eq!(value_of(&config, Setting::LastfmLink, &[]), "not linked");
-        let linked = vec![("lastfm".to_string(), "Last.fm".to_string())];
+        let linked = vec![("lastfm".to_string(), "Last.fm".to_string(), true)];
         assert_eq!(value_of(&config, Setting::LastfmLink, &linked), "linked as Last.fm");
+        let off = vec![("lastfm".to_string(), "Last.fm".to_string(), false)];
+        assert_eq!(value_of(&config, Setting::LastfmLink, &off), "linked as Last.fm, off");
         set_text(&mut config, Setting::LastfmKey, "");
         set_text(&mut config, Setting::LastfmSecret, "");
         assert!(config.scrobble.lastfm.is_none(), "both empty is no service");
