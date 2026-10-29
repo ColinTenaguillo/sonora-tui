@@ -449,6 +449,43 @@ fn a_track_card_without_ids_still_opens_its_album_and_artist() {
         ),
         "a fetches the track to find its artist"
     );
+
+    // Asked for, and still on its way: a repeat of the key does nothing.
+    // The row has no id to match on, so the wait is matched by the track
+    // it looks up.
+    app.update(Action::FetchTrackArtist("42".into()));
+    let depth = app.back.len();
+    assert!(
+        key(&mut app, KeyCode::Char('a')).is_none(),
+        "the artist is already on its way"
+    );
+    assert_eq!(app.back.len(), depth, "and nothing was stacked");
+}
+
+#[test]
+fn a_on_an_artists_own_track_does_not_open_their_page_again() {
+    // The page is up and its top tracks name the artist whose page it
+    // is; `a` on one of them reopened the page, by id as by name.
+    let mut app = with_artist_open();
+    let page = app.artist.page.as_ref().expect("open");
+    let (id, name) = (page.id.clone(), page.name.clone());
+    app.artist.section = artistview::Section::Tracks.index();
+    app.artist.page.as_mut().expect("open").top_tracks = vec![crate::domain::Track {
+        id: crate::domain::TrackId::from(1),
+        artist: name,
+        artist_id: Some(id),
+        ..crate::domain::Track::sample("Hit", "x", std::time::Duration::from_secs(1))
+    }];
+    assert!(
+        app.selected_track_artist().is_some(),
+        "the row names the artist"
+    );
+    let depth = app.back.len();
+    assert!(
+        key(&mut app, KeyCode::Char('a')).is_none(),
+        "already looking at them"
+    );
+    assert_eq!(app.back.len(), depth);
 }
 
 #[test]
