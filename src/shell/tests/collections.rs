@@ -424,6 +424,26 @@ fn a_reply_for_an_album_that_was_left_is_dropped() {
 }
 
 #[test]
+fn a_view_left_while_loading_is_asked_for_again_on_the_way_back() {
+    // Its reply was dropped as a late one for a view that had been left,
+    // so coming back to it found an empty list and nothing on its way.
+    let mut app = with_albums(3);
+    app.update(Action::ActivateSelection);
+    let first = open_request(&app);
+    assert!(app.awaiting, "nothing has arrived");
+    app.update(Action::GoBack);
+    assert!(app.open.is_none());
+    app.update(Action::GoForward);
+    let open = app.open.as_ref().expect("the album is back");
+    assert!(app.awaiting, "and still waiting");
+    assert!(
+        open.request > first,
+        "stamped afresh, so the loop fetches it again"
+    );
+    assert!(open.target.is_some(), "with something to fetch");
+}
+
+#[test]
 fn a_reply_for_the_previous_album_does_not_fill_the_current_one() {
     let mut app = with_albums(5);
     app.update(Action::ActivateSelection);

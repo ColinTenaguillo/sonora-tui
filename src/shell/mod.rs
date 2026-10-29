@@ -163,6 +163,7 @@ pub enum Action {
     /// above found. `title` is what the view is headed with, and the rest
     /// is its banner until the reply fills it in.
     OpenTarget {
+        request: RequestId,
         target: Collection,
         title: String,
         subtitle: String,
@@ -798,7 +799,10 @@ impl Favourable {
             Collection::Artist(id) => Some(Favourable::Artist(id)),
             Collection::Album(id) => Some(Favourable::Album(id)),
             Collection::Playlist(uuid) => Some(Favourable::Playlist(uuid)),
-            Collection::Radio(_) | Collection::Page { .. } => None,
+            Collection::Radio(_)
+            | Collection::Page { .. }
+            | Collection::TrackAlbum(_)
+            | Collection::TrackArtist(_) => None,
         }
     }
 }
@@ -835,6 +839,11 @@ pub enum Collection {
         title: String,
         path: String,
     },
+    /// The album a track is on, or the artist who made it, when the row
+    /// carries the track's id but not theirs: the track is fetched first,
+    /// and what it names comes back as `OpenTarget` and takes the view.
+    TrackAlbum(crate::domain::TrackId),
+    TrackArtist(crate::domain::TrackId),
 }
 
 /// Which request an opened view is waiting on.
@@ -906,6 +915,9 @@ pub struct Level {
     /// views of their own: back returns to them, and opening something
     /// from one is a step forward from it.
     list: Option<List>,
+    /// Whether the view was still waiting on its reply when it was left.
+    /// That reply is dropped as a late one, so coming back asks again.
+    awaiting: bool,
 }
 
 /// The two lists that open over the pane as views of their own. One at a
@@ -2047,6 +2059,7 @@ impl App {
         Level {
             section: self.sidebar.section(),
             list: self.list.take(),
+            awaiting: std::mem::take(&mut self.awaiting),
             // Taken, not cloned: a search left open would draw over the
             // view being opened, which is what made the Albums and Profils
             // tabs look as though enter did nothing at all.
@@ -2085,12 +2098,21 @@ impl App {
         self.sidebar.select(level.section);
         self.search = level.search;
         self.open = level.open;
-        self.artist.page = level.artist.page;
+        self.artist = level.artist;
         self.tracks = level.tracks;
         self.tracklist = level.tracklist;
         self.open_cards = level.open_cards;
         self.open_grid = level.open_grid;
         self.list = level.list;
+        self.awaiting = level.awaiting;
+        // Left before its reply landed: that reply was dropped as a late
+        // one, so the view is stamped afresh and the loop asks again.
+        if level.awaiting {
+            let request = self.next_request();
+            if let Some(open) = self.open.as_mut().filter(|o| o.target.is_some()) {
+                open.request = request;
+            }
+        }
         // Back onto a list: its rows go over covers the view being left
         // drew, in cells the diff never writes.
         if self.list.is_some() {
@@ -3001,19 +3023,21 @@ impl App {
             // than when the track comes back: the fetch is a round trip
             // before the one that brings the album, and for that first
             // trip nothing changed on screen -- the key looked dead.
-            Action::FetchTrackAlbum(_) => {
+            Action::FetchTrackAlbum(id) => {
                 let track = self.selected_track()?;
                 let title = if track.album.is_empty() {
                     track.title.clone()
                 } else {
                     track.album.clone()
                 };
-                self.open_for(None, false, title, track.artist.clone(), track.cover.clone());
+                let target = Some(Collection::TrackAlbum(id));
+                self.open_for(target, false, title, track.artist.clone(), track.cover.clone());
                 None
             }
-            Action::FetchTrackArtist(_) => {
+            Action::FetchTrackArtist(id) => {
                 let track = self.selected_track()?;
-                self.open_for(None, true, first_artist(&track.artist), String::new(), None);
+                let target = Some(Collection::TrackArtist(id));
+                self.open_for(target, true, first_artist(&track.artist), String::new(), None);
                 None
             }
             // What the fetch found. The pane is already waiting under the
@@ -3022,23 +3046,25 @@ impl App {
             // wait is renamed rather than opened again -- a second open
             // was a second level to step back out of.
             Action::OpenTarget {
+                request,
                 target,
                 title,
                 subtitle,
                 cover,
             } => {
                 let round = matches!(target, Collection::Artist(_));
-                let awaiting = self.awaiting;
-                let request = self.next_request();
+                let next = self.next_request();
                 match self.open.as_mut() {
-                    Some(open) if awaiting => {
+                    // The view that asked, by its request: a wait for
+                    // another track, opened since, must not take this.
+                    Some(open) if open.request == request => {
                         open.title = title;
                         open.subtitle = subtitle;
                         open.cover = cover;
                         open.round_cover = round;
                         // Now known, and not yet fetched: the loop does.
                         open.target = Some(target);
-                        open.request = request;
+                        open.request = next;
                     }
                     // The wait was left before the track came back: the
                     // same rule as any other late reply.

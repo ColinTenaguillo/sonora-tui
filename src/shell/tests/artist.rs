@@ -341,8 +341,14 @@ fn opening_an_album_or_artist_takes_the_pane_so_the_reply_lands() {
         app.open.as_ref().map(|o| o.title.as_str()),
         Some("The Record")
     );
+    assert_eq!(
+        app.open.as_ref().and_then(|o| o.target.clone()),
+        Some(Collection::TrackAlbum(crate::domain::TrackId::from(1))),
+        "the wait names the track to look up, which is what the loop fetches"
+    );
     let depth = app.back.len();
     app.update(Action::OpenTarget {
+        request: open_request(&app),
         target: Collection::Album("5".into()),
         title: "Fetched".into(),
         subtitle: "By".into(),
@@ -360,12 +366,50 @@ fn opening_an_album_or_artist_takes_the_pane_so_the_reply_lands() {
     app.update(Action::GoBack);
     assert!(app.open.is_none());
     app.update(Action::OpenTarget {
+        request: RequestId(0),
         target: Collection::Album("6".into()),
         title: "Late".into(),
         subtitle: String::new(),
         cover: None,
     });
     assert!(app.open.is_none(), "nothing was waiting for it");
+
+    // A wait for another track, opened since, is not it either: the
+    // lookup is a reply like any other, and names the request it answers.
+    app.tracks = vec![track.clone()];
+    app.update(Action::FetchTrackAlbum(crate::domain::TrackId::from(1)));
+    let first = open_request(&app);
+    app.update(Action::GoBack);
+    app.tracks = vec![track.clone()];
+    app.update(Action::FetchTrackArtist(crate::domain::TrackId::from(1)));
+    app.update(Action::OpenTarget {
+        request: first,
+        target: Collection::Album("6".into()),
+        title: "Late".into(),
+        subtitle: String::new(),
+        cover: None,
+    });
+    let open = app.open.as_ref().expect("the artist wait is still up");
+    assert_eq!(open.title, "Someone", "and the late album did not take it");
+    assert_eq!(
+        open.target,
+        Some(Collection::TrackArtist(crate::domain::TrackId::from(1)))
+    );
+}
+
+#[test]
+fn back_onto_an_artists_page_lands_where_the_user_left() {
+    // The history carries the whole page, not just its contents: the
+    // section and the scroll come back with it.
+    let mut app = with_artist_open();
+    app.artist.section = artistview::Section::Albums.index();
+    app.artist.scroll = 2;
+    key(&mut app, KeyCode::Char('Q'));
+    assert_eq!(app.showing(), Showing::Queue);
+    app.update(Action::GoBack);
+    assert_eq!(app.showing(), Showing::Artist);
+    assert_eq!(app.artist.section, artistview::Section::Albums.index());
+    assert_eq!(app.artist.scroll, 2);
 }
 
 #[test]
