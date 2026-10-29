@@ -379,6 +379,7 @@ pub async fn run(
                 .clear_region(ratatui::backend::ClearType::All)?;
             terminal.swap_buffers();
             terminal.current_buffer_mut().reset();
+            unsettle(terminal.current_buffer_mut());
             terminal.swap_buffers();
         }
         terminal.draw(|frame| draw(frame, &mut app))?;
@@ -1121,5 +1122,37 @@ async fn sign_in(
             tracing::warn!("could not sign in to {name}: {e:#}");
             let _ = tx.send(Action::Error(format!("{e:#}")));
         }
+    }
+}
+
+/// Make every cell of a wiped buffer differ from a blank one, so the draw
+/// that diffs against it writes its blank cells too.
+///
+/// A cover is one escape sequence in its top-left cell that paints the
+/// whole rectangle, and the diff goes row by row, so whatever sits over
+/// the cover is written after it -- but only if it is written at all. A
+/// modal's empty cells equal the wiped buffer's and are left out, and the
+/// cover comes back in full underneath the modal that is meant to hide it.
+fn unsettle(buf: &mut ratatui::buffer::Buffer) {
+    use ratatui::buffer::CellDiffOption;
+    for cell in &mut buf.content {
+        cell.set_diff_option(CellDiffOption::Skip);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unsettle;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn a_blank_cell_over_a_wiped_screen_is_still_written() {
+        let area = Rect::new(0, 0, 3, 1);
+        let next = Buffer::empty(area);
+        let mut wiped = Buffer::empty(area);
+        assert!(wiped.diff(&next).is_empty(), "a plain wipe writes nothing");
+        unsettle(&mut wiped);
+        assert_eq!(wiped.diff(&next).len(), 3, "every blank cell is written");
     }
 }
