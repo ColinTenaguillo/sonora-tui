@@ -290,7 +290,10 @@ pub fn render(
             Line::from(""),
             field("name", name),
             Line::from(""),
-            Line::styled("Enter to create and add, Esc to go back.", palette.subtitle()),
+            Line::styled(
+                "Enter to create and add, Esc to go back.",
+                palette.subtitle(),
+            ),
         ],
         Prompt::NewPlaylist { name } => vec![
             Line::from("New playlist"),
@@ -375,7 +378,9 @@ fn render_list(
         ..inner
     };
     let fit = (body.height / ROW).max(1) as usize;
-    let first = selected.saturating_sub(fit - 1).min(rows.saturating_sub(fit));
+    let first = selected
+        .saturating_sub(fit - 1)
+        .min(rows.saturating_sub(fit));
     for (slot, row) in (first..rows.min(first + fit)).enumerate() {
         let y = body.y + slot as u16 * ROW;
         let cover = Rect {
@@ -473,20 +478,32 @@ mod tests {
         on_key(&mut p, KeyCode::Char('j'), &lists);
         on_key(&mut p, KeyCode::Char('j'), &lists);
         on_key(&mut p, KeyCode::Char('j'), &lists);
-        assert!(matches!(p, Prompt::AddTo { selected: 2, .. }), "stops at the last row");
+        assert!(
+            matches!(p, Prompt::AddTo { selected: 2, .. }),
+            "stops at the last row"
+        );
         match on_key(&mut p, KeyCode::Enter, &lists) {
             Outcome::Done(Edit::AddTo { uuid, title, track }) => {
-                assert_eq!((uuid.as_str(), title.as_str(), track.as_str()), ("b", "Also mine", "t1"));
+                assert_eq!(
+                    (uuid.as_str(), title.as_str(), track.as_str()),
+                    ("b", "Also mine", "t1")
+                );
             }
             other => panic!("expected an add, got {other:?}"),
         }
 
         let mut p = adding();
-        assert!(matches!(on_key(&mut p, KeyCode::Enter, &lists), Outcome::Kept));
+        assert!(matches!(
+            on_key(&mut p, KeyCode::Enter, &lists),
+            Outcome::Kept
+        ));
         for c in "Road".chars() {
             on_key(&mut p, KeyCode::Char(c), &lists);
         }
-        assert!(matches!(on_key(&mut p, KeyCode::Esc, &lists), Outcome::Kept), "Esc backs out of the name");
+        assert!(
+            matches!(on_key(&mut p, KeyCode::Esc, &lists), Outcome::Kept),
+            "Esc backs out of the name"
+        );
         assert!(matches!(p, Prompt::AddTo { naming: None, .. }));
         on_key(&mut p, KeyCode::Enter, &lists);
         for c in "Road".chars() {
@@ -513,7 +530,10 @@ mod tests {
         // Down works from the box, and the one match is row 1.
         on_key(&mut p, KeyCode::Down, &lists);
         on_key(&mut p, KeyCode::Down, &lists);
-        assert!(matches!(p, Prompt::AddTo { selected: 1, .. }), "one match, so one row past create");
+        assert!(
+            matches!(p, Prompt::AddTo { selected: 1, .. }),
+            "one match, so one row past create"
+        );
         assert!(matches!(
             on_key(&mut p, KeyCode::Enter, &lists),
             Outcome::Done(Edit::AddTo { uuid, .. }) if uuid == "b"
@@ -522,11 +542,20 @@ mod tests {
         let mut p = adding();
         on_key(&mut p, KeyCode::Char('/'), &lists);
         on_key(&mut p, KeyCode::Char('m'), &lists);
-        assert!(matches!(on_key(&mut p, KeyCode::Esc, &lists), Outcome::Kept), "out of the box");
+        assert!(
+            matches!(on_key(&mut p, KeyCode::Esc, &lists), Outcome::Kept),
+            "out of the box"
+        );
         assert!(matches!(&p, Prompt::AddTo { typing: false, filter, .. } if filter == "m"));
-        assert!(matches!(on_key(&mut p, KeyCode::Esc, &lists), Outcome::Kept), "the search cleared");
+        assert!(
+            matches!(on_key(&mut p, KeyCode::Esc, &lists), Outcome::Kept),
+            "the search cleared"
+        );
         assert!(matches!(&p, Prompt::AddTo { filter, .. } if filter.is_empty()));
-        assert!(matches!(on_key(&mut p, KeyCode::Esc, &lists), Outcome::Closed));
+        assert!(matches!(
+            on_key(&mut p, KeyCode::Esc, &lists),
+            Outcome::Closed
+        ));
     }
 
     #[test]
@@ -547,7 +576,10 @@ mod tests {
             uuid: "a".into(),
             title: "Mine".into(),
         };
-        assert!(matches!(on_key(&mut p, KeyCode::Enter, &[]), Outcome::Closed), "Enter is not a yes");
+        assert!(
+            matches!(on_key(&mut p, KeyCode::Enter, &[]), Outcome::Closed),
+            "Enter is not a yes"
+        );
         assert!(matches!(
             on_key(&mut p, KeyCode::Char('y'), &[]),
             Outcome::Done(Edit::Delete { uuid }) if uuid == "a"
@@ -558,13 +590,21 @@ mod tests {
     fn the_prompts_draw_what_they_ask() {
         let lists = owned();
         let draw = |p: &Prompt| {
-            let buf = crate::shell::geometry::draw(90, 30, |f, a, pal| render(f, a, pal, p, &lists, None));
+            let buf = crate::shell::geometry::draw(90, 30, |f, a, pal| {
+                render(f, a, pal, p, &lists, None)
+            });
             crate::shell::geometry::text(&buf)
         };
         let text = draw(&adding());
         assert!(text.contains("A Song"), "{text}");
-        assert!(text.contains("Create a playlist") && text.contains("Also mine"), "{text}");
-        assert!(text.contains("9 tracks"), "a row says how big the playlist is:\n{text}");
+        assert!(
+            text.contains("Create a playlist") && text.contains("Also mine"),
+            "{text}"
+        );
+        assert!(
+            text.contains("9 tracks"),
+            "a row says how big the playlist is:\n{text}"
+        );
         let text = draw(&Prompt::Delete {
             uuid: "a".into(),
             title: "Mine".into(),

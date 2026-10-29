@@ -224,7 +224,7 @@ pub fn render<F>(
                 super::waiting::animated("Searching…").into_owned(),
                 palette.subtitle(),
             ))
-                .alignment(ratatui::layout::Alignment::Right),
+            .alignment(ratatui::layout::Alignment::Right),
             Rect {
                 y: area.y + under_box,
                 height: 1,
@@ -479,7 +479,13 @@ fn render_top<F>(
 /// Say nothing before a search has run, that one is running while it is,
 /// and so after one that found nothing — "Nothing found" over an empty
 /// box, or over a query still out, would be a lie.
-fn render_empty(frame: &mut Frame, area: Rect, palette: &Palette, results: &Results, pending: bool) {
+fn render_empty(
+    frame: &mut Frame,
+    area: Rect,
+    palette: &Palette,
+    results: &Results,
+    pending: bool,
+) {
     let word = match (pending, results.query.is_empty()) {
         (true, _) => super::waiting::animated("Searching…").into_owned(),
         (false, true) => return,
@@ -648,11 +654,17 @@ mod tests {
             geometry::text(&buf)
         };
         let text = draw(&empty, true);
-        assert!(text.contains("Searching ") && !text.contains("Nothing found"), "{text}");
+        assert!(
+            text.contains("Searching ") && !text.contains("Nothing found"),
+            "{text}"
+        );
         let text = draw(&empty, false);
         assert!(text.contains("Nothing found"), "{text}");
         let text = draw(&full, true);
-        assert!(text.contains("Searching ") && text.contains("Daft"), "old results stay up:\n{text}");
+        assert!(
+            text.contains("Searching ") && text.contains("Daft"),
+            "old results stay up:\n{text}"
+        );
     }
 
     #[test]

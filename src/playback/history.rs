@@ -47,7 +47,8 @@ mod tests {
     use std::time::Duration;
 
     fn scratch(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("sonora-tui-history-{}-{name}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("sonora-tui-history-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("history.json")
     }
@@ -63,8 +64,15 @@ mod tests {
         let back = load_history(&path);
         let titles: Vec<&str> = back.iter().map(|t| t.title.as_str()).collect();
         assert_eq!(titles, ["Now", "Earlier"]);
-        assert_eq!(back[0].duration, Duration::from_secs(200), "the fields survive");
-        assert!(!path.with_extension("json.tmp").exists(), "the staging file is gone");
+        assert_eq!(
+            back[0].duration,
+            Duration::from_secs(200),
+            "the fields survive"
+        );
+        assert!(
+            !path.with_extension("json.tmp").exists(),
+            "the staging file is gone"
+        );
     }
 
     #[test]
@@ -72,6 +80,9 @@ mod tests {
         let path = scratch("broken");
         assert!(load_history(&path).is_empty(), "nothing saved yet");
         std::fs::write(&path, "not json").unwrap();
-        assert!(load_history(&path).is_empty(), "a broken file is skipped, not fatal");
+        assert!(
+            load_history(&path).is_empty(),
+            "a broken file is skipped, not fatal"
+        );
     }
 }

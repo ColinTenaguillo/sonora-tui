@@ -136,7 +136,10 @@ fn any_added(tracks: &[&Track]) -> bool {
 
 /// The day a track was added, out of the timestamp TIDAL sends.
 fn added_day(track: &Track) -> &str {
-    track.added.as_deref().map_or("", |d| d.get(..10).unwrap_or(d))
+    track
+        .added
+        .as_deref()
+        .map_or("", |d| d.get(..10).unwrap_or(d))
 }
 
 /// Whether every track here belongs to the same record.
@@ -1544,7 +1547,9 @@ mod tests {
     #[test]
     fn column_widths_never_exceed_the_pane() {
         for w in [20u16, 40, 60, 80, 100, 140, 200] {
-            for (in_collection, dated) in [(false, false), (true, false), (false, true), (true, true)] {
+            for (in_collection, dated) in
+                [(false, false), (true, false), (false, true), (true, true)]
+            {
                 let c = columns(w, in_collection, dated);
                 let total =
                     c.number + c.thumb + c.title + c.artist + c.album + c.added + c.duration;

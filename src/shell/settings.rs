@@ -46,7 +46,9 @@ pub enum Kind {
     Cycle,
     Toggle,
     /// Enter opens a box for the text; a secret is drawn as dots.
-    Text { secret: bool },
+    Text {
+        secret: bool,
+    },
     /// Enter adds a folder, x takes the last one out.
     Folders,
     /// Enter does the thing: links the account.
@@ -81,7 +83,11 @@ impl Setting {
 
     pub fn kind(&self) -> Kind {
         match self {
-            Setting::Service | Setting::Quality | Setting::Volume | Setting::Equalizer | Setting::Theme => Kind::Cycle,
+            Setting::Service
+            | Setting::Quality
+            | Setting::Volume
+            | Setting::Equalizer
+            | Setting::Theme => Kind::Cycle,
             Setting::Normalisation
             | Setting::Gapless
             | Setting::Autoplay
@@ -89,9 +95,11 @@ impl Setting {
             | Setting::Ai
             | Setting::NerdFont
             | Setting::Librefm => Kind::Toggle,
-            Setting::LastfmKey | Setting::MalojaUrl | Setting::Discord | Setting::SubsonicServer | Setting::SubsonicUser => {
-                Kind::Text { secret: false }
-            }
+            Setting::LastfmKey
+            | Setting::MalojaUrl
+            | Setting::Discord
+            | Setting::SubsonicServer
+            | Setting::SubsonicUser => Kind::Text { secret: false },
             Setting::LastfmSecret | Setting::ListenbrainzToken | Setting::MalojaKey => {
                 Kind::Text { secret: true }
             }
@@ -104,9 +112,22 @@ impl Setting {
     pub fn group(&self) -> &'static str {
         match self {
             Setting::Service => "Streaming",
-            Setting::Quality | Setting::Volume | Setting::Normalisation | Setting::Gapless | Setting::Equalizer | Setting::Autoplay | Setting::Explicit | Setting::Ai => "Playback",
+            Setting::Quality
+            | Setting::Volume
+            | Setting::Normalisation
+            | Setting::Gapless
+            | Setting::Equalizer
+            | Setting::Autoplay
+            | Setting::Explicit
+            | Setting::Ai => "Playback",
             Setting::NerdFont | Setting::Theme => "Appearance",
-            Setting::LastfmKey | Setting::LastfmSecret | Setting::LastfmLink | Setting::Librefm | Setting::ListenbrainzToken | Setting::MalojaUrl | Setting::MalojaKey => "Scrobbling",
+            Setting::LastfmKey
+            | Setting::LastfmSecret
+            | Setting::LastfmLink
+            | Setting::Librefm
+            | Setting::ListenbrainzToken
+            | Setting::MalojaUrl
+            | Setting::MalojaKey => "Scrobbling",
             Setting::Discord => "Discord",
             Setting::SubsonicServer | Setting::SubsonicUser => "Subsonic",
             Setting::LocalFolders => "Local files",
@@ -192,11 +213,31 @@ impl Setting {
 /// What a text row holds now, as the box opens on it.
 pub fn text_of(config: &crate::config::Config, setting: Setting) -> String {
     match setting {
-        Setting::LastfmKey => config.scrobble.lastfm.as_ref().map(|k| k.key.clone()).unwrap_or_default(),
-        Setting::LastfmSecret => config.scrobble.lastfm.as_ref().map(|k| k.secret.clone()).unwrap_or_default(),
+        Setting::LastfmKey => config
+            .scrobble
+            .lastfm
+            .as_ref()
+            .map(|k| k.key.clone())
+            .unwrap_or_default(),
+        Setting::LastfmSecret => config
+            .scrobble
+            .lastfm
+            .as_ref()
+            .map(|k| k.secret.clone())
+            .unwrap_or_default(),
         Setting::ListenbrainzToken => config.scrobble.listenbrainz.clone().unwrap_or_default(),
-        Setting::MalojaUrl => config.scrobble.maloja.as_ref().map(|m| m.url.clone()).unwrap_or_default(),
-        Setting::MalojaKey => config.scrobble.maloja.as_ref().map(|m| m.key.clone()).unwrap_or_default(),
+        Setting::MalojaUrl => config
+            .scrobble
+            .maloja
+            .as_ref()
+            .map(|m| m.url.clone())
+            .unwrap_or_default(),
+        Setting::MalojaKey => config
+            .scrobble
+            .maloja
+            .as_ref()
+            .map(|m| m.key.clone())
+            .unwrap_or_default(),
         Setting::Discord => config.discord.application_id.clone(),
         Setting::SubsonicServer => config.subsonic.server.clone(),
         Setting::SubsonicUser => config.subsonic.username.clone(),
@@ -217,7 +258,8 @@ pub fn set_text(config: &mut crate::config::Config, setting: Setting, text: &str
                 Setting::LastfmKey => keys.key = text.to_owned(),
                 _ => keys.secret = text.to_owned(),
             }
-            config.scrobble.lastfm = (!keys.key.is_empty() || !keys.secret.is_empty()).then_some(keys);
+            config.scrobble.lastfm =
+                (!keys.key.is_empty() || !keys.secret.is_empty()).then_some(keys);
         }
         Setting::ListenbrainzToken => {
             config.scrobble.listenbrainz = (!text.is_empty()).then(|| text.to_owned());
@@ -228,7 +270,8 @@ pub fn set_text(config: &mut crate::config::Config, setting: Setting, text: &str
                 Setting::MalojaUrl => maloja.url = text.to_owned(),
                 _ => maloja.key = text.to_owned(),
             }
-            config.scrobble.maloja = (!maloja.url.is_empty() || !maloja.key.is_empty()).then_some(maloja);
+            config.scrobble.maloja =
+                (!maloja.url.is_empty() || !maloja.key.is_empty()).then_some(maloja);
         }
         Setting::Discord => config.discord.application_id = text.to_owned(),
         Setting::SubsonicServer => config.subsonic.server = text.to_owned(),
@@ -267,9 +310,15 @@ pub fn render_edit(frame: &mut Frame, area: Rect, palette: &Palette, edit: &Edit
             Span::styled("_", palette.subtitle()),
         ]),
         Line::from(""),
-        Line::styled("Enter to save, Esc to leave it as it was.", palette.subtitle()),
+        Line::styled(
+            "Enter to save, Esc to leave it as it was.",
+            palette.subtitle(),
+        ),
     ];
-    let (w, h) = (62.min(area.width), (lines.len() as u16 + 2).min(area.height));
+    let (w, h) = (
+        62.min(area.width),
+        (lines.len() as u16 + 2).min(area.height),
+    );
     let modal = Rect {
         x: area.x + (area.width - w) / 2,
         y: area.y + (area.height - h) / 2,
@@ -399,7 +448,10 @@ pub fn cycle(config: &mut crate::config::Config, setting: Setting, forward: bool
         }
         Setting::Theme => {
             let themes = super::theme::THEMES;
-            let at = themes.iter().position(|t| *t == config.ui.theme).unwrap_or(0);
+            let at = themes
+                .iter()
+                .position(|t| *t == config.ui.theme)
+                .unwrap_or(0);
             let n = themes.len();
             let next = if forward { at + 1 } else { at + n - 1 };
             config.ui.theme = themes[next % n].to_string();
@@ -473,7 +525,11 @@ fn set_or_not(text: &str) -> String {
 
 /// `linked` is each scrobbler linked right now, as (service id, label,
 /// whether it is on).
-fn value_of(config: &crate::config::Config, setting: Setting, linked: &[(String, String, bool)]) -> String {
+fn value_of(
+    config: &crate::config::Config,
+    setting: Setting,
+    linked: &[(String, String, bool)],
+) -> String {
     let linked_as = |id: &str| {
         linked
             .iter()
@@ -500,7 +556,11 @@ fn value_of(config: &crate::config::Config, setting: Setting, linked: &[(String,
             (true, Some(as_who)) => format!("On, {as_who}"),
             (true, None) => "On, not linked".to_string(),
         },
-        Setting::LastfmKey | Setting::MalojaUrl | Setting::Discord | Setting::SubsonicServer | Setting::SubsonicUser => {
+        Setting::LastfmKey
+        | Setting::MalojaUrl
+        | Setting::Discord
+        | Setting::SubsonicServer
+        | Setting::SubsonicUser => {
             let text = text_of(config, setting);
             match text.is_empty() {
                 true => "not set".to_string(),
@@ -738,23 +798,45 @@ mod tests {
     fn a_typed_pair_is_one_service_and_an_emptied_pair_is_none() {
         let mut config = crate::config::Config::default();
         set_text(&mut config, Setting::LastfmKey, " abc ");
-        assert_eq!(config.scrobble.lastfm.as_ref().map(|k| k.key.as_str()), Some("abc"));
+        assert_eq!(
+            config.scrobble.lastfm.as_ref().map(|k| k.key.as_str()),
+            Some("abc")
+        );
         set_text(&mut config, Setting::LastfmSecret, "s3");
-        assert_eq!(config.scrobble.lastfm.as_ref().map(|k| k.secret.as_str()), Some("s3"));
-        assert_eq!(value_of(&config, Setting::LastfmSecret, &[]), "set", "a secret is never shown");
+        assert_eq!(
+            config.scrobble.lastfm.as_ref().map(|k| k.secret.as_str()),
+            Some("s3")
+        );
+        assert_eq!(
+            value_of(&config, Setting::LastfmSecret, &[]),
+            "set",
+            "a secret is never shown"
+        );
         assert_eq!(value_of(&config, Setting::LastfmLink, &[]), "not linked");
         let linked = vec![("lastfm".to_string(), "Last.fm".to_string(), true)];
-        assert_eq!(value_of(&config, Setting::LastfmLink, &linked), "linked as Last.fm");
+        assert_eq!(
+            value_of(&config, Setting::LastfmLink, &linked),
+            "linked as Last.fm"
+        );
         let off = vec![("lastfm".to_string(), "Last.fm".to_string(), false)];
-        assert_eq!(value_of(&config, Setting::LastfmLink, &off), "linked as Last.fm, off");
+        assert_eq!(
+            value_of(&config, Setting::LastfmLink, &off),
+            "linked as Last.fm, off"
+        );
         set_text(&mut config, Setting::LastfmKey, "");
         set_text(&mut config, Setting::LastfmSecret, "");
         assert!(config.scrobble.lastfm.is_none(), "both empty is no service");
 
         set_text(&mut config, Setting::LocalFolders, "~/Music");
         set_text(&mut config, Setting::LocalFolders, "/media/flac");
-        assert_eq!(value_of(&config, Setting::LocalFolders, &[]), "~/Music, /media/flac");
-        assert_eq!(remove_last_folder(&mut config).as_deref(), Some("/media/flac"));
+        assert_eq!(
+            value_of(&config, Setting::LocalFolders, &[]),
+            "~/Music, /media/flac"
+        );
+        assert_eq!(
+            remove_last_folder(&mut config).as_deref(),
+            Some("/media/flac")
+        );
         assert_eq!(config.local.folders, ["~/Music"]);
 
         cycle(&mut config, Setting::Theme, true);
@@ -770,13 +852,25 @@ mod tests {
             match seen.last() {
                 Some(last) if *last == s.group() => {}
                 _ => {
-                    assert!(!seen.contains(&s.group()), "{:?} is split in two", s.group());
+                    assert!(
+                        !seen.contains(&s.group()),
+                        "{:?} is split in two",
+                        s.group()
+                    );
                     seen.push(s.group());
                 }
             }
         }
         let buf = crate::shell::geometry::draw(120, 90, |f, area, palette| {
-            render(f, area, palette, &crate::config::Config::default(), &SettingsState::default(), true, &[]);
+            render(
+                f,
+                area,
+                palette,
+                &crate::config::Config::default(),
+                &SettingsState::default(),
+                true,
+                &[],
+            );
         });
         let text = crate::shell::geometry::text(&buf);
         for group in ["Scrobbling", "Discord", "Local files", "TIDAL"] {
@@ -837,8 +931,14 @@ mod tests {
             render(f, area, palette, &config, &state, true, &[]);
         });
         let text = crate::shell::geometry::text(&buf);
-        assert!(text.contains(last.label()), "the selected row is drawn:\n{text}");
-        assert!(!text.contains(Setting::Quality.label()), "and the top scrolled off:\n{text}");
+        assert!(
+            text.contains(last.label()),
+            "the selected row is drawn:\n{text}"
+        );
+        assert!(
+            !text.contains(Setting::Quality.label()),
+            "and the top scrolled off:\n{text}"
+        );
     }
 
     #[test]
@@ -864,10 +964,19 @@ mod tests {
         assert_eq!(draw(&state), at_bottom, "one up stays in the window");
         while state.selected > at_bottom {
             state.previous();
-            assert_eq!(draw(&state), at_bottom, "still in the window at {}", state.selected);
+            assert_eq!(
+                draw(&state),
+                at_bottom,
+                "still in the window at {}",
+                state.selected
+            );
         }
         state.previous();
-        assert_eq!(draw(&state), state.selected, "past the top, the window follows by one");
+        assert_eq!(
+            draw(&state),
+            state.selected,
+            "past the top, the window follows by one"
+        );
     }
 
     #[test]
@@ -885,13 +994,24 @@ mod tests {
         };
         let mut state = SettingsState::default();
         let top = thumb(&state, 24);
-        assert_eq!(top.first(), Some(&2), "the thumb starts under the title: {top:?}");
+        assert_eq!(
+            top.first(),
+            Some(&2),
+            "the thumb starts under the title: {top:?}"
+        );
         for _ in 0..Setting::ALL.len() {
             state.next();
         }
         let bottom = thumb(&state, 24);
-        assert_eq!(bottom.last(), Some(&23), "and reaches the bottom at the last row: {bottom:?}");
-        assert!(thumb(&state, 100).is_empty(), "a pane that holds it all has no bar");
+        assert_eq!(
+            bottom.last(),
+            Some(&23),
+            "and reaches the bottom at the last row: {bottom:?}"
+        );
+        assert!(
+            thumb(&state, 100).is_empty(),
+            "a pane that holds it all has no bar"
+        );
     }
 
     #[test]
@@ -926,7 +1046,9 @@ mod tests {
             columns.push((label, value_at));
         }
 
-        let first = columns[0].1.unwrap_or_else(|| panic!("the first row has a value:\n{text}"));
+        let first = columns[0]
+            .1
+            .unwrap_or_else(|| panic!("the first row has a value:\n{text}"));
         for (label, at) in &columns {
             let at = at.unwrap_or_else(|| panic!("{label} has no value beside it"));
             assert_eq!(

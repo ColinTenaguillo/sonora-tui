@@ -137,7 +137,9 @@ impl Segue {
 type SharedSegue = Arc<Mutex<Segue>>;
 
 fn lock(segue: &SharedSegue) -> std::sync::MutexGuard<'_, Segue> {
-    segue.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    segue
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[derive(Debug, Clone)]
@@ -235,7 +237,11 @@ fn forward_commands(
     let segue: SharedSegue = Arc::default();
     while let Ok(cmd) = cmds.recv() {
         match cmd {
-            Cmd::Attach { factory, meta, options } => {
+            Cmd::Attach {
+                factory,
+                meta,
+                options,
+            } => {
                 *lock(&segue) = Segue::default();
                 let (fresh, stream) = factory.start(config(&options));
                 fresh.set_gain(volume);
@@ -498,7 +504,10 @@ mod tests {
                 sample_rate,
                 delivered,
             }) => {
-                assert_eq!((bit_depth, sample_rate, delivered), (Some(24), 96_000, Quality::HiResLossless));
+                assert_eq!(
+                    (bit_depth, sample_rate, delivered),
+                    (Some(24), 96_000, Quality::HiResLossless)
+                );
             }
             other => panic!("expected Started, got {other:?}"),
         }

@@ -90,32 +90,32 @@ fn no_view_paints_under_the_now_playing_bar() {
         app.update(Action::ArtistLoaded {
             request,
             page: Box::new(crate::library::ArtistPage {
-            id: (0).to_string(),
-            fans: None,
-            following: false,
-            kind: crate::library::PageKind::Artist,
-            name: "Daft Punk".into(),
-            picture: None,
-            top_tracks_path: None,
-            year: None,
-            top_tracks: some_tracks(&["One", "Two", "Three"]),
-            albums: (0..4)
-                .map(|i| crate::library::Album {
-                    id: (i).to_string(),
-                    title: format!("Album {i}"),
-                    artist: "Daft Punk".into(),
-                    year: None,
-                    cover: None,
-                    track_count: 10,
-                    duration: None,
-                })
-                .collect(),
-            similar: Vec::new(),
-            bio: None,
-            singles: Vec::new(),
-            appears_on: Vec::new(),
-            radio: None,
-        }),
+                id: (0).to_string(),
+                fans: None,
+                following: false,
+                kind: crate::library::PageKind::Artist,
+                name: "Daft Punk".into(),
+                picture: None,
+                top_tracks_path: None,
+                year: None,
+                top_tracks: some_tracks(&["One", "Two", "Three"]),
+                albums: (0..4)
+                    .map(|i| crate::library::Album {
+                        id: (i).to_string(),
+                        title: format!("Album {i}"),
+                        artist: "Daft Punk".into(),
+                        year: None,
+                        cover: None,
+                        track_count: 10,
+                        duration: None,
+                    })
+                    .collect(),
+                similar: Vec::new(),
+                bio: None,
+                singles: Vec::new(),
+                appears_on: Vec::new(),
+                radio: None,
+            }),
         });
         assert_clear_of_the_bar(&mut app, height, "artist page");
     }
@@ -682,7 +682,10 @@ fn the_queue_is_a_list_the_keys_work_in() {
         ),
         "A likes it"
     );
-    assert!(app.list == Some(List::Queue), "and the queue stays open to show it");
+    assert!(
+        app.list == Some(List::Queue),
+        "and the queue stays open to show it"
+    );
 
     // A key the queue does not know does what it always does, and does
     // not close the list.
@@ -772,7 +775,10 @@ fn opening_from_the_queue_draws_the_wait_over_it() {
         "no id in hand: fetched"
     );
     app.update(fetch);
-    assert!(app.list != Some(List::Queue), "the wait took the pane from the queue");
+    assert!(
+        app.list != Some(List::Queue),
+        "the wait took the pane from the queue"
+    );
 
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
@@ -984,11 +990,15 @@ fn a_late_reply_marks_its_own_track_not_the_selected_one() {
     });
 
     assert!(
-        app.favourites.tracks.contains(&crate::domain::TrackId::from(0)),
+        app.favourites
+            .tracks
+            .contains(&crate::domain::TrackId::from(0)),
         "the track the reply was for"
     );
     assert!(
-        !app.favourites.tracks.contains(&crate::domain::TrackId::from(2)),
+        !app.favourites
+            .tracks
+            .contains(&crate::domain::TrackId::from(2)),
         "and not the one now selected"
     );
 }

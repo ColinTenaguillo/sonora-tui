@@ -70,7 +70,10 @@ async fn the_library_endpoints_parse_into_populated_values() {
             "  {:?} by {:?}, {:?}, cover {:?}",
             a.title, a.artist, a.year, a.cover
         );
-        assert!(!a.id.is_empty() && a.id != "0", "the id field name is wrong");
+        assert!(
+            !a.id.is_empty() && a.id != "0",
+            "the id field name is wrong"
+        );
         assert!(!a.title.is_empty(), "the title field name is wrong");
         assert!(!a.artist.is_empty(), "the artists field name is wrong");
     }
@@ -91,7 +94,10 @@ async fn the_library_endpoints_parse_into_populated_values() {
     println!("  no picture: {:?}", &without[..without.len().min(15)]);
     if let Some(a) = artists.first() {
         println!("  {:?} ({}), picture {:?}", a.name, a.id, a.picture);
-        assert!(!a.id.is_empty() && a.id != "0", "the id field name is wrong");
+        assert!(
+            !a.id.is_empty() && a.id != "0",
+            "the id field name is wrong"
+        );
         assert!(!a.name.is_empty(), "the name field name is wrong");
     }
 
@@ -597,7 +603,9 @@ async fn what_an_artist_page_holds() {
 
     // An artist id from the user's own favourites, so the probe is not
     // pinned to one that might vanish.
-    let artists = sonora_tui::library::artists(&client).await.expect("artists");
+    let artists = sonora_tui::library::artists(&client)
+        .await
+        .expect("artists");
     let Some(artist) = artists.first() else {
         eprintln!("no favourite artists to probe with");
         return;
@@ -644,7 +652,9 @@ async fn an_artist_page_comes_back_populated() {
     let Some(token) = session() else { return };
     let client = sonora_tui::tidal::Client::new(token);
 
-    let artists = sonora_tui::library::artists(&client).await.expect("artists");
+    let artists = sonora_tui::library::artists(&client)
+        .await
+        .expect("artists");
     let Some(artist) = artists.first() else {
         eprintln!("no favourite artists to probe with");
         return;
@@ -2890,7 +2900,9 @@ async fn a_genre_link_from_explore_opens_a_page_of_rows() {
         .iter()
         .flat_map(|r| r.cards.iter())
         .find_map(|c| match &c.target {
-            Some(sonora_tui::shell::carousel::Target::Page(p)) => Some((c.title.clone(), p.clone())),
+            Some(sonora_tui::shell::carousel::Target::Page(p)) => {
+                Some((c.title.clone(), p.clone()))
+            }
             _ => None,
         });
     let (title, path) =
@@ -2949,7 +2961,9 @@ async fn no_page_reached_from_explore_keeps_a_row_of_videos() {
         .iter()
         .flat_map(|r| r.cards.iter())
         .filter_map(|c| match &c.target {
-            Some(sonora_tui::shell::carousel::Target::Page(p)) => Some((c.title.clone(), p.clone())),
+            Some(sonora_tui::shell::carousel::Target::Page(p)) => {
+                Some((c.title.clone(), p.clone()))
+            }
             _ => None,
         })
         .collect();
@@ -3062,7 +3076,9 @@ async fn an_artist_page_carries_a_radio_and_more_top_tracks() {
 async fn an_artist_page_is_captured_for_the_fixture() {
     let Some(token) = session() else { return };
     let client = sonora_tui::tidal::Client::new(token);
-    let artists = sonora_tui::library::artists(&client).await.expect("artists");
+    let artists = sonora_tui::library::artists(&client)
+        .await
+        .expect("artists");
     let artist = artists.first().expect("no favourite artists");
     let body =
         sonora_tui::browse::raw_page_body(&client, &format!("pages/artist?artistId={}", artist.id))
@@ -3272,9 +3288,10 @@ async fn an_album_page_carries_its_tracks_and_the_webs_rows() {
     // other versions, related albums and artists.
     let Some(token) = session() else { return };
     let client = sonora_tui::tidal::Client::new(token);
-    let page = sonora_tui::library::album_page(&client, "20556792", "good kid, m.A.A.d city (Deluxe)")
-        .await
-        .expect("the album page");
+    let page =
+        sonora_tui::library::album_page(&client, "20556792", "good kid, m.A.A.d city (Deluxe)")
+            .await
+            .expect("the album page");
     println!(
         "{}: kind={:?} tracks={} bio={} more_by={} versions={} related_albums={} related_artists={} following={} picture={}",
         page.name,

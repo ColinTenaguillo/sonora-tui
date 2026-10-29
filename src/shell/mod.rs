@@ -1371,7 +1371,9 @@ impl App {
             let end = if track.duration.is_zero() {
                 std::time::Duration::MAX
             } else {
-                track.duration.saturating_sub(std::time::Duration::from_secs(1))
+                track
+                    .duration
+                    .saturating_sub(std::time::Duration::from_secs(1))
             };
             (at + SEEK_STEP).min(end)
         } else {
@@ -1387,9 +1389,21 @@ impl App {
             return;
         }
         let rows = [
-            ("Playlists", self.playlists.iter().map(carousel::playlist_card).collect::<Vec<_>>()),
-            ("Favourite albums", self.albums.iter().map(carousel::album_card).collect()),
-            ("Artists", self.artists.iter().map(carousel::artist_card).collect()),
+            (
+                "Playlists",
+                self.playlists
+                    .iter()
+                    .map(carousel::playlist_card)
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                "Favourite albums",
+                self.albums.iter().map(carousel::album_card).collect(),
+            ),
+            (
+                "Artists",
+                self.artists.iter().map(carousel::artist_card).collect(),
+            ),
         ];
         let mut old = std::mem::take(&mut self.home.rows);
         self.home.rows = rows
@@ -1459,7 +1473,10 @@ impl App {
         // you cannot hear yourself setting is one you set by guessing.
         match which {
             settings::Setting::Service => {
-                self.say(format!("Enter to switch to {}", self.config.provider.kind.label()));
+                self.say(format!(
+                    "Enter to switch to {}",
+                    self.config.provider.kind.label()
+                ));
                 None
             }
             settings::Setting::Volume => Some(Action::SetVolume(self.config.audio.volume)),
@@ -1562,7 +1579,8 @@ impl App {
             }
             None => {
                 self.equalizer.set_enabled(false);
-                self.equalizer.set_gains(&music::equalizer::Preset::Flat.gains());
+                self.equalizer
+                    .set_gains(&music::equalizer::Preset::Flat.gains());
             }
         }
     }
@@ -1614,7 +1632,9 @@ impl App {
         if !self.lyrics.wants(&id) {
             return None;
         }
-        self.lyrics.found.insert(id.clone(), lyricsview::Found::Searching);
+        self.lyrics
+            .found
+            .insert(id.clone(), lyricsview::Found::Searching);
         Some(Action::LoadLyrics(id))
     }
 
@@ -1880,9 +1900,9 @@ impl App {
     /// station is, once the service has named it.
     fn open_favourable(&self) -> Option<Favourable> {
         match self.open.as_ref()?.target.clone()? {
-            Collection::Radio(seed) => {
-                Some(Favourable::Playlist(self.favourites.radios.get(&seed)?.clone()))
-            }
+            Collection::Radio(seed) => Some(Favourable::Playlist(
+                self.favourites.radios.get(&seed)?.clone(),
+            )),
             target => Favourable::of(target),
         }
     }
@@ -2475,9 +2495,7 @@ impl App {
             | Showing::History => false,
             Showing::Section(section) => matches!(
                 section,
-                sidebar::Section::Playlists
-                    | sidebar::Section::Albums
-                    | sidebar::Section::Profiles
+                sidebar::Section::Playlists | sidebar::Section::Albums | sidebar::Section::Profiles
             ),
         }
     }
@@ -2782,7 +2800,11 @@ impl App {
                 home,
             } => {
                 // Same rule as any other reply.
-                if self.open.as_ref().is_none_or(|open| open.request != request) {
+                if self
+                    .open
+                    .as_ref()
+                    .is_none_or(|open| open.request != request)
+                {
                     tracing::info!("dropping the page {title:?}, no longer open");
                     return None;
                 }
@@ -3063,13 +3085,25 @@ impl App {
                 let track = self.selected_track()?;
                 let title = album_heading(&track);
                 let target = Some(Collection::TrackAlbum(id));
-                self.open_for(target, false, title, track.artist.clone(), track.cover.clone());
+                self.open_for(
+                    target,
+                    false,
+                    title,
+                    track.artist.clone(),
+                    track.cover.clone(),
+                );
                 None
             }
             Action::FetchTrackArtist(id) => {
                 let track = self.selected_track()?;
                 let target = Some(Collection::TrackArtist(id));
-                self.open_for(target, true, first_artist(&track.artist), String::new(), None);
+                self.open_for(
+                    target,
+                    true,
+                    first_artist(&track.artist),
+                    String::new(),
+                    None,
+                );
                 None
             }
             // What the fetch found. The pane is already waiting under the
@@ -3163,11 +3197,10 @@ impl App {
                         }
                         // The album's page, when it is up, shows the heart
                         // at once rather than on the next open.
-                        if let Some(page) = self
-                            .artist
-                            .page
-                            .as_mut()
-                            .filter(|p| p.kind == crate::library::PageKind::Album && p.id == *id)
+                        if let Some(page) =
+                            self.artist.page.as_mut().filter(|p| {
+                                p.kind == crate::library::PageKind::Album && p.id == *id
+                            })
                         {
                             page.following = following;
                         }
@@ -3299,7 +3332,11 @@ impl App {
                 // heading takes the name they now carry, so a rename shows
                 // without reopening.
                 if open_is_it && !deleted {
-                    let name = self.playlists.iter().find(|p| p.uuid == uuid).map(|p| p.title.clone());
+                    let name = self
+                        .playlists
+                        .iter()
+                        .find(|p| p.uuid == uuid)
+                        .map(|p| p.title.clone());
                     // A fresh request: its tracks are fetched again, so
                     // the edit shows.
                     let request = self.next_request();
@@ -3523,10 +3560,9 @@ impl App {
                     // stop Last.fm short of clearing the key. Otherwise
                     // it links.
                     (_, settings::Kind::Link) => {
-                        let Some(linked) = which
-                            .scrobbler()
-                            .and_then(|id| self.scrobblers.iter_mut().find(|l| l.service.id() == id))
-                        else {
+                        let Some(linked) = which.scrobbler().and_then(|id| {
+                            self.scrobblers.iter_mut().find(|l| l.service.id() == id)
+                        }) else {
                             return Some(Action::SettingChanged(which));
                         };
                         linked.account.enabled = !linked.account.enabled;
@@ -3534,7 +3570,10 @@ impl App {
                             true => format!("scrobbling to {} again", linked.label()),
                             false => format!("{} off", linked.label()),
                         };
-                        crate::scrobble::store(crate::config::paths::scrobble_file().as_deref(), &self.scrobblers);
+                        crate::scrobble::store(
+                            crate::config::paths::scrobble_file().as_deref(),
+                            &self.scrobblers,
+                        );
                         self.say(said);
                         None
                     }
@@ -3610,7 +3649,13 @@ impl App {
             Action::OpenTrackAlbum => {
                 let track = self.selected_track()?;
                 let (target, title) = album_of(&track)?;
-                self.open_for(Some(target), false, title, track.artist.clone(), track.cover.clone());
+                self.open_for(
+                    Some(target),
+                    false,
+                    title,
+                    track.artist.clone(),
+                    track.cover.clone(),
+                );
                 None
             }
             Action::OpenTrackArtist => {
@@ -3648,7 +3693,8 @@ impl App {
                     .selected_track()
                     .or_else(|| self.now_playing.track.clone())
                     .and_then(|t| t.cover);
-                let identity = self.heading_with_cover(seed, format!("{title} Radio"), cover, false);
+                let identity =
+                    self.heading_with_cover(seed, format!("{title} Radio"), cover, false);
                 self.open_view(identity, Vec::new());
                 None
             }
@@ -4394,7 +4440,9 @@ impl App {
             // `R` reaches this from anywhere, which is where the user is
             // when the thought occurs.
             // Already in that radio: nothing to open.
-            KeyCode::Char('R') if self.track_radio().is_some_and(|s| self.radio_is_open(&s)) => None,
+            KeyCode::Char('R') if self.track_radio().is_some_and(|s| self.radio_is_open(&s)) => {
+                None
+            }
             KeyCode::Char('R') if self.track_radio().is_some() => Some(Action::PlayTrackRadio),
             // The nav by number, 1 through 8: there are exactly eight
             // entries, Music first and Settings last, and reaching the far
@@ -4475,7 +4523,9 @@ impl App {
                     Some(p) if p.owned => {
                         let (uuid, title) = (p.uuid.clone(), p.title.clone());
                         self.prompt = Some(match key.code {
-                            KeyCode::Char('m') => playlistedit::Prompt::Rename { uuid, name: title },
+                            KeyCode::Char('m') => {
+                                playlistedit::Prompt::Rename { uuid, name: title }
+                            }
                             _ => playlistedit::Prompt::Delete { uuid, title },
                         });
                     }
@@ -4541,7 +4591,10 @@ impl App {
 /// left is dropped by its request id rather than shown under the wrong heading.
 /// The album a track names, as something a key can open.
 fn album_of(track: &crate::domain::Track) -> Option<(Collection, String)> {
-    Some((Collection::Album(track.album_id.clone()?), track.album.clone()))
+    Some((
+        Collection::Album(track.album_id.clone()?),
+        track.album.clone(),
+    ))
 }
 
 /// What a wait for a track's album is headed by: the album, or the track

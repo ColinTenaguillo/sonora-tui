@@ -44,7 +44,9 @@ pub fn spectrum_row(levels: &[f32], cells: usize) -> String {
     (0..cells)
         .map(|cell| {
             let from = cell * levels.len() / cells;
-            let to = ((cell + 1) * levels.len() / cells).max(from + 1).min(levels.len());
+            let to = ((cell + 1) * levels.len() / cells)
+                .max(from + 1)
+                .min(levels.len());
             let level = levels[from..to].iter().copied().fold(0f32, f32::max);
             let step = (level.clamp(0.0, 1.0) * 8.0).round() as usize;
             BLOCKS[step.min(8)]
@@ -659,9 +661,16 @@ mod tests {
         let levels: Vec<f32> = (0..32).map(|i| if i == 5 { 1.0 } else { 0.0 }).collect();
         let row = super::spectrum_row(&levels, 16);
         assert_eq!(row.chars().count(), 16);
-        assert_eq!(row.chars().nth(2), Some('█'), "bands 4 and 5 fold into cell 2: {row:?}");
+        assert_eq!(
+            row.chars().nth(2),
+            Some('█'),
+            "bands 4 and 5 fold into cell 2: {row:?}"
+        );
         assert!(row.chars().filter(|c| *c == ' ').count() == 15, "{row:?}");
-        assert!(super::spectrum_row(&[], 16).is_empty(), "nothing playing draws nothing");
+        assert!(
+            super::spectrum_row(&[], 16).is_empty(),
+            "nothing playing draws nothing"
+        );
         assert_eq!(super::spectrum_row(&[0.5], 1), "▄");
     }
 

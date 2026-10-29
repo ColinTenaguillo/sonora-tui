@@ -102,7 +102,8 @@ const BINDINGS: &[Binding] = &[
     },
     Binding {
         keys: "x",
-        what: "in the queue or a playlist of yours, take the track out; in Settings, the last folder",
+        what:
+            "in the queue or a playlist of yours, take the track out; in Settings, the last folder",
     },
     Binding {
         keys: "i",
@@ -292,10 +293,16 @@ mod tests {
         let over = overflow(20);
         assert!(over > 0);
         let top = draw(0);
-        assert!(top.contains("Moving around") && !top.contains("quit"), "{top}");
+        assert!(
+            top.contains("Moving around") && !top.contains("quit"),
+            "{top}"
+        );
         assert!(top.contains("j k to scroll"), "{top}");
         let bottom = draw(over);
-        assert!(bottom.contains("quit") && !bottom.contains("Moving around"), "{bottom}");
+        assert!(
+            bottom.contains("quit") && !bottom.contains("Moving around"),
+            "{bottom}"
+        );
         assert_eq!(overflow(60), 0, "a tall terminal has nothing to scroll");
     }
 
@@ -304,7 +311,15 @@ mod tests {
         let buf = crate::shell::geometry::draw(120, 60, |f, a, p| render(f, a, p, 0));
         let text = crate::shell::geometry::text(&buf);
         for b in BINDINGS.iter().filter(|b| !b.what.is_empty()) {
-            let tail: String = b.what.chars().rev().take(12).collect::<Vec<_>>().into_iter().rev().collect();
+            let tail: String = b
+                .what
+                .chars()
+                .rev()
+                .take(12)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
             assert!(text.contains(&tail), "{:?} is cut short:\n{text}", b.what);
         }
     }

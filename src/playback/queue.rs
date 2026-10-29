@@ -596,13 +596,25 @@ mod tests {
         };
         let mut q = Queue::new(vec![track(1), track(2)], 0);
         assert_eq!(q.upcoming().map(|t| t.id.clone()), Some(TrackId::from(2)));
-        assert_eq!(q.current().map(|t| t.id.clone()), Some(TrackId::from(1)), "did not move");
+        assert_eq!(
+            q.current().map(|t| t.id.clone()),
+            Some(TrackId::from(1)),
+            "did not move"
+        );
         q.next();
         assert!(q.upcoming().is_none(), "the end, with repeat off");
         q.repeat = Repeat::All;
-        assert_eq!(q.upcoming().map(|t| t.id.clone()), Some(TrackId::from(1)), "round again");
+        assert_eq!(
+            q.upcoming().map(|t| t.id.clone()),
+            Some(TrackId::from(1)),
+            "round again"
+        );
         q.repeat = Repeat::One;
-        assert_eq!(q.upcoming().map(|t| t.id.clone()), Some(TrackId::from(2)), "the same one");
+        assert_eq!(
+            q.upcoming().map(|t| t.id.clone()),
+            Some(TrackId::from(2)),
+            "the same one"
+        );
     }
     use std::time::Duration;
 
@@ -745,7 +757,10 @@ mod tests {
         assert!(q.shuffled(), "still shuffled");
         assert_eq!(&after[..4], &before[..], "the order was not touched");
         assert_eq!(after[4], TrackId::from(50), "the radio is last");
-        assert_eq!(q.last_track().map(|t| t.id.clone()), Some(TrackId::from(50)));
+        assert_eq!(
+            q.last_track().map(|t| t.id.clone()),
+            Some(TrackId::from(50))
+        );
     }
 
     #[test]
@@ -857,7 +872,8 @@ mod tests {
 
     #[test]
     fn a_restored_history_comes_behind_what_this_run_played() {
-        let song = |t: &str| crate::domain::Track::sample(t, "Band", std::time::Duration::from_secs(1));
+        let song =
+            |t: &str| crate::domain::Track::sample(t, "Band", std::time::Duration::from_secs(1));
         let mut q = Queue::default();
         q.remember(&song("Now"));
         q.restore_history(vec![song("Earlier"), song("Earliest")]);
@@ -865,7 +881,11 @@ mod tests {
         assert_eq!(played, ["Now", "Earlier", "Earliest"]);
 
         q.restore_history((0..HISTORY * 2).map(|i| song(&format!("Old {i}"))));
-        assert_eq!(q.history().count(), HISTORY, "capped as the live history is");
+        assert_eq!(
+            q.history().count(),
+            HISTORY,
+            "capped as the live history is"
+        );
     }
 
     #[test]
@@ -1127,7 +1147,11 @@ mod tests {
             seen.push(t.id.0.clone());
         }
         seen.sort_unstable();
-        assert_eq!(seen, vec!["0", "1", "2", "3", "4", "5"], "every track, once each");
+        assert_eq!(
+            seen,
+            vec!["0", "1", "2", "3", "4", "5"],
+            "every track, once each"
+        );
     }
 
     #[test]

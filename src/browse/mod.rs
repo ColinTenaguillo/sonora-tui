@@ -1463,7 +1463,10 @@ mod tests {
             &home.rows[0].cards[0].target,
             Some(Target::Album(id)) if id == "20556792"
         ));
-        assert_eq!(home.rows[0].cards[0].detail, "2012", "the album's year is its third line");
+        assert_eq!(
+            home.rows[0].cards[0].detail, "2012",
+            "the album's year is its third line"
+        );
         let home = Home {
             rows: home.rows.into_iter().skip(1).collect(),
         };
