@@ -666,7 +666,7 @@ fn every_overlay_asks_for_a_repaint_when_it_closes() {
     let _ = app.take_repaint();
     let back = key(&mut app, KeyCode::Esc).expect("escape steps back");
     app.update(back);
-    assert!(!app.showing_queue, "escape leaves the queue");
+    assert!(app.list != Some(List::Queue), "escape leaves the queue");
     assert!(
         app.take_repaint(),
         "leaving the queue leaves it on the artwork without one"

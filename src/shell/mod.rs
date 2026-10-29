@@ -900,8 +900,18 @@ pub struct Level {
     /// Which list was up, when one was. The queue and the history are
     /// views of their own: back returns to them, and opening something
     /// from one is a step forward from it.
-    showing_queue: bool,
-    showing_history: bool,
+    list: Option<List>,
+}
+
+/// The two lists that open over the pane as views of their own. One at a
+/// time: two flags could both be set, and nothing but care kept them from
+/// being.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum List {
+    /// What is queued.
+    Queue,
+    /// What has been played.
+    History,
 }
 
 /// What the main pane is drawing, asked once and read by everything that
@@ -1070,14 +1080,12 @@ pub struct App {
     pub cdm: drmview::Cdm,
     /// The download waiting on the user's word about Google's terms.
     pub cdm_answer: Option<tokio::sync::oneshot::Sender<bool>>,
-    /// Whether the queue is open over the pane.
-    pub showing_queue: bool,
-    /// Where in it the user is. The selection is set to what is playing
-    /// each time the view opens, since that is where the eye goes.
+    /// Which list is open over the pane, if one is.
+    pub list: Option<List>,
+    /// Where in the queue the user is. The selection is set to what is
+    /// playing each time the view opens, since that is where the eye goes.
     pub queue_list: tracklist::TrackListState,
-    /// Whether the history is open over the pane.
-    pub showing_history: bool,
-    /// Where in it the user is, as for the queue.
+    /// Where in the history the user is, as for the queue.
     pub history_list: tracklist::TrackListState,
     /// Set when something drew over the artwork and the next frame has to
     /// be painted in full rather than diffed. See `take_repaint`.
@@ -2024,7 +2032,7 @@ impl App {
         // A list that was up goes onto the level, so back brings it back.
         // Its rows drew covers into cells the image protocols mark `Skip`,
         // which the next frame writes nothing over: a full paint.
-        if self.showing_queue || self.showing_history {
+        if self.list.is_some() {
             self.needs_repaint = true;
         }
         // Read before anything is taken: the fields below are moved out as
@@ -2033,8 +2041,7 @@ impl App {
         let over_a_section = self.open.is_some() || self.artist.page.is_some();
         Level {
             section: self.sidebar.section(),
-            showing_queue: std::mem::take(&mut self.showing_queue),
-            showing_history: std::mem::take(&mut self.showing_history),
+            list: self.list.take(),
             // Taken, not cloned: a search left open would draw over the
             // view being opened, which is what made the Albums and Profils
             // tabs look as though enter did nothing at all.
@@ -2078,11 +2085,10 @@ impl App {
         self.tracklist = level.tracklist;
         self.open_cards = level.open_cards;
         self.open_grid = level.open_grid;
-        self.showing_queue = level.showing_queue;
-        self.showing_history = level.showing_history;
+        self.list = level.list;
         // Back onto a list: its rows go over covers the view being left
         // drew, in cells the diff never writes.
-        if self.showing_queue || self.showing_history {
+        if self.list.is_some() {
             self.needs_repaint = true;
         }
         if let Some(explore) = level.explore {
@@ -2356,11 +2362,10 @@ impl App {
         // the stack and takes it off the screen, so while it shows it is
         // the top -- only the search box, which is not a level, opens over
         // it, and closes back onto it.
-        if self.showing_queue {
-            return Showing::Queue;
-        }
-        if self.showing_history {
-            return Showing::History;
+        match self.list {
+            Some(List::Queue) => return Showing::Queue,
+            Some(List::History) => return Showing::History,
+            None => {}
         }
         // A page of rows opened from Explore: drawn by the rows renderer
         // under its own heading, and driven by the keys as the page of rows
@@ -4213,7 +4218,7 @@ impl App {
                 // two lists are never up at once.
                 self.push_level();
                 self.open = None;
-                self.showing_queue = true;
+                self.list = Some(List::Queue);
                 self.queue_list.selected = self.queue.position();
                 let visible = self.over_list_visible();
                 self.queue_list.scroll_into_view(visible);
@@ -4235,7 +4240,7 @@ impl App {
                 // As the queue: a level of its own.
                 self.push_level();
                 self.open = None;
-                self.showing_history = true;
+                self.list = Some(List::History);
                 // From the top, which is the newest: what was just played
                 // is what the eye is after.
                 self.history_list = Default::default();

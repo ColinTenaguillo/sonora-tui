@@ -280,7 +280,7 @@ fn ctrl_d_and_ctrl_u_move_half_a_screen_at_a_time() {
     app.tracklist.selected = 0;
     app.queue = crate::playback::Queue::new(app.tracks.clone(), 0);
     key(&mut app, KeyCode::Char('Q'));
-    assert!(app.showing_queue);
+    assert!(app.list == Some(List::Queue));
     press(&mut app, 'd');
     assert!(
         app.queue_list.selected > 1,
