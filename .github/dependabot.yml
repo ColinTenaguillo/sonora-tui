@@ -1,0 +1,25 @@
+# Weekly PRs for crates.io dependencies, grouped into one so the lockfile
+# moves in a single reviewable step. Security advisories open their own PR
+# as soon as they land, outside the weekly cadence.
+#
+# `music` is a git dependency pinned to a commit; Dependabot's Cargo
+# support does not move those. .github/workflows/update-music.yml does.
+#
+# apple-cf is held at 0.7: mediaplayer 0.4.3 declares "<0.10" but builds
+# only against 0.7's CGRect (see Cargo.toml). Ignored here so Dependabot
+# stops proposing a bump CI would reject.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      crates:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: apple-cf
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

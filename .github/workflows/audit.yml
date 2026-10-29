@@ -1,0 +1,28 @@
+name: Audit
+
+# RustSec advisories against Cargo.lock. On push and PR it fails the build;
+# on the weekly run it opens an issue, which is how an advisory against a
+# dependency nobody has touched gets noticed. Dependabot security updates
+# open the PR that fixes it (repository setting, not this file).
+on:
+  push:
+    branches: [main]
+    paths: [Cargo.lock, .github/workflows/audit.yml]
+  pull_request:
+    paths: [Cargo.lock, .github/workflows/audit.yml]
+  schedule:
+    - cron: "0 7 * * 1"
+
+permissions:
+  contents: read
+  issues: write
+  checks: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
