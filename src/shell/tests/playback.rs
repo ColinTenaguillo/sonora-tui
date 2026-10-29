@@ -83,9 +83,13 @@ fn no_view_paints_under_the_now_playing_bar() {
             cover: None,
             round_cover: false,
             came_from: sidebar::Section::Profiles,
+            request: RequestId::default(),
             target: None,
         });
-        app.update(Action::ArtistLoaded(Box::new(crate::library::ArtistPage {
+        let request = open_request(&app);
+        app.update(Action::ArtistLoaded {
+            request,
+            page: Box::new(crate::library::ArtistPage {
             id: (0).to_string(),
             fans: None,
             following: false,
@@ -111,7 +115,8 @@ fn no_view_paints_under_the_now_playing_bar() {
             singles: Vec::new(),
             appears_on: Vec::new(),
             radio: None,
-        })));
+        }),
+        });
         assert_clear_of_the_bar(&mut app, height, "artist page");
     }
 }
@@ -1176,7 +1181,7 @@ fn r_does_nothing_inside_the_radio_it_would_open() {
     let mut other = crate::domain::Track::sample("Other", "B", secs(1));
     other.id = crate::domain::TrackId::from(2);
     app.update(Action::CollectionLoaded {
-        for_title: "Seed Radio".into(),
+        request: open_request(&app),
         tracks: vec![seed, other],
     });
     assert_eq!(app.track_radio(), Some(crate::domain::TrackId::from(1)));

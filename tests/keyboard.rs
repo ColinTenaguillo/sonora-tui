@@ -494,7 +494,7 @@ fn a_genre_page_can_be_left_for_another() {
     // reply in without asking it is how "nothing happens" survived a test.
     let asked = app.what_enter_opens();
     assert!(
-        matches!(asked, Some((sonora_tui::shell::Collection::Page { .. }, _))),
+        matches!(asked, Some(sonora_tui::shell::Collection::Page { .. })),
         "enter on Explore fetches the genre's page, got {asked:?}"
     );
 
@@ -517,6 +517,7 @@ fn a_genre_page_can_be_left_for_another() {
         more: None,
     });
     app.update(sonora_tui::shell::Action::PageLoaded {
+        request: app.open.as_ref().expect("waiting on the page").request,
         title: "Hip-Hop".into(),
         home: Box::new(home),
     });
@@ -544,6 +545,7 @@ fn open_hip_hop(app: &mut App) {
         more: None,
     });
     app.update(sonora_tui::shell::Action::PageLoaded {
+        request: app.open.as_ref().expect("waiting on the page").request,
         title: "Hip-Hop".into(),
         home: Box::new(home),
     });
@@ -692,6 +694,7 @@ fn opening_a_genre_says_it_is_loading_rather_than_drawing_an_empty_list() {
         more: None,
     });
     app.update(sonora_tui::shell::Action::PageLoaded {
+        request: app.open.as_ref().expect("waiting on the page").request,
         title: "Hip-Hop".into(),
         home: Box::new(home),
     });
@@ -731,7 +734,7 @@ fn see_all_on_top_tracks_opens_the_list() {
 
     // The reply fills it, as the loop would.
     app.update(sonora_tui::shell::Action::CollectionLoaded {
-        for_title: "Daft Punk — Top Tracks".into(),
+        request: app.open.as_ref().expect("the row is open").request,
         tracks: (0..30)
             .map(|i| sonora_tui::domain::Track {
                 id: sonora_tui::domain::TrackId::from(200 + i),
@@ -818,6 +821,7 @@ fn an_opened_collection_still_carries_its_tracks_onto_the_history() {
         cover: None,
         round_cover: false,
         came_from: sonora_tui::shell::sidebar::Section::Albums,
+        request: Default::default(),
         target: None,
     });
     app.tracks = vec![sonora_tui::domain::Track {

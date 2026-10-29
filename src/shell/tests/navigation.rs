@@ -15,6 +15,7 @@ fn a_section_emptied_by_an_open_view_is_fetched_again_on_the_way_in() {
         cover: None,
         round_cover: false,
         came_from: sidebar::Section::Music,
+        request: RequestId::default(),
         target: None,
     });
 
@@ -138,7 +139,9 @@ fn enter_on_an_explore_link_opens_its_page() {
         app.selected_collection()
     );
 
-    // The reply takes the pane, and the history gets back to Explore.
+    // Opened, and waited on; the reply takes the pane, and the history
+    // gets back to Explore.
+    app.update(Action::ActivateSelection);
     let mut home = crate::browse::Home::default();
     home.rows.push(crate::browse::HomeRow {
         heading: "Playlists".into(),
@@ -147,6 +150,7 @@ fn enter_on_an_explore_link_opens_its_page() {
         more: None,
     });
     app.update(Action::PageLoaded {
+        request: open_request(&app),
         title: "Hip-Hop".into(),
         home: Box::new(home),
     });

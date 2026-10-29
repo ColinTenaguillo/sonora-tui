@@ -36,10 +36,13 @@ fn opening_an_artist_waits_rather_than_drawing_a_stand_in_photo() {
     );
 
     // And when it does, the artist page takes the pane.
-    app.update(Action::ArtistLoaded(Box::new(crate::library::ArtistPage {
-        name: "13 Block".into(),
-        ..Default::default()
-    })));
+    app.update(Action::ArtistLoaded {
+        request: open_request(&app),
+        page: Box::new(crate::library::ArtistPage {
+            name: "13 Block".into(),
+            ..Default::default()
+        }),
+    });
     assert_eq!(app.showing(), Showing::Artist, "the page took the pane");
 }
 
@@ -244,7 +247,12 @@ fn a_page_for_an_artist_the_user_has_left_is_dropped() {
     let mut app = with_artist_open();
     let mut other = an_artist_page();
     other.name = "Someone Else".into();
-    app.update(Action::ArtistLoaded(Box::new(other)));
+    // A request the view on screen is not waiting on.
+    let left = RequestId(open_request(&app).0 + 1);
+    app.update(Action::ArtistLoaded {
+        request: left,
+        page: Box::new(other),
+    });
     assert_eq!(
         app.artist.as_ref().map(|p| p.name.as_str()),
         Some("Daft Punk"),
@@ -278,13 +286,20 @@ fn opening_an_album_or_artist_takes_the_pane_so_the_reply_lands() {
         Some("The Record"),
         "the album is what is open, so its tracks are accepted"
     );
+    // The loop fetches what the open names; a wait with nothing to fetch
+    // was a pane stuck on loading until escape.
+    assert_eq!(
+        app.open.as_ref().and_then(|o| o.target.clone()),
+        Some(Collection::Album("77".into())),
+        "and the open names the album to fetch"
+    );
     assert_eq!(
         app.showing(),
         Showing::Loading,
         "and the pane says it is on its way"
     );
     app.update(Action::CollectionLoaded {
-        for_title: "The Record".into(),
+        request: open_request(&app),
         tracks: vec![crate::domain::Track::sample(
             "1",
             "x",
@@ -305,6 +320,11 @@ fn opening_an_album_or_artist_takes_the_pane_so_the_reply_lands() {
     let open = app.open.as_ref().expect("an artist is open");
     assert_eq!(open.title, "Someone");
     assert!(open.round_cover, "an artist's picture is round");
+    assert_eq!(
+        open.target,
+        Some(Collection::Artist("88".into())),
+        "and the open names the artist to fetch"
+    );
 
     // When the row carries no id, the pane is taken as the fetch is
     // asked for, under the name the row knows -- and what the fetch
@@ -446,9 +466,13 @@ fn f_follows_the_artist_whose_page_is_open_whatever_is_selected() {
         cover: None,
         round_cover: false,
         came_from: sidebar::Section::Tracks,
+        request: RequestId::default(),
         target: None,
     });
-    app.update(Action::ArtistLoaded(Box::new(page)));
+    app.update(Action::ArtistLoaded {
+        request: open_request(&app),
+        page: Box::new(page),
+    });
     assert_eq!(
         app.selected_favourable(),
         Some((Favourable::Artist("42".into()), "Daft Punk".to_string()))
@@ -518,6 +542,7 @@ fn an_album_opens_as_a_page_in_the_artists_shape() {
         cover: None,
         round_cover: false,
         came_from: sidebar::Section::Albums,
+        request: RequestId::default(),
         target: Some(Collection::Album("20556792".into())),
     });
     let mut page = an_artist_page();
@@ -525,7 +550,10 @@ fn an_album_opens_as_a_page_in_the_artists_shape() {
     page.id = "20556792".into();
     page.name = "good kid".into();
     page.following = true;
-    app.update(Action::ArtistLoaded(Box::new(page)));
+    app.update(Action::ArtistLoaded {
+        request: open_request(&app),
+        page: Box::new(page),
+    });
     assert!(app.artist.is_some(), "the page took the pane");
 
     assert_eq!(

@@ -566,7 +566,13 @@ fn the_service_row_picks_a_service_and_enter_switches_to_it() {
     // config stays, and the new service is asked to sign in.
     let next = app.update(Action::ActivateSelection);
     assert!(matches!(next, Some(Action::SwitchProvider)), "got {next:?}");
+    // Stamped a few opens on the old service.
+    app.requests = 7;
     let next = app.update(Action::SwitchProvider);
+    assert!(
+        app.requests >= 7,
+        "the request counter survives the switch: the loop drops any open stamped below what it last fetched"
+    );
     assert!(matches!(next, Some(Action::BeginLogin)), "got {next:?}");
     assert!(app.session.is_none());
     assert!(app.tracks.is_empty());
