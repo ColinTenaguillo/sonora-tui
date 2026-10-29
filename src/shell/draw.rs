@@ -154,6 +154,7 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                 page,
                 section: artistview::Section::from_index(app.artist.section),
                 tracks: &app.artist.tracks,
+                filtering: app.filtering,
                 rows: &app.artist.rows,
                 scroll: app.artist.scroll,
                 bio_open: app.artist.bio_open,
@@ -367,7 +368,7 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                 app.artwork = art;
             }
             _ => {
-                let visible = tracklist::filter(&app.tracks, &app.tracklist.filter);
+                let visible = tracklist::visible(&app.tracks, &app.tracklist);
                 let mut art = app.artwork.take();
                 tracklist::render(
                     frame,

@@ -65,6 +65,14 @@ const BINDINGS: &[Binding] = &[
         what: "filter the current view",
     },
     Binding {
+        keys: "O",
+        what: "order a track list by the next column, title first; over the filter",
+    },
+    Binding {
+        keys: "I",
+        what: "the other way round",
+    },
+    Binding {
         keys: "s",
         what: "search the catalogue",
     },

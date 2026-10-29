@@ -472,7 +472,9 @@ impl App {
                 if artistview::Section::from_index(self.artist.section)
                     == artistview::Section::Tracks
                 {
-                    page.top_tracks.get(self.artist.tracks.selected).cloned()
+                    tracklist::visible(&page.top_tracks, &self.artist.tracks)
+                        .get(self.artist.tracks.selected)
+                        .map(|t| (*t).clone())
                 } else {
                     self.selected_card_track()
                 }
@@ -483,15 +485,16 @@ impl App {
                 // which of them holds the selection.
                 let in_tracks = state.in_tracks(tab);
                 if in_tracks {
-                    searchview::track_rows(&state.results, tab)
+                    let rows = searchview::track_rows(&state.results, tab);
+                    tracklist::visible(&rows, &state.tracks)
                         .get(state.tracks.selected)
-                        .cloned()
+                        .map(|t| (*t).clone())
                 } else {
                     self.selected_card_track()
                 }
             }
             Showing::Tracks | Showing::Section(sidebar::Section::Tracks) => {
-                tracklist::filter(&self.tracks, &self.tracklist.filter)
+                tracklist::visible(&self.tracks, &self.tracklist)
                     .get(self.tracklist.selected)
                     .map(|t| (*t).clone())
             }
@@ -530,7 +533,10 @@ impl App {
                     == artistview::Section::Tracks
                 {
                     (
-                        page.top_tracks.clone(),
+                        tracklist::visible(&page.top_tracks, &self.artist.tracks)
+                            .into_iter()
+                            .cloned()
+                            .collect(),
                         self.artist.tracks.selected,
                         Some(page.name.clone()),
                     )
@@ -554,7 +560,7 @@ impl App {
                 }
             }
             Showing::Tracks | Showing::Section(sidebar::Section::Tracks) => (
-                tracklist::filter(&self.tracks, &self.tracklist.filter)
+                tracklist::visible(&self.tracks, &self.tracklist)
                     .into_iter()
                     .cloned()
                     .collect(),
@@ -1155,6 +1161,8 @@ impl App {
             &self.feed.filter
         } else if self.on_grid() {
             &self.grid_state(self.sidebar.section()).filter
+        } else if self.on_page_tracks() {
+            &self.artist.tracks.filter
         } else {
             &self.tracklist.filter
         }
@@ -1179,9 +1187,18 @@ impl App {
             let state = self.grid_state_mut(section);
             state.filter = text;
             state.clamp(len);
+        } else if self.on_page_tracks() {
+            // A page's list is `top_tracks`, read through the page's own
+            // state: the Tracks section's filter was written here before,
+            // and the page never read it.
+            self.artist.tracks.filter = text;
+            let len = self.artist.page.as_ref().map_or(0, |p| {
+                tracklist::visible(&p.top_tracks, &self.artist.tracks).len()
+            });
+            self.artist.tracks.clamp(len);
         } else {
-            let len = tracklist::filter(&self.tracks, &text).len();
             self.tracklist.filter = text;
+            let len = self.list_len();
             self.tracklist.clamp(len);
         }
     }
@@ -1973,11 +1990,47 @@ impl App {
         )
     }
 
+    /// The track list the sort keys act on, and the columns it draws: the
+    /// list on screen, or none when what is on screen is cards. The
+    /// search's tracks tab has a list of its own, with its own order; so
+    /// has a page -- an album is one, with its tracks in `top_tracks`
+    /// rather than in `tracks`.
+    fn sort_target(&mut self) -> Option<(Vec<tracklist::Column>, &mut tracklist::TrackListState)> {
+        match self.showing() {
+            Showing::Tracks | Showing::Section(sidebar::Section::Tracks) => {
+                Some((tracklist::sortable(&self.tracks), &mut self.tracklist))
+            }
+            Showing::Artist => {
+                if !self.on_page_tracks() {
+                    return None;
+                }
+                let columns = tracklist::sortable(&self.artist.page.as_ref()?.top_tracks);
+                Some((columns, &mut self.artist.tracks))
+            }
+            Showing::Search(tab) => {
+                let state = self.search.as_mut()?;
+                if !state.in_tracks(tab) {
+                    return None;
+                }
+                let columns = tracklist::sortable(&searchview::track_rows(&state.results, tab));
+                Some((columns, &mut state.tracks))
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether a page's track list has the selection: the filter and the
+    /// sort keys act on that list then, not on the Tracks section's.
+    fn on_page_tracks(&self) -> bool {
+        matches!(self.showing(), Showing::Artist)
+            && artistview::Section::from_index(self.artist.section) == artistview::Section::Tracks
+    }
+
     /// The tracks the list shows once the filter box has had its say. The
     /// keys moved through the unfiltered list, so with a filter typed the
     /// selection could walk onto tracks that were not on screen.
     fn list_len(&self) -> usize {
-        tracklist::filter(&self.tracks, &self.tracklist.filter).len()
+        tracklist::visible(&self.tracks, &self.tracklist).len()
     }
 
     /// The cards a home row's selection may land on: the renderer draws the
@@ -3849,9 +3902,11 @@ impl App {
         let at = present.iter().position(|s| *s == current).unwrap_or(0);
         // The rows the renderer gives the list at this size, so the keys
         // scroll it where it is drawn.
+        let shown = tracklist::visible(&page.top_tracks, &self.artist.tracks).len();
         let tracks_visible = tracklist::visible_rows_of(
             artistview::tracks_height(
                 page,
+                shown,
                 self.artist.scroll,
                 self.artist.bio_open,
                 width,
@@ -3865,6 +3920,7 @@ impl App {
         let cards = artistview::cards(page, current).len();
         let in_view = artistview::sections_in_view(
             page,
+            shown,
             self.artist.scroll,
             self.artist.bio_open,
             width,
@@ -3877,14 +3933,7 @@ impl App {
                 tracks: present
                     .iter()
                     .position(|s| *s == artistview::Section::Tracks)
-                    .map(|i| {
-                        (
-                            i,
-                            &mut self.artist.tracks,
-                            page.top_tracks.len(),
-                            tracks_visible,
-                        )
-                    }),
+                    .map(|i| (i, &mut self.artist.tracks, shown, tracks_visible)),
                 row: (current != artistview::Section::Tracks).then(|| {
                     (
                         &mut self.artist.rows[current.index()],
@@ -4463,6 +4512,20 @@ impl App {
             // Every view but the home page has a filter box.
             KeyCode::Char('/') if self.session.is_some() && !self.on_home() => {
                 self.filtering = true;
+                None
+            }
+            // Order a track list by the next column, or the other way round.
+            // On top of the filter: it orders what the filter kept.
+            KeyCode::Char('O') if self.sort_target().is_some() => {
+                if let Some((columns, list)) = self.sort_target() {
+                    list.next_sort(&columns);
+                }
+                None
+            }
+            KeyCode::Char('I') if self.sort_target().is_some() => {
+                if let Some((_, list)) = self.sort_target() {
+                    list.reverse_sort();
+                }
                 None
             }
             KeyCode::Enter if self.session.is_none() => Some(Action::BeginLogin),

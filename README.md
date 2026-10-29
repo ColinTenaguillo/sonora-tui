@@ -228,6 +228,7 @@ Press `?` in the app for the full list.
 | `Esc`, `[` | Back one view, or out of the filter or the bio; on the sign-in screen, out of the sign-in under way |
 | `]` | Forward again, through views and sections |
 | `/` | Filter the current view: case and accents ignored, words in any order, letters in order will do ("kdl" finds Kendrick Lamar, below exact hits) |
+| `O` / `I` | Order a track list by the next of the columns it draws — title, artist, album, added, time, then back to its own order — or reverse it. The direction stays as you move on. Works on top of `/`, and on an album's page `/` shows in the Tracks heading |
 | `s` | Search the catalogue |
 | `o` | See all of a row |
 | `b` | Open an artist's biography |

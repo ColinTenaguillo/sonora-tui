@@ -123,6 +123,8 @@ pub const ACTIONS: &[(&str, char)] = &[
     ("back", '['),
     ("forward", ']'),
     ("filter", '/'),
+    ("sort", 'O'),
+    ("sort_reverse", 'I'),
     ("search", 's'),
     ("see_all", 'o'),
     ("biography", 'b'),

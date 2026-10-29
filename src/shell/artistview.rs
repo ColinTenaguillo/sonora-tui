@@ -15,7 +15,6 @@ use ratatui::Frame;
 use super::carousel::Card;
 use super::theme::Palette;
 use super::{carousel, tracklist};
-use crate::domain::Track;
 use crate::library::{ArtistPage, PageKind};
 
 /// An artist's page as the pane holds it: the page, once it has arrived,
@@ -396,6 +395,10 @@ pub struct View<'a> {
     pub page: &'a ArtistPage,
     pub section: Section,
     pub tracks: &'a tracklist::TrackListState,
+    /// Whether the filter box has the keyboard. The page draws no box of
+    /// its own: what is typed shows in the Tracks heading, with a caret
+    /// while it is being typed.
+    pub filtering: bool,
     /// One per card section, indexed by `Section::index`.
     ///
     /// A carousel, not a grid: these are one row of covers that scrolls
@@ -436,8 +439,12 @@ pub fn render<F>(
     // run under it. Taken whether or not the bar is drawn, or the layout
     // would shift as soon as the page grew past one screen. `layout` takes
     // the same column off, so the keys count beside it too.
+    // What the filter keeps, in the sort's order: the list drawn, and what
+    // the sections under it are laid out against.
+    let shown = tracklist::visible(&view.page.top_tracks, view.tracks);
     let laid = layout(
         view.page,
+        shown.len(),
         view.scroll,
         view.bio_open,
         area.width,
@@ -466,6 +473,13 @@ pub fn render<F>(
         // cut by the pane's edge, the way a row of the home page is.
         let height = wants.min(bottom - y);
         if section == Section::Tracks {
+            let heading = Section::Tracks.heading(view.page.kind);
+            let heading = if view.filtering || !view.tracks.filter.is_empty() {
+                let caret = if view.filtering { "█" } else { "" };
+                format!("{heading}  /{}{caret}", view.tracks.filter)
+            } else {
+                heading.to_string()
+            };
             carousel::render_heading(
                 frame,
                 Rect {
@@ -474,7 +488,7 @@ pub fn render<F>(
                     ..area
                 },
                 palette,
-                Section::Tracks.heading(view.page.kind),
+                &heading,
                 view.section == Section::Tracks,
                 // The web offers it here too: these are an artist's top few,
                 // and there are always more behind them.
@@ -484,7 +498,6 @@ pub fn render<F>(
             if height <= 1 {
                 continue;
             }
-            let refs: Vec<&Track> = view.page.top_tracks.iter().collect();
             tracklist::render(
                 frame,
                 Rect {
@@ -496,7 +509,7 @@ pub fn render<F>(
                 tracklist::TrackList {
                     filtering: false,
                     favourites: view.favourites,
-                    tracks: &refs,
+                    tracks: &shown,
                     state: view.tracks,
                     focused: view.section == Section::Tracks,
                     playing: view.playing.clone(),
@@ -534,6 +547,7 @@ pub fn render<F>(
         view.scroll,
         sections_in_view(
             view.page,
+            shown.len(),
             view.scroll,
             view.bio_open,
             full.width,
@@ -544,11 +558,13 @@ pub fn render<F>(
 
 /// Rows a section wants: a card section's heading, the blank under it and
 /// its cards; the track list's heading, column headers and every row.
-fn section_rows(page: &ArtistPage, section: Section) -> u16 {
+/// `shown` is the rows the list draws, which is fewer than the page's
+/// tracks while a filter is typed.
+fn section_rows(section: Section, shown: usize) -> u16 {
     match section {
         Section::Tracks => {
             1 + tracklist::header_rows_of(None, tracklist::Chrome::Bare)
-                + page.top_tracks.len() as u16 * tracklist::ROW_HEIGHT
+                + shown as u16 * tracklist::ROW_HEIGHT
         }
         s => HEADER_ROWS + carousel::card_height(card_lines(s)),
     }
@@ -569,6 +585,7 @@ fn section_rows(page: &ArtistPage, section: Section) -> u16 {
 /// the web never shows: blank pane between a list and what follows it.
 pub fn layout(
     page: &ArtistPage,
+    shown: usize,
     scroll: usize,
     bio_open: bool,
     width: u16,
@@ -586,7 +603,7 @@ pub fn layout(
         if y >= height {
             break;
         }
-        let wants = section_rows(page, section);
+        let wants = section_rows(section, shown);
         out.push((section, y, wants));
         y += wants;
     }
@@ -597,12 +614,13 @@ pub fn layout(
 /// when it is scrolled off the page. What the keys scroll the list against.
 pub fn tracks_height(
     page: &ArtistPage,
+    shown: usize,
     scroll: usize,
     bio_open: bool,
     width: u16,
     height: u16,
 ) -> u16 {
-    layout(page, scroll, bio_open, width, height)
+    layout(page, shown, scroll, bio_open, width, height)
         .into_iter()
         .find(|(s, _, _)| *s == Section::Tracks)
         .map_or(0, |(_, y, wants)| {
@@ -614,12 +632,13 @@ pub fn tracks_height(
 /// that is cut off, or below the fold, scrolls the page up to it.
 pub fn sections_in_view(
     page: &ArtistPage,
+    shown: usize,
     scroll: usize,
     bio_open: bool,
     width: u16,
     height: u16,
 ) -> usize {
-    layout(page, scroll, bio_open, width, height)
+    layout(page, shown, scroll, bio_open, width, height)
         .into_iter()
         .filter(|(_, y, wants)| y + wants <= height)
         .count()
@@ -628,6 +647,7 @@ pub fn sections_in_view(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::Track;
     use crate::shell::geometry;
     use std::time::Duration;
 
@@ -705,6 +725,7 @@ mod tests {
                     page: &p,
                     section: Section::Tracks,
                     tracks: &tracks,
+                    filtering: false,
                     rows: &g,
                     scroll: 0,
                     bio_open: false,
@@ -756,6 +777,7 @@ mod tests {
                     page: &p,
                     section: Section::Tracks,
                     tracks: &tracks,
+                    filtering: false,
                     rows: &g,
                     scroll: 0,
                     bio_open: false,
@@ -807,6 +829,7 @@ mod tests {
                     page: &p,
                     section: Section::Tracks,
                     tracks: &tracks,
+                    filtering: false,
                     rows: &g,
                     scroll: 0,
                     bio_open: false,
@@ -895,6 +918,7 @@ mod tests {
                     page: &p,
                     section: Section::Albums,
                     tracks: &tracks,
+                    filtering: false,
                     rows: &rows,
                     favourites: &favourites,
                     playing: None,
@@ -931,6 +955,7 @@ mod tests {
                     page: &p,
                     section: Section::Tracks,
                     tracks: &tracks,
+                    filtering: false,
                     rows: &g,
                     favourites: &favourites,
                     playing: None,
@@ -971,6 +996,7 @@ mod tests {
                         page: &p,
                         section: Section::Tracks,
                         tracks: &tracks,
+                        filtering: false,
                         rows: &g,
                         favourites: &favourites,
                         playing: None,
@@ -1021,6 +1047,7 @@ mod tests {
                     page: &p,
                     section: Section::Tracks,
                     tracks: &tracks,
+                    filtering: false,
                     rows: &g,
                     favourites: &favourites,
                     playing: None,
@@ -1072,6 +1099,7 @@ mod tests {
                         page: p,
                         section: Section::Tracks,
                         tracks,
+                        filtering: false,
                         rows: g,
                         favourites,
                         playing: None,
@@ -1114,6 +1142,7 @@ mod tests {
                     page: &p,
                     section: Section::Tracks,
                     tracks: &tracks,
+                    filtering: false,
                     rows: &g,
                     favourites: &favourites,
                     playing: None,
@@ -1151,6 +1180,7 @@ mod tests {
                     page: &p,
                     section: Section::Tracks,
                     tracks: &tracks,
+                    filtering: false,
                     rows: &g,
                     scroll: 0,
                     bio_open: false,
@@ -1223,6 +1253,7 @@ mod tests {
                     page: p,
                     section: Section::Tracks,
                     tracks: &tracks,
+                    filtering: false,
                     rows: &g,
                     scroll: 0,
                     bio_open: false,
@@ -1297,6 +1328,7 @@ mod tests {
                     page: &p,
                     section: Section::Albums,
                     tracks: &tracks,
+                    filtering: false,
                     rows: &g,
                     scroll: 2,
                     bio_open: false,
@@ -1372,6 +1404,7 @@ mod tests {
                         page: p,
                         section: Section::Tracks,
                         tracks,
+                        filtering: false,
                         rows: g,
                         favourites,
                         playing: None,
@@ -1480,5 +1513,63 @@ mod tests {
         for h in [1u16, 3, 8, 16, 30, 60] {
             let _ = draw(h);
         }
+    }
+
+    #[test]
+    fn the_tracks_heading_carries_the_filter_and_the_list_shrinks_to_it() {
+        // The page has no filter box of its own: what is typed shows in
+        // the Tracks heading, and the sections under the list move up with
+        // it rather than leaving the filtered-out rows blank.
+        let p = full_page();
+        let g: [carousel::CarouselState; Section::ALL.len()] = Default::default();
+        let favourites = std::collections::HashSet::new();
+        let draw = |tracks: &tracklist::TrackListState, filtering: bool| {
+            geometry::draw(120, 80, |f, area, palette| {
+                render(
+                    f,
+                    area,
+                    palette,
+                    View {
+                        page: &p,
+                        section: Section::Tracks,
+                        tracks,
+                        rows: &g,
+                        scroll: 0,
+                        bio_open: false,
+                        bio_scroll: 0,
+                        liked: &carousel::nobody,
+                        favourites: &favourites,
+                        playing: None,
+                        tier: super::super::nowplaying::Tier::Low,
+                        filtering,
+                    },
+                    |_, _, _, _| false,
+                )
+            })
+        };
+        let plain = draw(&tracklist::TrackListState::default(), false);
+        let albums_at = geometry::find(&plain, "Albums")
+            .expect("the albums heading")
+            .row;
+
+        let state = tracklist::TrackListState {
+            filter: "track 1".into(),
+            ..Default::default()
+        };
+        let filtered = draw(&state, true);
+        let text = geometry::text(&filtered);
+        assert!(
+            text.contains("/track 1█"),
+            "the heading shows what is typed:\n{text}"
+        );
+        assert!(text.contains("Track 1"), "{text}");
+        assert!(!text.contains("Track 2"), "{text}");
+        let moved_to = geometry::find(&filtered, "Albums")
+            .expect("the albums heading")
+            .row;
+        assert!(
+            moved_to < albums_at,
+            "the next section moves up under the shorter list ({moved_to} vs {albums_at})"
+        );
     }
 }
