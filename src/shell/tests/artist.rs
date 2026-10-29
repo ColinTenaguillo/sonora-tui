@@ -398,6 +398,38 @@ fn opening_an_album_or_artist_takes_the_pane_so_the_reply_lands() {
 }
 
 #[test]
+fn an_album_in_the_favourites_opens_with_its_heart() {
+    // The album's page is built from its detail, which never says whether
+    // it is a favourite, so the header drew no heart on an album opened
+    // from the Albums section itself. The ids fetched at sign-in know.
+    let mut app = signed_in(sidebar::Section::Albums);
+    app.favourites.albums.insert("20556792".into());
+    app.open = Some(OpenCollection {
+        title: "good kid".into(),
+        subtitle: String::new(),
+        detail: String::new(),
+        cover: None,
+        round_cover: false,
+        came_from: sidebar::Section::Albums,
+        request: RequestId::default(),
+        target: Some(Collection::Album("20556792".into())),
+    });
+    let mut page = an_artist_page();
+    page.kind = crate::library::PageKind::Album;
+    page.id = "20556792".into();
+    page.name = "good kid".into();
+    page.following = false;
+    app.update(Action::ArtistLoaded {
+        request: open_request(&app),
+        page: Box::new(page),
+    });
+    assert!(
+        app.artist.page.as_ref().is_some_and(|p| p.following),
+        "the page says it is a favourite, which is what the header draws"
+    );
+}
+
+#[test]
 fn back_onto_an_artists_page_lands_where_the_user_left() {
     // The history carries the whole page, not just its contents: the
     // section and the scroll come back with it.
