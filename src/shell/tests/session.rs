@@ -335,7 +335,7 @@ fn a_subsonic_config_without_a_server_asks_for_it_then_the_user_then_the_passwor
     app.update(Action::BeginLogin);
     assert!(matches!(
         &app.login,
-        login::LoginState::Text { field: login::Field::Server, typed } if typed == "https://"
+        login::LoginState::Text { field: login::Field::Server, typed } if typed.is_empty()
     ));
     let next = app.update(Action::Typed(
         login::Field::Server,
