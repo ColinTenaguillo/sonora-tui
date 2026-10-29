@@ -18,6 +18,30 @@ use super::{carousel, tracklist};
 use crate::domain::Track;
 use crate::library::{ArtistPage, PageKind};
 
+/// An artist's page as the pane holds it: the page, once it has arrived,
+/// and where the user is on it. Goes onto the history whole, so coming back
+/// lands where the user left.
+#[derive(Debug, Default)]
+pub struct Open {
+    /// The page, when its reply has landed.
+    pub page: Option<ArtistPage>,
+    /// Which section has the selection, and where in it.
+    pub section: usize,
+    /// The first section that is drawn. Five sections and a portrait are
+    /// taller than a terminal, so it scrolls.
+    pub scroll: usize,
+    /// Whether the blurb is open. TIDAL's run to a page of prose, so the
+    /// header shows the first paragraph and `b` opens the rest.
+    pub bio_open: bool,
+    /// Lines of the open bio scrolled off the top.
+    pub bio_scroll: u16,
+    pub tracks: tracklist::TrackListState,
+    /// One carousel state per card section, indexed by `Section::index` —
+    /// a field each meant a new one to remember every time a section was
+    /// added, and two of the five went without.
+    pub rows: [carousel::CarouselState; Section::ALL.len()],
+}
+
 /// The heading and the blank line under it.
 pub const HEADER_ROWS: u16 = carousel::HEADING_ROWS;
 

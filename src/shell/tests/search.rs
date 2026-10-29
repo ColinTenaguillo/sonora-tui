@@ -76,7 +76,7 @@ fn the_search_box_opens_over_a_page_and_closes_back_onto_it() {
     // `s` on an album left the album drawn over the box, with the keys
     // still moving through its tracks.
     let mut app = signed_in(sidebar::Section::Albums);
-    app.artist = Some(crate::library::ArtistPage {
+    app.artist.page = Some(crate::library::ArtistPage {
         name: "Section.80".into(),
         ..Default::default()
     });
