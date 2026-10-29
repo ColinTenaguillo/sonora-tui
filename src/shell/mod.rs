@@ -3737,7 +3737,7 @@ impl App {
         if subsonic.server.trim().is_empty() {
             return login::LoginState::Text {
                 field: login::Field::Server,
-                typed: "https://".into(),
+                typed: String::new(),
             };
         }
         if subsonic.username.trim().is_empty() {
