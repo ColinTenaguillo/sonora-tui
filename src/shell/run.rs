@@ -308,7 +308,7 @@ pub async fn run(
         let (scrobble, tx) = (config.scrobble.clone(), action_tx.clone());
         let task = tokio::spawn(async move {
             let file = crate::config::paths::scrobble_file();
-            let (linked, refused) = crate::scrobble::link(&scrobble, file.as_deref()).await;
+            let (linked, refused) = crate::scrobble::link(&scrobble, file.as_deref(), None).await;
             let _ = tx.send(Action::ScrobblersLinked(linked, refused));
         });
         app.link_task = Some(task.abort_handle());
@@ -578,6 +578,7 @@ pub async fn run(
                 // new application, or stops on none.
                 Action::SettingChanged(setting) if setting.is_scrobbling() => {
                     let (scrobble, tx) = (app.config.scrobble.clone(), action_tx.clone());
+                    let fresh = setting.scrobbler();
                     if let Some(task) = app.link_task.take() {
                         task.abort();
                     }
@@ -586,7 +587,7 @@ pub async fn run(
                         let (linked, refused) = match crate::scrobble::configured(&scrobble) {
                             true => {
                                 let file = crate::config::paths::scrobble_file();
-                                crate::scrobble::link(&scrobble, file.as_deref()).await
+                                crate::scrobble::link(&scrobble, file.as_deref(), fresh).await
                             }
                             false => (Vec::new(), Vec::new()),
                         };

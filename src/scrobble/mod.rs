@@ -86,10 +86,20 @@ pub fn configured(config: &ScrobbleConfig) -> bool {
 /// the browser and waits for the approval, one after the other, since both
 /// listen on the same port for it. The accounts are written back.
 ///
+/// `fresh` is the one service a Settings row just changed: only it goes
+/// through `connect`, and the others come from the file or wait for the
+/// next start. Without it, Enter on the Last.fm row sent an unapproved
+/// Libre.fm back to the browser first. At start it is `None`: every
+/// service is connected.
+///
 /// With the accounts come the refusals, in words for the status line: a
 /// token typed wrong in Settings showed "set" and nothing else, while the
 /// log alone knew it had been turned away.
-pub async fn link(config: &ScrobbleConfig, file: Option<&Path>) -> (Vec<Linked>, Vec<String>) {
+pub async fn link(
+    config: &ScrobbleConfig,
+    file: Option<&Path>,
+    fresh: Option<&str>,
+) -> (Vec<Linked>, Vec<String>) {
     let stored = file.map(load).unwrap_or_default();
     let mut linked = Vec::new();
     let mut refused = Vec::new();
@@ -102,6 +112,9 @@ pub async fn link(config: &ScrobbleConfig, file: Option<&Path>) -> (Vec<Linked>,
                 service,
                 account: account.clone(),
             });
+            continue;
+        }
+        if fresh.is_some_and(|id| id != service.id()) {
             continue;
         }
         match service.connect(secret).await {

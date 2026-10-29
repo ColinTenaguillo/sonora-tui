@@ -119,6 +119,18 @@ impl Setting {
         self.group() == "Scrobbling"
     }
 
+    /// The scrobbling service a row is about, by its id in the `music`
+    /// crate: the one a change to the row may link afresh.
+    pub fn scrobbler(&self) -> Option<&'static str> {
+        match self {
+            Setting::LastfmKey | Setting::LastfmSecret | Setting::LastfmLink => Some("lastfm"),
+            Setting::Librefm => Some("librefm"),
+            Setting::ListenbrainzToken => Some("listenbrainz"),
+            Setting::MalojaUrl | Setting::MalojaKey => Some("maloja"),
+            _ => None,
+        }
+    }
+
     fn label(&self) -> &'static str {
         match self {
             Setting::Service => "Service",
