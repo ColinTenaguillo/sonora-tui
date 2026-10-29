@@ -8,6 +8,12 @@ fn sources_in(dir: &str) -> Vec<(String, String)> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
+                // A `tests` directory under a module is that module's test
+                // code, split out of its file: not sources to hold to the
+                // rules the inline `mod tests` is already exempt from.
+                if path.file_name().is_some_and(|n| n == "tests") {
+                    continue;
+                }
                 walk(&path, out);
             } else if path.extension().is_some_and(|e| e == "rs") {
                 if let Ok(text) = std::fs::read_to_string(&path) {
