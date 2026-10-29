@@ -82,7 +82,7 @@ fn playback_asks_for_the_configured_quality() {
     // did nothing at all. The request itself now lives in the engine's
     // fetch, which has the matching check; this is the half that hands
     // it the setting.
-    let source = include_str!("../mod.rs");
+    let source = include_str!("../run.rs");
     assert!(
         source.contains("app.config.audio.quality()"),
         "no request site reads the configured quality"
@@ -215,7 +215,7 @@ fn a_text_setting_is_typed_in_its_box_and_written_on_enter() {
 #[test]
 fn a_service_without_a_feed_says_so_instead_of_a_blank_page() {
     assert!(sample_session().has_feed(), "TIDAL has one");
-    let text: String = feed_notice("Deezer")
+    let text: String = crate::shell::draw::feed_notice("Deezer")
         .iter()
         .map(|l| l.to_string())
         .collect::<Vec<_>>()
