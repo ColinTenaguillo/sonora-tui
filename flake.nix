@@ -18,17 +18,17 @@
           cargoLock = {
             lockFile = ./Cargo.lock;
             outputHashes = {
-              "librespot-audio-0.8.0" = pkgs.lib.fakeHash;
-              "librespot-core-0.8.0" = pkgs.lib.fakeHash;
-              "librespot-metadata-0.8.0" = pkgs.lib.fakeHash;
-              "librespot-oauth-0.8.0" = pkgs.lib.fakeHash;
-              "librespot-playback-0.8.0" = pkgs.lib.fakeHash;
-              "librespot-protocol-0.8.0" = pkgs.lib.fakeHash;
-              "music-0.43.0" = pkgs.lib.fakeHash;
-              "storage-0.43.0" = pkgs.lib.fakeHash;
-              "widevine-0.43.0" = pkgs.lib.fakeHash;
-              "rodio-0.22.2" = pkgs.lib.fakeHash;
-              "ytmusic-0.1.0" = pkgs.lib.fakeHash;
+              "librespot-audio-0.8.0" = "sha256-M8zbz6WSXJnz6ESo1e9TZ6m3p9mUdQdCWYR1MlAl3gM=";
+              "librespot-core-0.8.0" = "sha256-M8zbz6WSXJnz6ESo1e9TZ6m3p9mUdQdCWYR1MlAl3gM=";
+              "librespot-metadata-0.8.0" = "sha256-M8zbz6WSXJnz6ESo1e9TZ6m3p9mUdQdCWYR1MlAl3gM=";
+              "librespot-oauth-0.8.0" = "sha256-M8zbz6WSXJnz6ESo1e9TZ6m3p9mUdQdCWYR1MlAl3gM=";
+              "librespot-playback-0.8.0" = "sha256-M8zbz6WSXJnz6ESo1e9TZ6m3p9mUdQdCWYR1MlAl3gM=";
+              "librespot-protocol-0.8.0" = "sha256-M8zbz6WSXJnz6ESo1e9TZ6m3p9mUdQdCWYR1MlAl3gM=";
+              "music-0.43.0" = "sha256-xbVK46IYhnkggey/+jvokZL2TIf1TNOJQJDmQo44Vrs=";
+              "storage-0.43.0" = "sha256-xbVK46IYhnkggey/+jvokZL2TIf1TNOJQJDmQo44Vrs=";
+              "widevine-0.43.0" = "sha256-xbVK46IYhnkggey/+jvokZL2TIf1TNOJQJDmQo44Vrs=";
+              "rodio-0.22.2" = "sha256-9UocC1oWKBviaPsLWXvt53qBFasZonYArzThxIiJFSE=";
+              "ytmusic-0.1.0" = "sha256-WsZleHDO/O7f8e5dtQpOtu+oToxx7POWdsOZ/3I5JHQ=";
             };
           };
 
