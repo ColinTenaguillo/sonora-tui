@@ -56,7 +56,7 @@ pub trait Provider: MusicProvider {
 
     /// The Feed: what is new for this account, dated. Releases from the
     /// artists followed, on TIDAL.
-    async fn feed(&self) -> anyhow::Result<Vec<crate::shell::carousel::Card>> {
+    async fn feed(&self) -> anyhow::Result<Vec<crate::domain::Card>> {
         Ok(Vec::new())
     }
 

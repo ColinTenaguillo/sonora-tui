@@ -718,7 +718,7 @@ impl crate::catalogue::Provider for TidalProvider {
     }
 
     /// Releases from the artists followed, dated, as the web's Feed page.
-    async fn feed(&self) -> Result<Vec<crate::shell::carousel::Card>> {
+    async fn feed(&self) -> Result<Vec<crate::domain::Card>> {
         let client = self.inner.client().await?;
         Ok(browse::feed(&client).await?)
     }

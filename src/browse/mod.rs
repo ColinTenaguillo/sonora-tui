@@ -6,7 +6,7 @@
 //! skipped rather than failing the page, and a row that ends up with no items
 //! is dropped instead of rendering as an empty heading.
 
-use crate::shell::carousel::Card;
+use crate::domain::Card;
 use crate::tidal::dto::cover_url;
 use crate::tidal::{Client, TidalError};
 
@@ -48,7 +48,7 @@ impl RowKind {
     /// shortcut grid two.
     pub fn grid_rows(&self) -> Option<usize> {
         match self {
-            RowKind::Compact => Some(crate::shell::trackgrid::ROWS),
+            RowKind::Compact => Some(GRID_ROWS),
             RowKind::Shortcuts => Some(2),
             RowKind::Carousel | RowKind::Links => None,
         }
@@ -782,7 +782,7 @@ fn holds_tracks(cards: &[Card]) -> bool {
     !cards.is_empty()
         && cards
             .iter()
-            .all(|c| matches!(c.target, Some(crate::shell::carousel::Target::Track(_))))
+            .all(|c| matches!(c.target, Some(crate::domain::Target::Track(_))))
 }
 
 /// Give a heading to any row that came back without one.
@@ -822,9 +822,14 @@ fn fold_rows_with_the_same_heading(rows: &mut Vec<HomeRow>) {
     *rows = out;
 }
 
+/// Columns of cells in a track grid, as the web client's three.
+pub const GRID_COLUMNS: usize = 3;
+/// Rows of cells in a track grid, as the web client's three. Counted off
+/// the running client: a track row there holds nine, three across and
+/// three down.
+pub const GRID_ROWS: usize = 3;
 /// How many cards a track grid draws.
-pub const GRID_CARDS: u32 =
-    (crate::shell::trackgrid::COLUMNS * crate::shell::trackgrid::ROWS) as u32;
+pub const GRID_CARDS: u32 = (GRID_COLUMNS * GRID_ROWS) as u32;
 
 /// The largest page the API will serve.
 ///
@@ -1055,8 +1060,8 @@ fn feed_item_card(v: &serde_json::Value) -> Option<Card> {
 }
 
 /// The view a `tidal://` deep link stands for, when this app has one.
-fn deep_link_section(url: &str) -> Option<crate::shell::sidebar::Section> {
-    use crate::shell::sidebar::Section;
+fn deep_link_section(url: &str) -> Option<crate::domain::Section> {
+    use crate::domain::Section;
     Some(match url {
         "tidal://my-collection/tracks" => Section::Tracks,
         "tidal://my-collection/albums" => Section::Albums,
@@ -1197,7 +1202,7 @@ impl ItemDto {
             // apart by — so this is empty on everything else without
             // needing to ask which kind it is.
             detail: match &target {
-                Some(crate::shell::carousel::Target::Album(_)) => self
+                Some(crate::domain::Target::Album(_)) => self
                     .release_date
                     .as_deref()
                     .and_then(|d| d.get(..4))
@@ -1212,7 +1217,7 @@ impl ItemDto {
             // Only a track's duration means anything to the player; a
             // playlist's is the sum of its contents.
             duration: match (&target, self.duration) {
-                (Some(crate::shell::carousel::Target::Track(_)), Some(secs)) => {
+                (Some(crate::domain::Target::Track(_)), Some(secs)) => {
                     std::time::Duration::from_secs(secs)
                 }
                 _ => std::time::Duration::ZERO,
@@ -1220,7 +1225,7 @@ impl ItemDto {
             // An artist is a face, and the artist cards everywhere else
             // draw it round. Square here, a row of uploaders read as a
             // row of records.
-            round: matches!(target, Some(crate::shell::carousel::Target::Artist(_))),
+            round: matches!(target, Some(crate::domain::Target::Artist(_))),
             target,
             ..Default::default()
         })
@@ -1231,8 +1236,8 @@ impl ItemDto {
     /// The API does not label these by kind, so they are told apart by what
     /// they carry: a uuid is a playlist, a nested album means this is a
     /// track, and a track count on a numbered item is an album.
-    fn target(&self) -> Option<crate::shell::carousel::Target> {
-        use crate::shell::carousel::Target;
+    fn target(&self) -> Option<crate::domain::Target> {
+        use crate::domain::Target;
 
         if let Some(uuid) = &self.uuid {
             return Some(Target::Playlist(uuid.clone()));
@@ -1301,7 +1306,7 @@ mod tests {
         assert!(
             matches!(
                 got[0].0.target,
-                Some(crate::shell::carousel::Target::Playlist(ref id)) if id == "mix:m0"
+                Some(crate::domain::Target::Playlist(ref id)) if id == "mix:m0"
             ),
             "and it opens, got {:?}",
             got[0].0.target
@@ -1442,7 +1447,7 @@ mod tests {
             "items":[{"type":"PLAYLIST","data":{"uuid":"u1","title":"A Playlist","squareImage":"sq"}}]}
         ],"page":{"cursor":"NEXT"}}"#;
         let (home, cursor) = parse_home_feed(body);
-        use crate::shell::carousel::Target;
+        use crate::domain::Target;
 
         assert_eq!(cursor.as_deref(), Some("NEXT"));
         assert_eq!(
@@ -1614,7 +1619,7 @@ mod tests {
         assert!(
             matches!(
                 card.target,
-                Some(crate::shell::carousel::Target::Page(ref p))
+                Some(crate::domain::Target::Page(ref p))
                     if p == "pages/genre_hip_hop"
             ),
             "it opens the page it names, got {:?}",
@@ -1749,8 +1754,8 @@ mod tests {
         assert!(
             matches!(
                 cards[0].target,
-                Some(crate::shell::carousel::Target::Section(
-                    crate::shell::sidebar::Section::Tracks
+                Some(crate::domain::Target::Section(
+                    crate::domain::Section::Tracks
                 ))
             ),
             "got {:?}",
@@ -1782,7 +1787,7 @@ mod tests {
         assert_eq!(cards[0].subtitle, "Daft Punk", "the artist comes through");
         assert!(matches!(
             &cards[0].target,
-            Some(crate::shell::carousel::Target::Album(id)) if id == "9"
+            Some(crate::domain::Target::Album(id)) if id == "9"
         ));
         // The date the Feed groups by. Thrown away before, which left the
         // sections with nothing to sort on.
@@ -1912,7 +1917,7 @@ mod tests {
         assert_eq!(cards[0].detail, "Discovery", "the album comes through");
         assert!(matches!(
             &cards[0].target,
-            Some(crate::shell::carousel::Target::Track(id)) if id == "1"
+            Some(crate::domain::Target::Track(id)) if id == "1"
         ));
     }
 
@@ -1943,7 +1948,7 @@ mod tests {
             card.detail
         );
         assert!(
-            matches!(card.target, Some(crate::shell::carousel::Target::Track(_))),
+            matches!(card.target, Some(crate::domain::Target::Track(_))),
             "and it is a track card"
         );
     }
@@ -1960,8 +1965,8 @@ mod tests {
 
         let mut tracks_with_album = 0;
         for card in home.rows.iter().flat_map(|r| r.cards.iter()) {
-            let is_track = matches!(card.target, Some(crate::shell::carousel::Target::Track(_)));
-            let is_album = matches!(card.target, Some(crate::shell::carousel::Target::Album(_)));
+            let is_track = matches!(card.target, Some(crate::domain::Target::Track(_)));
+            let is_album = matches!(card.target, Some(crate::domain::Target::Album(_)));
             if is_track {
                 tracks_with_album += usize::from(!card.detail.is_empty());
             } else if is_album {
@@ -2033,7 +2038,7 @@ mod tests {
             .rows
             .iter()
             .flat_map(|row| &row.cards)
-            .filter(|c| matches!(c.target, Some(crate::shell::carousel::Target::Track(_))))
+            .filter(|c| matches!(c.target, Some(crate::domain::Target::Track(_))))
             .collect();
         assert!(!tracks.is_empty(), "the captured page has track cards");
         for card in tracks {
@@ -2052,7 +2057,7 @@ mod tests {
         let body = std::fs::read_to_string("tests/fixtures/json/pages-home.json").expect("fixture");
         for row in parse_home(&body).rows {
             for card in &row.cards {
-                if !matches!(card.target, Some(crate::shell::carousel::Target::Track(_))) {
+                if !matches!(card.target, Some(crate::domain::Target::Track(_))) {
                     assert!(
                         card.duration.is_zero(),
                         "{:?} is not a track but carries a duration",

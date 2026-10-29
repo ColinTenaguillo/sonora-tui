@@ -219,10 +219,14 @@ fn components_never_import_the_shell() {
     // that knows the shell has inverted the arrow.
     for dir in [
         "src/auth",
+        "src/browse",
+        "src/catalogue",
         "src/library",
         "src/playback",
         "src/presence",
+        "src/provider",
         "src/scrobble",
+        "src/search",
         "src/tidal",
         "src/domain",
     ] {

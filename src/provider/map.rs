@@ -12,7 +12,7 @@ use music::{
 use crate::browse::{Home, HomeRow};
 use crate::domain;
 use crate::library;
-use crate::shell::carousel::{Card, Target};
+use crate::domain::{Card, Target};
 
 pub use crate::browse::MIX;
 
@@ -311,7 +311,7 @@ mod tests {
         assert!(matches!(item(card(Target::Artist("3".into()))), Some(GenreItem::Artist(a)) if a.id == "3"));
         assert!(matches!(item(card(Target::Playlist("u".into()))), Some(GenreItem::Playlist(p)) if p.id == "u"));
         assert!(matches!(item(card(Target::Page("/pages/genre".into()))), Some(GenreItem::Genre(g)) if g.id == "/pages/genre"));
-        assert!(item(card(Target::Section(crate::shell::sidebar::Section::Music))).is_none());
+        assert!(item(card(Target::Section(crate::domain::Section::Music))).is_none());
         assert!(item(Card::default()).is_none(), "a card with nowhere to go");
     }
 
@@ -322,7 +322,7 @@ mod tests {
                 HomeRow {
                     heading: "Shortcuts".into(),
                     cards: vec![Card {
-                        target: Some(Target::Section(crate::shell::sidebar::Section::Music)),
+                        target: Some(Target::Section(crate::domain::Section::Music)),
                         ..Card::default()
                     }],
                     kind: Default::default(),
