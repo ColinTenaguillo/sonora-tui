@@ -245,7 +245,7 @@ fn shift_q_shows_the_queue_and_any_key_closes_it() {
     // and the other keys act on the row under the cursor rather than
     // shutting it.
     press(&mut app, KeyCode::Char('Q'));
-    assert!(!app.showing_queue, "Q closes the queue again");
+    assert!(app.list != Some(sonora_tui::shell::List::Queue), "Q closes the queue again");
     assert!(!app.should_quit, "and the app is still running");
 }
 
@@ -310,10 +310,10 @@ fn a_key_the_queue_view_does_not_use_reaches_the_app() {
     let mut app = app();
     queued(&mut app, &["First"]);
     press(&mut app, KeyCode::Char('Q'));
-    assert!(app.showing_queue, "open");
+    assert!(app.list == Some(sonora_tui::shell::List::Queue), "open");
 
     press(&mut app, KeyCode::Char('z'));
-    assert!(app.showing_queue, "z is not a way out");
+    assert!(app.list == Some(sonora_tui::shell::List::Queue), "z is not a way out");
     assert!(app.queue.shuffled(), "and it shuffled, as it does anywhere");
 }
 
@@ -349,14 +349,14 @@ fn shift_h_shows_what_has_been_played() {
     press(&mut app, KeyCode::Char('H'));
     let shown = screen(&mut app);
     assert!(shown.contains("History"), "the history opened:\n{shown}");
-    assert!(app.showing_history);
+    assert!(app.list == Some(sonora_tui::shell::List::History));
 
     // A view of its own, as the queue is: its keys are few, the rest act
     // on the row under the cursor, and H closes it again.
     press(&mut app, KeyCode::Char('z'));
-    assert!(app.showing_history, "z is not a way out");
+    assert!(app.list == Some(sonora_tui::shell::List::History), "z is not a way out");
     press(&mut app, KeyCode::Char('H'));
-    assert!(!app.showing_history, "H closes it");
+    assert!(app.list != Some(sonora_tui::shell::List::History), "H closes it");
 }
 
 #[test]
@@ -1148,10 +1148,10 @@ fn i_in_the_queue_view_switches_autoplay() {
     let mut app = app();
     app.config.playback.autoplay = true;
     press(&mut app, KeyCode::Char('Q'));
-    assert!(app.showing_queue, "the queue is up");
+    assert!(app.list == Some(sonora_tui::shell::List::Queue), "the queue is up");
     press(&mut app, KeyCode::Char('i'));
     assert!(!app.config.playback.autoplay, "off");
-    assert!(app.showing_queue, "and the queue is still up");
+    assert!(app.list == Some(sonora_tui::shell::List::Queue), "and the queue is still up");
     press(&mut app, KeyCode::Char('i'));
     assert!(app.config.playback.autoplay, "and on again");
 }

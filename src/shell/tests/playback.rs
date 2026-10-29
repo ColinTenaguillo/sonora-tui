@@ -667,7 +667,7 @@ fn the_queue_is_a_list_the_keys_work_in() {
     };
     app.queue.play_next(queued);
     key(&mut app, KeyCode::Char('Q'));
-    assert!(app.showing_queue, "Q opens the queue");
+    assert!(app.list == Some(List::Queue), "Q opens the queue");
     app.queue_list.selected = 0;
 
     assert_eq!(
@@ -682,7 +682,7 @@ fn the_queue_is_a_list_the_keys_work_in() {
         ),
         "A likes it"
     );
-    assert!(app.showing_queue, "and the queue stays open to show it");
+    assert!(app.list == Some(List::Queue), "and the queue stays open to show it");
 
     // A key the queue does not know does what it always does, and does
     // not close the list.
@@ -690,18 +690,18 @@ fn the_queue_is_a_list_the_keys_work_in() {
         key(&mut app, KeyCode::Char('z')),
         Some(Action::ToggleShuffle)
     ));
-    assert!(app.showing_queue, "shuffle is not a way out");
+    assert!(app.list == Some(List::Queue), "shuffle is not a way out");
 
     // Enter is the queue's, even with nothing to jump to: falling
     // through would open whatever the hidden page had selected.
     app.queue = Default::default();
     assert!(key(&mut app, KeyCode::Enter).is_none());
-    assert!(app.showing_queue);
+    assert!(app.list == Some(List::Queue));
 
     // The key that opened it closes it: a step back.
     let back = key(&mut app, KeyCode::Char('Q')).expect("Q again steps back");
     app.update(back);
-    assert!(!app.showing_queue, "Q again closes it");
+    assert!(app.list != Some(List::Queue), "Q again closes it");
 }
 
 #[test]
@@ -711,17 +711,17 @@ fn the_queue_is_a_view_that_back_returns_to() {
     // returns to it -- as it does for an opened album.
     let mut app = signed_in(sidebar::Section::Music);
     key(&mut app, KeyCode::Char('Q'));
-    assert!(app.showing_queue);
+    assert!(app.list == Some(List::Queue));
 
     // Driven the way a keystroke is: the key names the move and
     // `update` makes it, which is where the level is taken.
     let action = key(&mut app, KeyCode::Char('J')).expect("J moves the nav");
     app.update(action);
-    assert!(!app.showing_queue, "moving the nav leaves it");
+    assert!(app.list != Some(List::Queue), "moving the nav leaves it");
     app.update(Action::GoBack);
-    assert!(app.showing_queue, "and back returns to it");
+    assert!(app.list == Some(List::Queue), "and back returns to it");
     app.update(Action::GoForward);
-    assert!(!app.showing_queue, "forward steps out again");
+    assert!(app.list != Some(List::Queue), "forward steps out again");
     app.update(Action::GoBack);
 
     // The search box is not a level: it opens over the queue and
@@ -734,7 +734,7 @@ fn the_queue_is_a_view_that_back_returns_to() {
     );
     app.update(Action::CloseSearch);
     assert!(
-        app.showing_queue && app.search.is_none(),
+        app.list == Some(List::Queue) && app.search.is_none(),
         "the queue is back"
     );
 
@@ -742,11 +742,11 @@ fn the_queue_is_a_view_that_back_returns_to() {
     // it is the queue.
     key(&mut app, KeyCode::Char('H'));
     assert!(
-        app.showing_history && !app.showing_queue,
+        app.list == Some(List::History) && app.list != Some(List::Queue),
         "one list at a time"
     );
     app.update(Action::GoBack);
-    assert!(app.showing_queue && !app.showing_history);
+    assert!(app.list == Some(List::Queue) && app.list != Some(List::History));
 }
 
 #[test]
@@ -772,7 +772,7 @@ fn opening_from_the_queue_draws_the_wait_over_it() {
         "no id in hand: fetched"
     );
     app.update(fetch);
-    assert!(!app.showing_queue, "the wait took the pane from the queue");
+    assert!(app.list != Some(List::Queue), "the wait took the pane from the queue");
 
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
@@ -792,7 +792,7 @@ fn opening_from_the_queue_draws_the_wait_over_it() {
 
     // And back from the wait is the queue.
     app.update(Action::GoBack);
-    assert!(app.showing_queue);
+    assert!(app.list == Some(List::Queue));
 }
 
 #[test]
@@ -853,10 +853,10 @@ fn an_album_opened_from_the_queue_is_a_step_forward_from_it() {
     app.queue_list.selected = 0;
     let open = key(&mut app, KeyCode::Char('c')).expect("c from the queue");
     app.update(open);
-    assert!(!app.showing_queue, "the album took the pane");
+    assert!(app.list != Some(List::Queue), "the album took the pane");
     assert_eq!(app.open.as_ref().map(|o| o.title.as_str()), Some("Q"));
     app.update(Action::GoBack);
-    assert!(app.showing_queue, "and back is the queue");
+    assert!(app.list == Some(List::Queue), "and back is the queue");
 }
 
 #[test]
@@ -865,27 +865,27 @@ fn the_history_is_a_list_the_keys_work_in() {
     // could be done with a played track from where it was listed.
     let mut app = signed_in(sidebar::Section::Music);
     key(&mut app, KeyCode::Char('H'));
-    assert!(app.showing_history, "H opens the history");
+    assert!(app.list == Some(List::History), "H opens the history");
     assert!(matches!(
         key(&mut app, KeyCode::Char('z')),
         Some(Action::ToggleShuffle)
     ));
-    assert!(app.showing_history, "shuffle is not a way out");
+    assert!(app.list == Some(List::History), "shuffle is not a way out");
     assert!(
         key(&mut app, KeyCode::Enter).is_none(),
         "nothing played, nothing to queue"
     );
-    assert!(app.showing_history);
+    assert!(app.list == Some(List::History));
     let _ = app.take_repaint();
     let back = key(&mut app, KeyCode::Esc).expect("escape steps back");
     app.update(back);
-    assert!(!app.showing_history, "escape leaves it");
+    assert!(app.list != Some(List::History), "escape leaves it");
     assert!(app.take_repaint(), "and asks for the covers under it back");
 
     // One list at a time: opening one is a step forward from the other.
     key(&mut app, KeyCode::Char('H'));
     key(&mut app, KeyCode::Char('Q'));
-    assert!(app.showing_queue && !app.showing_history);
+    assert!(app.list == Some(List::Queue) && app.list != Some(List::History));
 }
 
 #[test]
