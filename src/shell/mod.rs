@@ -2735,19 +2735,34 @@ impl App {
                 }
                 None
             }
-            Action::ArtistLoaded { request, page } => {
+            Action::ArtistLoaded { request, mut page } => {
                 // Same rule as any other reply: one for a view the user has
                 // since left would arrive under the wrong heading, and must
                 // not end the wait of the one on screen.
                 match self.open.as_ref() {
                     Some(open) if open.request == request => {
                         self.awaiting = false;
-                        // The server's word on whether this account
-                        // follows them, which is what `F` reads.
-                        if page.following {
-                            self.favourites.artists.insert(page.id.clone());
-                        } else {
-                            self.favourites.artists.remove(&page.id);
+                        match page.kind {
+                            // The server's word on whether this account
+                            // follows them, which is what `F` reads.
+                            crate::library::PageKind::Artist => {
+                                if page.following {
+                                    self.favourites.artists.insert(page.id.clone());
+                                } else {
+                                    self.favourites.artists.remove(&page.id);
+                                }
+                            }
+                            // An album's page is built from its detail,
+                            // which does not say whether it is a favourite;
+                            // the ids fetched at sign-in do. Without this
+                            // an album opened from the favourites drew no
+                            // heart in its header.
+                            crate::library::PageKind::Album => {
+                                page.following |= self.favourites.albums.contains(&page.id);
+                                if page.following {
+                                    self.favourites.albums.insert(page.id.clone());
+                                }
+                            }
                         }
                         self.artist.page = Some(*page);
                     }
