@@ -61,7 +61,7 @@ fn the_event_loop_clears_before_the_frame_that_needs_it() {
     // itself needs a terminal and a signed-in session to run, so this
     // reads the source: what must hold is that `take_repaint` is asked
     // before the draw and that a clear follows from it.
-    let source = include_str!("../mod.rs");
+    let source = include_str!("../run.rs");
     let loop_body = source
         .split("while !app.should_quit {")
         .nth(1)
