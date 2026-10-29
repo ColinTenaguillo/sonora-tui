@@ -656,12 +656,22 @@ fn a_key_that_would_open_what_is_showing_does_nothing() {
     app.tracks = vec![track.clone()];
     let open = key(&mut app, KeyCode::Char('c')).expect("opens the album");
     app.update(open);
+    // Still loading: a repeat of the key must not open it again. Held
+    // down, it opened the album once per repeat, each a level and a
+    // request of its own.
+    let depth = app.back.len();
+    let request = open_request(&app);
+    assert!(
+        key(&mut app, KeyCode::Char('c')).is_none(),
+        "already on its way"
+    );
+    assert_eq!(app.back.len(), depth, "nothing stacked while it loads");
+    assert_eq!(open_request(&app), request, "and nothing asked for again");
     app.update(Action::CollectionLoaded {
-        request: open_request(&app),
+        request,
         tracks: vec![track],
     });
     assert_eq!(app.showing(), Showing::Tracks);
-    let depth = app.back.len();
 
     assert!(
         key(&mut app, KeyCode::Char('c')).is_none(),

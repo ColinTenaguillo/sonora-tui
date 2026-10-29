@@ -2251,14 +2251,29 @@ impl App {
         RequestId(self.requests)
     }
 
-    /// Whether `title` is the view already on screen, filled.
+    /// Whether what `target` opens, headed `title`, is already on screen
+    /// or on its way.
     ///
     /// `c` on a track inside its own album opened the album again, and
     /// each press stacked a level: seven presses on a single were eight
     /// steps back out. A key that would open what is showing does nothing.
-    fn already_showing(&self, title: &str) -> bool {
-        (!self.awaiting && self.open.as_ref().is_some_and(|o| o.title == title))
-            || self.artist.page.as_ref().is_some_and(|p| p.name == title)
+    /// A view still loading counts: `a` held down on an artist's row
+    /// opened their page once per repeat, each a level and a request.
+    fn already_showing(&self, target: &Collection, title: &str) -> bool {
+        use crate::library::PageKind;
+        if let Some(open) = self.open.as_ref() {
+            if open.target.as_ref() == Some(target) || open.title == title {
+                return true;
+            }
+        }
+        self.artist.page.as_ref().is_some_and(|page| {
+            page.name == title
+                || match target {
+                    Collection::Artist(id) => page.kind == PageKind::Artist && page.id == *id,
+                    Collection::Album(id) => page.kind == PageKind::Album && page.id == *id,
+                    _ => false,
+                }
+        })
     }
 
     fn heading_only(&self, title: String) -> Option<OpenCollection> {
@@ -3025,11 +3040,7 @@ impl App {
             // trip nothing changed on screen -- the key looked dead.
             Action::FetchTrackAlbum(id) => {
                 let track = self.selected_track()?;
-                let title = if track.album.is_empty() {
-                    track.title.clone()
-                } else {
-                    track.album.clone()
-                };
+                let title = album_heading(&track);
                 let target = Some(Collection::TrackAlbum(id));
                 self.open_for(target, false, title, track.artist.clone(), track.cover.clone());
                 None
@@ -4312,12 +4323,12 @@ impl App {
             // says "album" was already spoken for, so this names the thing
             // on screen rather than a word nobody would guess.
             KeyCode::Char('c') if self.selected_track_album().is_some() => {
-                let (_, title) = self.selected_track_album()?;
-                (!self.already_showing(&title)).then_some(Action::OpenTrackAlbum)
+                let (target, title) = self.selected_track_album()?;
+                (!self.already_showing(&target, &title)).then_some(Action::OpenTrackAlbum)
             }
             KeyCode::Char('a') if self.selected_track_artist().is_some() => {
-                let (_, name) = self.selected_track_artist()?;
-                (!self.already_showing(&name)).then_some(Action::OpenTrackArtist)
+                let (target, name) = self.selected_track_artist()?;
+                (!self.already_showing(&target, &name)).then_some(Action::OpenTrackArtist)
             }
             // The row names an album and an artist but carries the id of
             // neither -- a card from the home page, a favourite from before
@@ -4325,12 +4336,20 @@ impl App {
             // way: fetch the track, which does carry them, then open.
             // Without this the key did nothing, in silence, on the one page
             // most people start from.
+            // The same guard as above: the wait is headed by what the row
+            // knows, and names the track it looks up.
             KeyCode::Char('c') if self.selected_track().is_some() => {
-                self.selected_track().map(|t| Action::FetchTrackAlbum(t.id))
+                let track = self.selected_track()?;
+                let target = Collection::TrackAlbum(track.id.clone());
+                (!self.already_showing(&target, &album_heading(&track)))
+                    .then_some(Action::FetchTrackAlbum(track.id))
             }
-            KeyCode::Char('a') if self.selected_track().is_some() => self
-                .selected_track()
-                .map(|t| Action::FetchTrackArtist(t.id)),
+            KeyCode::Char('a') if self.selected_track().is_some() => {
+                let track = self.selected_track()?;
+                let target = Collection::TrackArtist(track.id.clone());
+                (!self.already_showing(&target, &first_artist(&track.artist)))
+                    .then_some(Action::FetchTrackArtist(track.id))
+            }
             // The radio around the selected track, or whatever is playing.
             // `R` reaches this from anywhere, which is where the user is
             // when the thought occurs.
@@ -4483,6 +4502,16 @@ impl App {
 /// The album a track names, as something a key can open.
 fn album_of(track: &crate::domain::Track) -> Option<(Collection, String)> {
     Some((Collection::Album(track.album_id.clone()?), track.album.clone()))
+}
+
+/// What a wait for a track's album is headed by: the album, or the track
+/// itself when the row names none.
+fn album_heading(track: &crate::domain::Track) -> String {
+    if track.album.is_empty() {
+        track.title.clone()
+    } else {
+        track.album.clone()
+    }
 }
 
 /// The artist a track names, the same way.
