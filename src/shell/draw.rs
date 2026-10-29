@@ -35,7 +35,12 @@ fn cover_drawer(
 
 /// A line or two in the middle of an otherwise empty pane: loading,
 /// nothing here, no such page on this service.
-fn notice(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, palette: &theme::Palette, lines: Vec<ratatui::text::Line<'static>>) {
+fn notice(
+    frame: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    palette: &theme::Palette,
+    lines: Vec<ratatui::text::Line<'static>>,
+) {
     let height = (lines.len() as u16).min(area.height);
     frame.render_widget(
         ratatui::widgets::Paragraph::new(lines)
@@ -60,8 +65,11 @@ pub(super) fn feed_notice(service: &str) -> Vec<ratatui::text::Line<'static>> {
 pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     // Borrowed by field, so the closure lives beside the artwork being
     // taken out and put back below.
-    let (followed, fav_albums, fav_playlists) =
-        (&app.favourites.artists, &app.favourites.albums, &app.favourites.playlists);
+    let (followed, fav_albums, fav_playlists) = (
+        &app.favourites.artists,
+        &app.favourites.albums,
+        &app.favourites.playlists,
+    );
     let liked = |t: &carousel::Target| liked_in(t, followed, fav_albums, fav_playlists);
     let regions = layout::split(frame.area());
     let palette = app.palette;
@@ -224,7 +232,12 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
                         false => waiting::animated("Loading…").into_owned(),
                         true => format!("{} has nothing to show here yet.", app.service_name()),
                     };
-                    notice(frame, regions.main, &palette, vec![ratatui::text::Line::from(line)]);
+                    notice(
+                        frame,
+                        regions.main,
+                        &palette,
+                        vec![ratatui::text::Line::from(line)],
+                    );
                 } else {
                     let mut art = app.artwork.take();
                     home::render(

@@ -201,7 +201,10 @@ fn esc_closes_an_open_bio_before_leaving_the_artist() {
             "{code:?} is spent on the bio"
         );
         assert!(!app.artist.bio_open, "{code:?} closed the bio");
-        assert!(app.artist.page.is_some(), "{code:?} left the artist's page up");
+        assert!(
+            app.artist.page.is_some(),
+            "{code:?} left the artist's page up"
+        );
         assert_eq!(app.back.len(), depth, "{code:?} popped nothing");
 
         // With the bio closed, the same key leaves the page as before.
@@ -590,7 +593,10 @@ fn f_follows_the_artist_whose_page_is_open_whatever_is_selected() {
         app.selected_favourable(),
         Some((Favourable::Artist("42".into()), "Daft Punk".to_string()))
     );
-    assert!(!app.favourites.artists.contains("42"), "the page said not followed");
+    assert!(
+        !app.favourites.artists.contains("42"),
+        "the page said not followed"
+    );
 
     // The reply keeps the page in step: flag and count.
     app.artist.page.as_mut().unwrap().fans = Some(100);

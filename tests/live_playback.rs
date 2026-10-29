@@ -26,7 +26,9 @@ fn session() -> Option<sonora_tui::auth::StoredToken> {
     }
 }
 
-fn playback_info(quality: sonora_tui::domain::Quality) -> Option<sonora_tui::playback::PlaybackInfo> {
+fn playback_info(
+    quality: sonora_tui::domain::Quality,
+) -> Option<sonora_tui::playback::PlaybackInfo> {
     let token = session()?;
     let rt = tokio::runtime::Runtime::new().expect("runtime");
     let info = rt.block_on(async {
@@ -39,7 +41,10 @@ fn playback_info(quality: sonora_tui::domain::Quality) -> Option<sonora_tui::pla
 }
 
 fn skip_n(src: &mut dyn Iterator<Item = f32>, n: usize) {
-    assert!((0..n).all(|_| src.next().is_some()), "the stream ended early");
+    assert!(
+        (0..n).all(|_| src.next().is_some()),
+        "the stream ended early"
+    );
 }
 
 fn take_n(src: &mut dyn Iterator<Item = f32>, n: usize) -> Vec<f32> {
@@ -97,7 +102,10 @@ fn a_dash_stream_rebuilt_at_a_segment_plays_the_same_samples() {
         segments.clone(),
     ))
     .expect("decoder");
-    let (rate, ch) = (full.sample_rate().get() as usize, full.channels().get() as usize);
+    let (rate, ch) = (
+        full.sample_rate().get() as usize,
+        full.channels().get() as usize,
+    );
     let (ref_a, ref_b) = reference(full, rate, ch, a, b);
 
     // As the engine seeks: back to b, then further back to a.
@@ -133,16 +141,21 @@ fn a_bts_file_held_in_memory_seeks_for_real() {
         .to_vec();
     let (a, b) = (Duration::from_millis(16770), Duration::from_millis(26770));
     let full = rodio::Decoder::new(sonora_tui::playback::SegmentReader::from_slices(vec![
-        bytes.clone()
+        bytes.clone(),
     ]))
     .expect("decoder");
-    let (rate, ch) = (full.sample_rate().get() as usize, full.channels().get() as usize);
+    let (rate, ch) = (
+        full.sample_rate().get() as usize,
+        full.channels().get() as usize,
+    );
     let (ref_a, ref_b) = reference(full, rate, ch, a, b);
 
     // As the engine builds it: seekable, with its length.
     let len = bytes.len() as u64;
     let mut src = rodio::decoder::DecoderBuilder::new()
-        .with_data(sonora_tui::playback::SegmentReader::from_slices(vec![bytes]))
+        .with_data(sonora_tui::playback::SegmentReader::from_slices(vec![
+            bytes,
+        ]))
         .with_byte_len(len)
         .with_seekable(true)
         .build()
@@ -153,9 +166,8 @@ fn a_bts_file_held_in_memory_seeks_for_real() {
         src.try_seek(target).expect("a seekable stream seeks");
         let got = take_n(&mut src, rate * ch);
         // rodio lands within a few frames; what follows must be the track.
-        let head = head_mismatch(expected, &got, ch).unwrap_or_else(|| {
-            panic!("after seeking to {target:?} the audio is not the track's")
-        });
+        let head = head_mismatch(expected, &got, ch)
+            .unwrap_or_else(|| panic!("after seeking to {target:?} the audio is not the track's"));
         assert!(
             head < rate / 20,
             "seeking to {target:?} landed {head} frames off, more than 50ms"
@@ -174,5 +186,8 @@ fn restart_point(durations: &[Duration], at: Duration) -> (usize, Duration) {
         acc += *d;
     }
     let last = durations.len().saturating_sub(1);
-    (last, at.saturating_sub(acc - durations.last().copied().unwrap_or_default()))
+    (
+        last,
+        at.saturating_sub(acc - durations.last().copied().unwrap_or_default()),
+    )
 }

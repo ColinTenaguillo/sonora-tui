@@ -152,7 +152,11 @@ pub fn render(frame: &mut Frame, area: Rect, palette: &Palette, cdm: &Cdm) {
     };
     frame.render_widget(
         Paragraph::new(lines)
-            .alignment(if tall { Alignment::Left } else { Alignment::Center })
+            .alignment(if tall {
+                Alignment::Left
+            } else {
+                Alignment::Center
+            })
             .wrap(Wrap { trim: false })
             .scroll((scroll, 0)),
         inner,
@@ -180,7 +184,9 @@ mod tests {
         assert!(text.contains("4.10.2891.0"), "{text}");
         assert!(text.contains("TERMS OF SERVICE"), "{text}");
         assert!(text.contains("accept"), "{text}");
-        assert!(drawn(&Cdm::Ready(music::drm::Origin::Installed)).trim().is_empty());
+        assert!(drawn(&Cdm::Ready(music::drm::Origin::Installed))
+            .trim()
+            .is_empty());
         assert!(drawn(&Cdm::Unneeded).trim().is_empty());
     }
 
@@ -196,7 +202,10 @@ mod tests {
         offered.scroll_by(true);
         offered.scroll_by(false);
         offered.scroll_by(false);
-        assert!(matches!(offered, Cdm::Offered { scroll: 0, .. }), "never below the top");
+        assert!(
+            matches!(offered, Cdm::Offered { scroll: 0, .. }),
+            "never below the top"
+        );
         assert!(!Cdm::Offering.asking() && !Cdm::Missing.asking() && !Cdm::Unneeded.asking());
         assert!(Cdm::Offering.shown() && !Cdm::Declined.shown());
     }

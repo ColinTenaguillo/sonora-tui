@@ -159,6 +159,9 @@ mod tests {
         let _ = activity_of(&paused, &mut scratch);
         assert_eq!(scratch, "Someone (paused)");
         let started = epoch(SystemTime::now() - Duration::from_secs(30));
-        assert!(started <= before - 29 && started >= before - 31, "{started} vs {before}");
+        assert!(
+            started <= before - 29 && started >= before - 31,
+            "{started} vs {before}"
+        );
     }
 }

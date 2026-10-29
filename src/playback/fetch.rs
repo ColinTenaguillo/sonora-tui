@@ -76,7 +76,9 @@ pub struct TidalFetch {
 /// A poisoned lock holds nothing worse than a stale map, so it is taken
 /// anyway rather than panicking in raw mode.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 impl TidalFetch {
@@ -373,7 +375,10 @@ mod tests {
         let fetch = TidalFetch::new(Quality::Lossless).unwrap();
         let loaded = dash(&base);
 
-        let whole = fetch.open("1", &loaded, Duration::ZERO).expect("the track").count();
+        let whole = fetch
+            .open("1", &loaded, Duration::ZERO)
+            .expect("the track")
+            .count();
         let at = Duration::from_secs(5);
         let rest = fetch.open("1", &loaded, at).expect("the seek").count();
 
@@ -431,8 +436,14 @@ mod tests {
             }),
             bytes: Some(Arc::new(bytes)),
         };
-        let whole = fetch.open("2", &loaded, Duration::ZERO).expect("the file").count();
-        assert!(whole > 44_100 * 11, "about twelve seconds of audio: {whole}");
+        let whole = fetch
+            .open("2", &loaded, Duration::ZERO)
+            .expect("the file")
+            .count();
+        assert!(
+            whole > 44_100 * 11,
+            "about twelve seconds of audio: {whole}"
+        );
     }
 
     #[test]
@@ -446,7 +457,10 @@ mod tests {
             token: StoredToken::default(),
             wanted: fetch.wanted(),
         });
-        assert_eq!(fetch.session().map(|s| s.wanted), Some(Quality::HiResLossless));
+        assert_eq!(
+            fetch.session().map(|s| s.wanted),
+            Some(Quality::HiResLossless)
+        );
 
         fetch.set_quality(Quality::High);
         assert_eq!(fetch.session().map(|s| s.wanted), Some(Quality::High));
@@ -462,7 +476,10 @@ mod tests {
         let error = rt.block_on(fetch.load("655911")).unwrap_err();
         assert!(error.to_string().contains("not signed in"), "{error}");
         let error = rt.block_on(fetch.load("not-a-number")).unwrap_err();
-        assert!(error.to_string().contains("not a TIDAL track id"), "{error}");
+        assert!(
+            error.to_string().contains("not a TIDAL track id"),
+            "{error}"
+        );
     }
 
     #[test]

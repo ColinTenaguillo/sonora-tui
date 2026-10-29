@@ -11,8 +11,8 @@ use music::{
 
 use crate::browse::{Home, HomeRow};
 use crate::domain;
-use crate::library;
 use crate::domain::{Card, Target};
+use crate::library;
 
 pub use crate::browse::MIX;
 
@@ -306,11 +306,21 @@ mod tests {
             target: Some(target),
             ..Card::default()
         };
-        assert!(matches!(item(card(Target::Track("1".into()))), Some(GenreItem::Track(t)) if t.id.as_deref() == Some("1")));
-        assert!(matches!(item(card(Target::Album("2".into()))), Some(GenreItem::Album(a)) if a.id == "2"));
-        assert!(matches!(item(card(Target::Artist("3".into()))), Some(GenreItem::Artist(a)) if a.id == "3"));
-        assert!(matches!(item(card(Target::Playlist("u".into()))), Some(GenreItem::Playlist(p)) if p.id == "u"));
-        assert!(matches!(item(card(Target::Page("/pages/genre".into()))), Some(GenreItem::Genre(g)) if g.id == "/pages/genre"));
+        assert!(
+            matches!(item(card(Target::Track("1".into()))), Some(GenreItem::Track(t)) if t.id.as_deref() == Some("1"))
+        );
+        assert!(
+            matches!(item(card(Target::Album("2".into()))), Some(GenreItem::Album(a)) if a.id == "2")
+        );
+        assert!(
+            matches!(item(card(Target::Artist("3".into()))), Some(GenreItem::Artist(a)) if a.id == "3")
+        );
+        assert!(
+            matches!(item(card(Target::Playlist("u".into()))), Some(GenreItem::Playlist(p)) if p.id == "u")
+        );
+        assert!(
+            matches!(item(card(Target::Page("/pages/genre".into()))), Some(GenreItem::Genre(g)) if g.id == "/pages/genre")
+        );
         assert!(item(card(Target::Section(crate::domain::Section::Music))).is_none());
         assert!(item(Card::default()).is_none(), "a card with nowhere to go");
     }

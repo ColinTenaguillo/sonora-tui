@@ -136,7 +136,10 @@ pub async fn playlists(client: &Client) -> Result<Vec<Playlist>, TidalError> {
     let path = format!("/users/{}/playlists", client.user_id());
     let items: Vec<PlaylistDto> = fetch_all(client, "playlists", &path).await?;
     let user = client.user_id();
-    Ok(items.into_iter().map(|p| playlist_from_dto(p, user)).collect())
+    Ok(items
+        .into_iter()
+        .map(|p| playlist_from_dto(p, user))
+        .collect())
 }
 
 /// One playlist's header, by uuid: what a page needs above the tracks when
@@ -1082,7 +1085,10 @@ mod tests {
             uuid: "x".into(),
             title: "Classical Focus".into(),
             number_of_tracks: 118,
-            creator: crate::tidal::dto::PlaylistCreator { name: None, id: None },
+            creator: crate::tidal::dto::PlaylistCreator {
+                name: None,
+                id: None,
+            },
             ..Default::default()
         };
         assert_eq!(playlist_from_dto(dto, 1).creator, "TIDAL");
@@ -1108,7 +1114,10 @@ mod tests {
 
     #[test]
     fn passing_the_reported_total_ends_the_walk() {
-        assert!(walk_ends(100, 200, 206), "offset 200 of 206 is the last page");
+        assert!(
+            walk_ends(100, 200, 206),
+            "offset 200 of 206 is the last page"
+        );
         assert!(walk_ends(6, 200, 206), "however many it actually held");
     }
 

@@ -245,7 +245,10 @@ fn shift_q_shows_the_queue_and_any_key_closes_it() {
     // and the other keys act on the row under the cursor rather than
     // shutting it.
     press(&mut app, KeyCode::Char('Q'));
-    assert!(app.list != Some(sonora_tui::shell::List::Queue), "Q closes the queue again");
+    assert!(
+        app.list != Some(sonora_tui::shell::List::Queue),
+        "Q closes the queue again"
+    );
     assert!(!app.should_quit, "and the app is still running");
 }
 
@@ -313,7 +316,10 @@ fn a_key_the_queue_view_does_not_use_reaches_the_app() {
     assert!(app.list == Some(sonora_tui::shell::List::Queue), "open");
 
     press(&mut app, KeyCode::Char('z'));
-    assert!(app.list == Some(sonora_tui::shell::List::Queue), "z is not a way out");
+    assert!(
+        app.list == Some(sonora_tui::shell::List::Queue),
+        "z is not a way out"
+    );
     assert!(app.queue.shuffled(), "and it shuffled, as it does anywhere");
 }
 
@@ -354,9 +360,15 @@ fn shift_h_shows_what_has_been_played() {
     // A view of its own, as the queue is: its keys are few, the rest act
     // on the row under the cursor, and H closes it again.
     press(&mut app, KeyCode::Char('z'));
-    assert!(app.list == Some(sonora_tui::shell::List::History), "z is not a way out");
+    assert!(
+        app.list == Some(sonora_tui::shell::List::History),
+        "z is not a way out"
+    );
     press(&mut app, KeyCode::Char('H'));
-    assert!(app.list != Some(sonora_tui::shell::List::History), "H closes it");
+    assert!(
+        app.list != Some(sonora_tui::shell::List::History),
+        "H closes it"
+    );
 }
 
 #[test]
@@ -513,7 +525,10 @@ fn a_genre_page_can_be_left_for_another() {
     home.rows.push(sonora_tui::browse::HomeRow {
         heading: "Essential Rap".into(),
         kind: sonora_tui::browse::RowKind::Carousel,
-        cards: vec![sonora_tui::shell::carousel::Card::new("A Playlist", "TIDAL")],
+        cards: vec![sonora_tui::shell::carousel::Card::new(
+            "A Playlist",
+            "TIDAL",
+        )],
         more: None,
     });
     app.update(sonora_tui::shell::Action::PageLoaded {
@@ -541,7 +556,10 @@ fn open_hip_hop(app: &mut App) {
     home.rows.push(sonora_tui::browse::HomeRow {
         heading: "Essential Rap".into(),
         kind: sonora_tui::browse::RowKind::Carousel,
-        cards: vec![sonora_tui::shell::carousel::Card::new("A Playlist", "TIDAL")],
+        cards: vec![sonora_tui::shell::carousel::Card::new(
+            "A Playlist",
+            "TIDAL",
+        )],
         more: None,
     });
     app.update(sonora_tui::shell::Action::PageLoaded {
@@ -690,7 +708,10 @@ fn opening_a_genre_says_it_is_loading_rather_than_drawing_an_empty_list() {
     home.rows.push(sonora_tui::browse::HomeRow {
         heading: "Essential Rap".into(),
         kind: sonora_tui::browse::RowKind::Carousel,
-        cards: vec![sonora_tui::shell::carousel::Card::new("A Playlist", "TIDAL")],
+        cards: vec![sonora_tui::shell::carousel::Card::new(
+            "A Playlist",
+            "TIDAL",
+        )],
         more: None,
     });
     app.update(sonora_tui::shell::Action::PageLoaded {
@@ -1148,10 +1169,16 @@ fn i_in_the_queue_view_switches_autoplay() {
     let mut app = app();
     app.config.playback.autoplay = true;
     press(&mut app, KeyCode::Char('Q'));
-    assert!(app.list == Some(sonora_tui::shell::List::Queue), "the queue is up");
+    assert!(
+        app.list == Some(sonora_tui::shell::List::Queue),
+        "the queue is up"
+    );
     press(&mut app, KeyCode::Char('i'));
     assert!(!app.config.playback.autoplay, "off");
-    assert!(app.list == Some(sonora_tui::shell::List::Queue), "and the queue is still up");
+    assert!(
+        app.list == Some(sonora_tui::shell::List::Queue),
+        "and the queue is still up"
+    );
     press(&mut app, KeyCode::Char('i'));
     assert!(app.config.playback.autoplay, "and on again");
 }

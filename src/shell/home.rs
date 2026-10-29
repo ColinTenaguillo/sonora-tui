@@ -312,7 +312,12 @@ pub fn render<F>(
     // same way, and a floor here left a band of pane the others did not.
     let bottom = area.y + area.height;
     let top = y;
-    for (i, offset, height) in layout(&state.rows, state.scroll, bottom.saturating_sub(top), area.width) {
+    for (i, offset, height) in layout(
+        &state.rows,
+        state.scroll,
+        bottom.saturating_sub(top),
+        area.width,
+    ) {
         let row = &state.rows[i];
         let y = top + offset;
         let is_focused = focused && i == state.row;
@@ -617,20 +622,33 @@ mod tests {
             .lines()
             .filter(|l| l.contains("Hip-Hop") || l.contains("Metal"))
             .count();
-        assert_eq!(with_titles, 2, "forty columns: the six wrap onto more than one line:\n{text}");
-        assert!(!text.contains("See all"), "nothing is cut, so nothing offers more:\n{text}");
+        assert_eq!(
+            with_titles, 2,
+            "forty columns: the six wrap onto more than one line:\n{text}"
+        );
+        assert!(
+            !text.contains("See all"),
+            "nothing is cut, so nothing offers more:\n{text}"
+        );
 
         // And the row is as tall as its lines, no more: three short titles
         // fit one line on a wide pane, and take two on a narrow one.
         let mut row = home_with_rows(1).rows.remove(0);
         row.kind = crate::browse::RowKind::Links;
-        row.cards = ["Hip-Hop", "Pop", "Jazz"].iter().map(|t| carousel::Card::new(*t, "")).collect();
+        row.cards = ["Hip-Hop", "Pop", "Jazz"]
+            .iter()
+            .map(|t| carousel::Card::new(*t, ""))
+            .collect();
         assert_eq!(
             row_height_of(&row, 100),
             carousel::PILL_HEIGHT + 2,
             "a row of links that fits is its heading and one line"
         );
-        assert_eq!(row_height_of(&row, 20), 2 * carousel::PILL_HEIGHT + 1 + 2, "two lines and the gap");
+        assert_eq!(
+            row_height_of(&row, 20),
+            2 * carousel::PILL_HEIGHT + 1 + 2,
+            "two lines and the gap"
+        );
         assert!(
             row_height_of(&row, 100) < row_height(crate::browse::RowKind::Carousel),
             "and shorter than a row of covers"
@@ -649,8 +667,12 @@ mod tests {
             .map(|t| carousel::Card::new(*t, ""))
             .collect();
         let width = 30;
-        let laid = carousel::pill_layout(home.rows[0].cards.iter().map(|c| c.title.as_str()), width);
-        assert!(laid.last().is_some_and(|&(line, _, _)| line >= 1), "they wrap at thirty: {laid:?}");
+        let laid =
+            carousel::pill_layout(home.rows[0].cards.iter().map(|c| c.title.as_str()), width);
+        assert!(
+            laid.last().is_some_and(|&(line, _, _)| line >= 1),
+            "they wrap at thirty: {laid:?}"
+        );
 
         home.down(5, 1, width);
         assert_eq!(home.row, 0, "still in the block");
@@ -658,7 +680,11 @@ mod tests {
         assert_eq!(line, 1, "on the line below");
 
         home.up(5, 1, width);
-        assert_eq!((home.row, home.rows[0].state.selected), (0, 0), "back to the first pill");
+        assert_eq!(
+            (home.row, home.rows[0].state.selected),
+            (0, 0),
+            "back to the first pill"
+        );
 
         home.up(5, 1, width);
         assert_eq!(home.row, 0, "the top of the page is the top");
@@ -682,14 +708,26 @@ mod tests {
             .map(|t| carousel::Card::new(*t, ""))
             .collect();
 
-        assert_eq!(carousel::pill_block_height(&short, 40), 1, "four short ones share a line");
-        assert_eq!(carousel::pill_block_height(&long, 40), 3, "two long ones take two, and the gap");
+        assert_eq!(
+            carousel::pill_block_height(&short, 40),
+            1,
+            "four short ones share a line"
+        );
+        assert_eq!(
+            carousel::pill_block_height(&long, 40),
+            3,
+            "two long ones take two, and the gap"
+        );
         assert_eq!(
             carousel::pill_block_height(&short, 1),
             7,
             "a pane too narrow for any puts one on each line, clipped, rather than dropping them"
         );
-        assert_eq!(carousel::pill_block_height(&[], 40), 1, "nothing still takes a line");
+        assert_eq!(
+            carousel::pill_block_height(&[], 40),
+            1,
+            "nothing still takes a line"
+        );
     }
 
     #[test]

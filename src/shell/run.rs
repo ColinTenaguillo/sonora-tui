@@ -64,16 +64,14 @@ fn open_collection(
             // An album is a page of its own, the artist's shape: its tracks
             // and, under them, the rows the web draws -- more by the
             // artist, other versions, related records.
-            Collection::Album(id) => {
-                match client.album_page(id, &title).await {
-                    Ok(page) => {
-                        let page = Box::new(page);
-                        let _ = tx.send(Action::ArtistLoaded { request, page });
-                        return;
-                    }
-                    Err(e) => Err(e),
+            Collection::Album(id) => match client.album_page(id, &title).await {
+                Ok(page) => {
+                    let page = Box::new(page);
+                    let _ = tx.send(Action::ArtistLoaded { request, page });
+                    return;
                 }
-            }
+                Err(e) => Err(e),
+            },
             // Named alongside, best-effort: a radio that cannot be saved
             // still plays.
             Collection::Radio(seed) => {
@@ -88,19 +86,17 @@ fn open_collection(
             // A genre, a mood or a decade is a page of rows, not a list of
             // tracks — the same shape Explore itself is, so it comes back
             // as its own reply and takes the pane.
-            Collection::Page { title, path } => {
-                match client.page_of_rows(path).await {
-                    Ok(home) => {
-                        let _ = tx.send(Action::PageLoaded {
-                            request,
-                            title: title.clone(),
-                            home: Box::new(home),
-                        });
-                        return;
-                    }
-                    Err(e) => Err(e),
+            Collection::Page { title, path } => match client.page_of_rows(path).await {
+                Ok(home) => {
+                    let _ = tx.send(Action::PageLoaded {
+                        request,
+                        title: title.clone(),
+                        home: Box::new(home),
+                    });
+                    return;
                 }
-            }
+                Err(e) => Err(e),
+            },
             // The row knew the track and not its album or artist: the track
             // names them, and what it names takes the view as `OpenTarget`,
             // which is fetched in its turn.
@@ -260,7 +256,8 @@ pub async fn run(
             match provider.restore().await {
                 Ok(Some(session)) => {
                     tracing::info!("resuming the stored {} session", provider.name());
-                    let session = crate::catalogue::Session::open(std::sync::Arc::clone(&provider), session);
+                    let session =
+                        crate::catalogue::Session::open(std::sync::Arc::clone(&provider), session);
                     app.session = Some(std::sync::Arc::new(session));
                 }
                 Ok(None) => {
@@ -621,7 +618,9 @@ pub async fn run(
                                             Some(track) => client
                                                 .add_track_to_playlist(&uuid, &track)
                                                 .await
-                                                .map(|()| (format!("added to {name}"), uuid, false, 0)),
+                                                .map(|()| {
+                                                    (format!("added to {name}"), uuid, false, 0)
+                                                }),
                                             None => Ok((format!("created {name}"), uuid, false, 0)),
                                         },
                                         Err(e) => Err(e),
@@ -645,10 +644,13 @@ pub async fn run(
                         let (client, tx) = (std::sync::Arc::clone(session), action_tx.clone());
                         let (uuid, track) = (uuid.clone(), track.clone());
                         tokio::spawn(async move {
-                            let done = client
-                                .remove_track_from_playlist(&uuid, &track)
-                                .await
-                                .map(|()| ("taken out of the playlist".to_string(), uuid, false, -1));
+                            let done =
+                                client
+                                    .remove_track_from_playlist(&uuid, &track)
+                                    .await
+                                    .map(|()| {
+                                        ("taken out of the playlist".to_string(), uuid, false, -1)
+                                    });
                             finish_edit(&client, &tx, done).await;
                         });
                     }
@@ -718,8 +720,7 @@ pub async fn run(
                 // is a queue like any other and the skip keys work on it.
                 Action::Autoplay { seed } => {
                     if let Some(session) = &app.session {
-                        let (client, tx) =
-                            (std::sync::Arc::clone(session), action_tx.clone());
+                        let (client, tx) = (std::sync::Arc::clone(session), action_tx.clone());
                         let seed = seed.clone();
                         tokio::spawn(async move {
                             match client.track_radio(&seed).await {
@@ -742,8 +743,7 @@ pub async fn run(
                 Action::RunSearch(query) => {
                     let query = query.clone();
                     if let Some(session) = &app.session {
-                        let (client, t) =
-                            (std::sync::Arc::clone(session), action_tx.clone());
+                        let (client, t) = (std::sync::Arc::clone(session), action_tx.clone());
                         tokio::spawn(async move {
                             match client.search(&query).await {
                                 Ok(results) => {
@@ -763,8 +763,7 @@ pub async fn run(
                 }
                 Action::LoadHome => {
                     if let Some(session) = &app.session {
-                        let (client, t) =
-                            (std::sync::Arc::clone(session), action_tx.clone());
+                        let (client, t) = (std::sync::Arc::clone(session), action_tx.clone());
                         tokio::spawn(async move {
                             match client.home().await {
                                 Ok(home) => {
@@ -789,8 +788,7 @@ pub async fn run(
                 }
                 Action::LoadFeed => {
                     if let Some(session) = &app.session {
-                        let (client, t) =
-                            (std::sync::Arc::clone(session), action_tx.clone());
+                        let (client, t) = (std::sync::Arc::clone(session), action_tx.clone());
                         tokio::spawn(async move {
                             match client.feed().await {
                                 Ok(cards) => {
@@ -807,8 +805,7 @@ pub async fn run(
                 }
                 Action::LoadExplore => {
                     if let Some(session) = &app.session {
-                        let (client, t) =
-                            (std::sync::Arc::clone(session), action_tx.clone());
+                        let (client, t) = (std::sync::Arc::clone(session), action_tx.clone());
                         tokio::spawn(async move {
                             match client.explore().await {
                                 Ok(home) => {
@@ -962,11 +959,8 @@ pub async fn run(
     app.settle_listen(app.now_playing.position);
     let sending = crate::scrobble::drain(&app.scrobblers, &mut app.scrobble_outbox);
     if !sending.is_empty() {
-        let _ = tokio::time::timeout(
-            Duration::from_secs(3),
-            futures::future::join_all(sending),
-        )
-        .await;
+        let _ =
+            tokio::time::timeout(Duration::from_secs(3), futures::future::join_all(sending)).await;
     }
     Ok(())
 }
@@ -1097,7 +1091,8 @@ async fn sign_in(
     if provider.stored() {
         if let Ok(Some(session)) = provider.restore().await {
             tracing::info!("resumed the stored {name} session");
-            let session = crate::catalogue::Session::open(std::sync::Arc::clone(&provider), session);
+            let session =
+                crate::catalogue::Session::open(std::sync::Arc::clone(&provider), session);
             let _ = tx.send(Action::SessionOpened(std::sync::Arc::new(session)));
             return;
         }
@@ -1118,7 +1113,8 @@ async fn sign_in(
     match provider.sign_in(method, prompt, input).await {
         Ok(session) => {
             tracing::info!("signed in to {name}");
-            let session = crate::catalogue::Session::open(std::sync::Arc::clone(&provider), session);
+            let session =
+                crate::catalogue::Session::open(std::sync::Arc::clone(&provider), session);
             let _ = tx.send(Action::SessionOpened(std::sync::Arc::new(session)));
         }
         Err(e) => {

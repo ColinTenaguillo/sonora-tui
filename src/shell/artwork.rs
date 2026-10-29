@@ -533,7 +533,15 @@ async fn fetch_and_decode(
         // The local provider's covers: the file beside the album, or the
         // tag's picture written out to the cache.
         Some(path) => tokio::fs::read(path).await.ok()?,
-        None => http.get(sized(url).as_ref()).send().await.ok()?.bytes().await.ok()?.to_vec(),
+        None => http
+            .get(sized(url).as_ref())
+            .send()
+            .await
+            .ok()?
+            .bytes()
+            .await
+            .ok()?
+            .to_vec(),
     };
     let picker = picker.clone();
 
@@ -629,7 +637,11 @@ mod tests {
         let square = squared(image::DynamicImage::ImageRgb8(img));
         assert_eq!((square.width(), square.height()), (90, 90));
         let rgb = square.to_rgb8();
-        assert_eq!(rgb.get_pixel(0, 0).0[0], 35, "the strip starts 35 pixels in");
+        assert_eq!(
+            rgb.get_pixel(0, 0).0[0],
+            35,
+            "the strip starts 35 pixels in"
+        );
         let same = squared(image::DynamicImage::ImageRgb8(image::RgbImage::new(50, 50)));
         assert_eq!((same.width(), same.height()), (50, 50));
     }
@@ -644,9 +656,13 @@ mod tests {
         let path = dir.join("cover.png");
         image::RgbImage::new(8, 8).save(&path).unwrap();
         let url = format!("file://{}", path.display());
-        let decoded =
-            fetch_and_decode(&reqwest::Client::new(), &Picker::halfblocks(), &url, Shape::Square)
-                .await;
+        let decoded = fetch_and_decode(
+            &reqwest::Client::new(),
+            &Picker::halfblocks(),
+            &url,
+            Shape::Square,
+        )
+        .await;
         let _ = std::fs::remove_dir_all(&dir);
         assert!(decoded.is_some());
     }

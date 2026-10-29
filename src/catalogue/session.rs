@@ -9,14 +9,14 @@ use std::sync::Arc;
 
 use music::{GenreItem, GenreSection, MusicApi, ProviderSession, ReleaseType};
 
+use super::Error;
 use crate::browse::{Home, HomeRow, RowKind};
 use crate::catalogue::{Favourable, Provider, Result};
+use crate::domain::{Card, Target};
 use crate::domain::{Quality, Track, TrackId};
 use crate::library::{Album, Artist, ArtistPage, FavouriteIds, PageKind, Playlist};
 use crate::playback::StreamMeta;
 use crate::search::Results;
-use crate::domain::{Card, Target};
-use super::Error;
 
 pub struct Session {
     name: &'static str,
@@ -198,7 +198,11 @@ fn artists_behind(tracks: &[music::Track], albums: &[music::Album]) -> Vec<Behin
     let refs = tracks
         .iter()
         .flat_map(|t| t.artist_refs.iter().map(move |a| (a, &t.cover)))
-        .chain(albums.iter().flat_map(|al| al.artist_refs.iter().map(move |a| (a, &al.cover))));
+        .chain(
+            albums
+                .iter()
+                .flat_map(|al| al.artist_refs.iter().map(move |a| (a, &al.cover))),
+        );
     for (artist, cover) in refs {
         let Some(id) = &artist.id else { continue };
         match seen.iter_mut().find(|(b, _)| &b.id == id) {
@@ -231,7 +235,10 @@ fn same_tracks(again: &[GenreItem], picks: &[GenreItem]) -> bool {
     };
     !again.is_empty()
         && again.len() <= picks.len()
-        && again.iter().zip(picks).all(|(a, p)| id(a).is_some() && id(a) == id(p))
+        && again
+            .iter()
+            .zip(picks)
+            .all(|(a, p)| id(a).is_some() && id(a) == id(p))
 }
 
 /// A shelf's title as text. The local provider names its shelves by the
@@ -342,7 +349,12 @@ fn page(id: &str, a: music::Artist) -> ArtistPage {
         fans: a.monthly_listeners,
         picture: a.cover_large,
         bio: a.biography,
-        top_tracks: a.top_tracks.into_iter().take(TOP_TRACKS).map(track).collect(),
+        top_tracks: a
+            .top_tracks
+            .into_iter()
+            .take(TOP_TRACKS)
+            .map(track)
+            .collect(),
         albums: albums.into_iter().map(album).collect(),
         singles: singles.into_iter().map(album).collect(),
         ..ArtistPage::default()
@@ -382,11 +394,17 @@ impl Session {
     }
 
     pub async fn add_track_to_playlist(&self, uuid: &str, id: &TrackId) -> Result<()> {
-        self.api.add_track_to_playlist(uuid, &id.0).await.map_err(error)
+        self.api
+            .add_track_to_playlist(uuid, &id.0)
+            .await
+            .map_err(error)
     }
 
     pub async fn remove_track_from_playlist(&self, uuid: &str, id: &TrackId) -> Result<()> {
-        self.api.remove_track_from_playlist(uuid, &id.0).await.map_err(error)
+        self.api
+            .remove_track_from_playlist(uuid, &id.0)
+            .await
+            .map_err(error)
     }
 
     pub async fn playlists(&self) -> Result<Vec<Playlist>> {
@@ -434,7 +452,11 @@ impl Session {
         Ok(FavouriteIds {
             albums: albums.map_err(error)?.into_iter().map(|a| a.id).collect(),
             artists: artists.map_err(error)?.into_iter().map(|a| a.id).collect(),
-            playlists: playlists.map_err(error)?.into_iter().map(|p| p.id).collect(),
+            playlists: playlists
+                .map_err(error)?
+                .into_iter()
+                .map(|p| p.id)
+                .collect(),
         })
     }
 
@@ -490,7 +512,12 @@ impl Session {
         let mut page = page(id, artist.map_err(error)?);
         if let Ok(more) = more {
             if !more.top_tracks.is_empty() {
-                page.top_tracks = more.top_tracks.into_iter().take(TOP_TRACKS).map(track).collect();
+                page.top_tracks = more
+                    .top_tracks
+                    .into_iter()
+                    .take(TOP_TRACKS)
+                    .map(track)
+                    .collect();
             }
             page.appears_on = more.appears_on.into_iter().map(album).collect();
         }
@@ -530,7 +557,11 @@ impl Session {
             tracks: tracks.into_iter().map(track).collect(),
             albums: albums.into_iter().map(album).collect(),
             artists,
-            playlists: playlists.map_err(error)?.into_iter().map(playlist).collect(),
+            playlists: playlists
+                .map_err(error)?
+                .into_iter()
+                .map(playlist)
+                .collect(),
         })
     }
 
@@ -608,7 +639,10 @@ mod tests {
         let picks = vec![track("a"), track("b"), track("c")];
         assert!(super::same_tracks(&[track("a"), track("b")], &picks));
         assert!(!super::same_tracks(&[track("b"), track("a")], &picks));
-        assert!(!super::same_tracks(&[], &picks), "an empty row repeats nothing");
+        assert!(
+            !super::same_tracks(&[], &picks),
+            "an empty row repeats nothing"
+        );
     }
 
     #[test]
@@ -619,7 +653,9 @@ mod tests {
                 ..Default::default()
             })
             .expect("a track card");
-            let super::GenreItem::Track(mut t) = item else { unreachable!() };
+            let super::GenreItem::Track(mut t) = item else {
+                unreachable!()
+            };
             t.artist_refs = artists
                 .iter()
                 .map(|(name, id)| music::ArtistRef {
@@ -636,7 +672,10 @@ mod tests {
         ];
         tracks[1].cover = Some("https://x/sch.jpg".into());
         let found = super::artists_behind(&tracks, &[]);
-        let names: Vec<(&str, &str)> = found.iter().map(|b| (b.id.as_str(), b.name.as_str())).collect();
+        let names: Vec<(&str, &str)> = found
+            .iter()
+            .map(|b| (b.id.as_str(), b.name.as_str()))
+            .collect();
         assert_eq!(names, [("j", "Jul"), ("s", "SCH")]);
         // The first cover seen stands in for a portrait: Jul's first track
         // had none, the second had one.
@@ -645,7 +684,10 @@ mod tests {
 
     #[test]
     fn a_shelf_named_by_a_translation_key_reads_as_english() {
-        assert_eq!(super::heading("home-recently-added".into()), "Recently added");
+        assert_eq!(
+            super::heading("home-recently-added".into()),
+            "Recently added"
+        );
         assert_eq!(super::heading("Quick picks".into()), "Quick picks");
     }
 
@@ -767,7 +809,11 @@ mod tests {
         assert_eq!(p.albums.len(), 1);
         assert_eq!(p.singles[0].title, "Blue Haze");
         assert_eq!(p.albums[0].year.as_deref(), Some("1959"));
-        assert_eq!(p.top_tracks.len(), TOP_TRACKS, "a handful, as the web shows");
+        assert_eq!(
+            p.top_tracks.len(),
+            TOP_TRACKS,
+            "a handful, as the web shows"
+        );
     }
 
     #[test]

@@ -516,7 +516,12 @@ mod tests {
     fn local_folders_expand_the_tilde_and_skip_blanks() {
         let home = std::env::var_os("HOME").map(PathBuf::from).expect("a home");
         let local = LocalConfig {
-            folders: vec!["~/Music".into(), " ".into(), "/media/flac".into(), "~".into()],
+            folders: vec![
+                "~/Music".into(),
+                " ".into(),
+                "/media/flac".into(),
+                "~".into(),
+            ],
         };
         assert_eq!(
             local.folders(),

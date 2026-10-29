@@ -273,7 +273,9 @@ pub fn bio_overflow(page: &ArtistPage, width: u16, height: u16) -> u16 {
     let total = Paragraph::new(bio)
         .wrap(ratatui::widgets::Wrap { trim: true })
         .line_count(text_w);
-    u16::try_from(total).unwrap_or(u16::MAX).saturating_sub(lines)
+    u16::try_from(total)
+        .unwrap_or(u16::MAX)
+        .saturating_sub(lines)
 }
 
 /// The rows the header takes at this size.

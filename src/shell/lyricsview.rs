@@ -203,9 +203,10 @@ pub fn render(
         None | Some(Found::Searching) => (vec![Line::from("Looking for the words…")], None),
         Some(Found::Nothing) => (vec![Line::from("No lyrics found for this track.")], None),
         Some(Found::Instrumental) => (vec![Line::from("♪ Instrumental ♪")], None),
-        Some(Found::Sheet(music::Lyrics::Plain { text, .. })) => {
-            (text.lines().map(|l| Line::from(l.to_string())).collect(), None)
-        }
+        Some(Found::Sheet(music::Lyrics::Plain { text, .. })) => (
+            text.lines().map(|l| Line::from(l.to_string())).collect(),
+            None,
+        ),
         Some(Found::Sheet(music::Lyrics::Synced { lines })) => synced_lines(lines, at, palette),
     };
 
@@ -240,14 +241,17 @@ mod tests {
             voice: music::Voice::default(),
         };
         music::Lyrics::Synced {
-            lines: Arc::from(vec![line(0, "First"), line(10, "Second"), line(20, "Third")]),
+            lines: Arc::from(vec![
+                line(0, "First"),
+                line(10, "Second"),
+                line(20, "Third"),
+            ]),
         }
     }
 
     fn drawn(pane: &Pane, track: Option<&Track>, at: Duration) -> String {
-        let buf = crate::shell::geometry::draw(80, 12, |f, area, p| {
-            render(f, area, p, pane, track, at)
-        });
+        let buf =
+            crate::shell::geometry::draw(80, 12, |f, area, p| render(f, area, p, pane, track, at));
         crate::shell::geometry::text(&buf)
     }
 
@@ -276,7 +280,10 @@ mod tests {
         pane.found.insert(track.id.clone(), Found::Sheet(sheet()));
         let text = drawn(&pane, Some(&track), Duration::from_secs(12));
         assert!(text.contains("Second"), "{text}");
-        assert!(text.contains("Song — Someone"), "headed by the track:\n{text}");
+        assert!(
+            text.contains("Song — Someone"),
+            "headed by the track:\n{text}"
+        );
 
         assert!(drawn(&pane, None, Duration::ZERO).contains("Nothing is playing"));
     }

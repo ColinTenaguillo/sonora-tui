@@ -55,13 +55,20 @@ struct Inner {
 /// that fails is retried on the minute rather than in a tight loop.
 fn renew_in(expires_at: u64, now: u64) -> Duration {
     const MARGIN: u64 = 5 * 60;
-    Duration::from_secs(expires_at.saturating_sub(now).saturating_sub(MARGIN).max(60))
+    Duration::from_secs(
+        expires_at
+            .saturating_sub(now)
+            .saturating_sub(MARGIN)
+            .max(60),
+    )
 }
 
 /// A poisoned lock holds nothing worse than a stale token, so it is taken
 /// anyway rather than panicking.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn now_unix() -> u64 {
@@ -244,12 +251,13 @@ impl TidalProvider {
     async fn device_flow(&self, prompt: PromptSink) -> Result<StoredToken> {
         let inner = &self.inner;
         inner.abandoned.store(false, Ordering::SeqCst);
-        let code = auth::start_login(&inner.http, &inner.auth)
-            .await
-            .map_err(|error| match error.is_refusal() {
-                true => anyhow!(SignInFailure(SignInProblem::Refused)),
-                false => anyhow!(SignInFailure(SignInProblem::Network)),
-            })?;
+        let code =
+            auth::start_login(&inner.http, &inner.auth)
+                .await
+                .map_err(|error| match error.is_refusal() {
+                    true => anyhow!(SignInFailure(SignInProblem::Refused)),
+                    false => anyhow!(SignInFailure(SignInProblem::Network)),
+                })?;
         prompt(SignInPrompt::Code {
             code: code.user_code.clone(),
             url: code.verification_uri.clone(),
@@ -378,7 +386,12 @@ impl MusicApi for TidalApi {
             MediaKind::Album => "album",
             MediaKind::Artist => "artist",
             MediaKind::Playlist => match id.starts_with(map::MIX) {
-                true => return Some(format!("https://tidal.com/browse/mix/{}", &id[map::MIX.len()..])),
+                true => {
+                    return Some(format!(
+                        "https://tidal.com/browse/mix/{}",
+                        &id[map::MIX.len()..]
+                    ))
+                }
                 false => "playlist",
             },
         };

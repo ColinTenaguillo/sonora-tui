@@ -238,7 +238,10 @@ pub fn drain(linked: &[Linked], outbox: &mut Outbox) -> Vec<Sending> {
             let play = play.clone();
             sending.push(Box::pin(async move {
                 if let Err(error) = l.service.now_playing(&l.account, &play).await {
-                    tracing::info!("scrobbling: {} now playing failed: {error:#}", l.service.id());
+                    tracing::info!(
+                        "scrobbling: {} now playing failed: {error:#}",
+                        l.service.id()
+                    );
                 }
             }));
         }
@@ -252,11 +255,7 @@ pub fn drain(linked: &[Linked], outbox: &mut Outbox) -> Vec<Sending> {
             batch.extend(plays.iter().cloned());
             sending.push(Box::pin(async move {
                 match l.service.scrobble(&l.account, &batch).await {
-                    Ok(()) => tracing::info!(
-                        "scrobbled {} to {}",
-                        batch.len(),
-                        l.service.id()
-                    ),
+                    Ok(()) => tracing::info!("scrobbled {} to {}", batch.len(), l.service.id()),
                     Err(error) => {
                         tracing::warn!(
                             "scrobbling: {} refused {}, kept for the next try: {error:#}",
@@ -293,10 +292,17 @@ mod tests {
                 key: "mk".into(),
             }),
         };
-        assert!(matches!(secret_for(&config, "lastfm"), Some(Secret::Keys { key, secret }) if key == "k" && secret == "s"));
+        assert!(
+            matches!(secret_for(&config, "lastfm"), Some(Secret::Keys { key, secret }) if key == "k" && secret == "s")
+        );
         assert!(matches!(secret_for(&config, "librefm"), Some(Secret::None)));
-        assert!(secret_for(&config, "listenbrainz").is_none(), "a blank token names nothing");
-        assert!(matches!(secret_for(&config, "maloja"), Some(Secret::Server { url, .. }) if url == "https://m"));
+        assert!(
+            secret_for(&config, "listenbrainz").is_none(),
+            "a blank token names nothing"
+        );
+        assert!(
+            matches!(secret_for(&config, "maloja"), Some(Secret::Server { url, .. }) if url == "https://m")
+        );
         assert!(secret_for(&ScrobbleConfig::default(), "lastfm").is_none());
     }
 
@@ -311,12 +317,22 @@ mod tests {
             at: SystemTime::UNIX_EPOCH,
         };
         keep(&backlog, "lastfm", vec![play("one"), play("two")]);
-        assert!(owed(&backlog, "listenbrainz").is_empty(), "another service owes nothing");
+        assert!(
+            owed(&backlog, "listenbrainz").is_empty(),
+            "another service owes nothing"
+        );
         let again = owed(&backlog, "lastfm");
-        assert_eq!(again.iter().map(|p| p.title.as_str()).collect::<Vec<_>>(), ["one", "two"]);
+        assert_eq!(
+            again.iter().map(|p| p.title.as_str()).collect::<Vec<_>>(),
+            ["one", "two"]
+        );
         assert!(owed(&backlog, "lastfm").is_empty(), "taken out once");
 
-        keep(&backlog, "lastfm", (0..BACKLOG_CAP + 5).map(|i| play(&i.to_string())).collect());
+        keep(
+            &backlog,
+            "lastfm",
+            (0..BACKLOG_CAP + 5).map(|i| play(&i.to_string())).collect(),
+        );
         let kept = owed(&backlog, "lastfm");
         assert_eq!(kept.len(), BACKLOG_CAP);
         assert_eq!(kept[0].title, "5", "the oldest go first");
@@ -327,7 +343,10 @@ mod tests {
         let mut track = Track::sample("Song", "Someone", Duration::from_secs(200));
         track.album = String::new();
         let play = play_of(&track, SystemTime::UNIX_EPOCH).expect("a listen");
-        assert_eq!((play.artist.as_str(), play.title.as_str()), ("Someone", "Song"));
+        assert_eq!(
+            (play.artist.as_str(), play.title.as_str()),
+            ("Someone", "Song")
+        );
         assert!(play.album.is_none(), "an empty album is no album");
         assert!(play.earned(Duration::from_secs(100)), "half of it");
         assert!(!play.earned(Duration::from_secs(99)));
@@ -368,8 +387,17 @@ mod tests {
             },
             ..linked
         };
-        outbox.finished.push(play_of(&Track::sample("S", "A", Duration::from_secs(60)), SystemTime::UNIX_EPOCH).unwrap());
-        assert!(drain(&[off], &mut outbox).is_empty(), "a switched-off account sends nothing");
+        outbox.finished.push(
+            play_of(
+                &Track::sample("S", "A", Duration::from_secs(60)),
+                SystemTime::UNIX_EPOCH,
+            )
+            .unwrap(),
+        );
+        assert!(
+            drain(&[off], &mut outbox).is_empty(),
+            "a switched-off account sends nothing"
+        );
         assert_eq!(linked_label(), "ListenBrainz");
     }
 
