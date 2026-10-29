@@ -17,8 +17,20 @@ cargo clippy --all-targets
 ```
 
 **Build from the committed `Cargo.lock`.** The macOS media-key crate declares
-a dependency it does not compile against, and the lockfile holds that one back
-to a version that works. `cargo update` breaks the macOS build.
+dependencies it does not compile against, and the lockfile holds those back to
+versions that work: `mediaplayer` must stay on `apple-cf` 0.7 and
+`doom-fish-utils` 0.3, with a second `doom-fish-utils` 0.2 for `apple-cf` itself.
+A plain `cargo update` re-resolves both and breaks the macOS build. After one,
+put the pins back and check the `mediaplayer` entry in the lockfile still names
+`doom-fish-utils 0.3.x`:
+
+```sh
+cargo update -p apple-cf@0.9.3 --precise 0.7.1
+```
+
+If that merges the two `doom-fish-utils` into 0.2, edit the lockfile by hand so
+`mediaplayer` depends on the 0.3 one, then `cargo build` prunes the rest.
+Dependabot's weekly PR is built on CI for both platforms, which is the check.
 
 ## How the crate is laid out
 
