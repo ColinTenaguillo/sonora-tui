@@ -101,6 +101,47 @@ fn open_collection(
                     Err(e) => Err(e),
                 }
             }
+            // The row knew the track and not its album or artist: the track
+            // names them, and what it names takes the view as `OpenTarget`,
+            // which is fetched in its turn.
+            Collection::TrackAlbum(id) | Collection::TrackArtist(id) => {
+                let album = matches!(target, Collection::TrackAlbum(_));
+                match client.track(id).await {
+                    Ok(track) => {
+                        let found = if album {
+                            album_of(&track)
+                        } else {
+                            artist_of(&track)
+                        };
+                        match found {
+                            Some((target, title)) => {
+                                // The track's own artist and sleeve head an
+                                // album; an artist's page brings its own
+                                // picture.
+                                let (subtitle, cover) = if album {
+                                    (track.artist.clone(), track.cover.clone())
+                                } else {
+                                    (String::new(), None)
+                                };
+                                let _ = tx.send(Action::OpenTarget {
+                                    request,
+                                    target,
+                                    title,
+                                    subtitle,
+                                    cover,
+                                });
+                            }
+                            None => tracing::info!(
+                                "{:?} names no {}",
+                                track.title,
+                                if album { "album" } else { "artist" }
+                            ),
+                        }
+                        return;
+                    }
+                    Err(e) => Err(e),
+                }
+            }
             // An artist is a page of its own — three sections rather than
             // one list — so it comes back as its own reply.
             Collection::Artist(id) => match client.artist_page(id).await {
@@ -452,52 +493,6 @@ pub async fn run(
                             options: app.playback_options(),
                         });
                         load_collection(std::sync::Arc::clone(session), action_tx.clone());
-                    }
-                }
-                // The card is a track whose radio the page did not send.
-                // Fetch the track for it, then open the radio the same way
-                // the key would have.
-                Action::FetchTrackAlbum(id) | Action::FetchTrackArtist(id) => {
-                    if let Some(session) = &app.session {
-                        let (client, tx) =
-                            (std::sync::Arc::clone(session), action_tx.clone());
-                        let id = id.clone();
-                        let album = matches!(action, Action::FetchTrackAlbum(_));
-                        tokio::spawn(async move {
-                            match client.track(&id).await {
-                                Ok(track) => {
-                                    let found = if album {
-                                        album_of(&track)
-                                    } else {
-                                        artist_of(&track)
-                                    };
-                                    match found {
-                                        Some((target, title)) => {
-                                            // The track's own artist and sleeve
-                                            // head an album; an artist's page
-                                            // brings its own picture.
-                                            let (subtitle, cover) = if album {
-                                                (track.artist.clone(), track.cover.clone())
-                                            } else {
-                                                (String::new(), None)
-                                            };
-                                            let _ = tx.send(Action::OpenTarget {
-                                                target,
-                                                title,
-                                                subtitle,
-                                                cover,
-                                            });
-                                        }
-                                        None => tracing::info!(
-                                            "{:?} names no {}",
-                                            track.title,
-                                            if album { "album" } else { "artist" }
-                                        ),
-                                    }
-                                }
-                                Err(e) => tracing::warn!("could not fetch the track: {e}"),
-                            }
-                        });
                     }
                 }
                 // A card that opens something: a playlist, an album, an
