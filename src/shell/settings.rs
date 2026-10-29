@@ -296,7 +296,7 @@ pub struct Edit {
 /// The box a text row opens: its label, what is typed, and the keys.
 pub fn render_edit(frame: &mut Frame, area: Rect, palette: &Palette, edit: &Edit) {
     use ratatui::style::{Modifier, Style};
-    use ratatui::widgets::{Block, Borders, Clear};
+    use ratatui::widgets::{Block, BorderType, Borders, Clear};
     let secret = matches!(edit.setting.kind(), Kind::Text { secret: true });
     let shown = match secret {
         true => "\u{2022}".repeat(edit.typed.chars().count()),
@@ -333,6 +333,7 @@ pub fn render_edit(frame: &mut Frame, area: Rect, palette: &Palette, edit: &Edit
         Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(palette.rule())
                 .padding(ratatui::widgets::Padding::horizontal(1))
                 .title(" Setting ")

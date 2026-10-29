@@ -1,7 +1,7 @@
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 #[derive(Debug, Clone, Default)]
@@ -287,7 +287,12 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
         Paragraph::new(lines)
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true })
-            .block(Block::default().borders(Borders::ALL).title(" sonora-tui ")),
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .title(" sonora-tui "),
+            ),
         box_area,
     );
 }

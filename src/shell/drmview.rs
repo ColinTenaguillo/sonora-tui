@@ -11,7 +11,7 @@
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use super::theme::Palette;
@@ -142,6 +142,7 @@ pub fn render(frame: &mut Frame, area: Rect, palette: &Palette, cdm: &Cdm) {
     frame.render_widget(Clear, modal);
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .title(" Widevine ")
         .border_style(palette.rule());
     let inner = block.inner(modal);
