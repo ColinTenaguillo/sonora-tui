@@ -51,7 +51,7 @@ impl Session {
 
     /// Whether the library is the whole catalogue rather than the stars.
     fn whole(&self) -> bool {
-        self.shape == music::Shape::Catalog
+        self.shape.is_catalog()
     }
 
     /// A TIDAL session with no token behind it, for tests and examples:

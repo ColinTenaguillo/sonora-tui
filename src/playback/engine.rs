@@ -59,7 +59,11 @@ impl Default for Options {
         Self {
             normalisation: false,
             gapless: true,
-            equalizer: music::Equalizer::default(),
+            equalizer: music::equalizer::EqualizerWriter::new(
+                false,
+                music::equalizer::Preset::Flat.curve(),
+            )
+            .reader(),
         }
     }
 }
@@ -221,6 +225,14 @@ fn config(options: &Options) -> music::PlaybackConfig {
         position_interval: Duration::from_millis(250),
         gain: 1.0,
         equalizer: options.equalizer.clone(),
+        // The server-side conversion, the quality pick, the level meter,
+        // the spectrum analyzer and the download vault are sonora's desktop
+        // features; the TUI has no screen for any of them yet.
+        transcode: music::Transcode::default(),
+        quality: music::Quality::default(),
+        meter: music::Meter::default(),
+        analyzer: music::Analyzer::default(),
+        vault: None,
     }
 }
 
@@ -416,7 +428,8 @@ fn translate(
         | Engine::Downloaded { id: None }
         | Engine::Unavailable { id: None }
         | Engine::Throttled { id: None }
-        | Engine::OutputChanged => None,
+        | Engine::OutputChanged
+        | Engine::Signal { .. } => None,
     }
 }
 
