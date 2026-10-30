@@ -1,9 +1,11 @@
 name: Update music
 
-# `music` is a git dependency pinned to a commit of sonorahq/sonora, which
-# Dependabot does not move. Weekly: read sonora's main, re-pin, build and
-# test, and open a PR with the result. Nothing is opened when the pin is
-# already current or when the build fails; the failed run is the signal.
+# `music` and `storage` are git dependencies pinned to a commit of
+# sonorahq/sonora, which Dependabot does not move, and `[patch.crates-io]`
+# holds the librespot and rodio forks that commit's workspace builds with.
+# Weekly: read sonora's main, move all three pins to what it names, build
+# and test, and open a PR with the result. Nothing is opened when the pin
+# is already current or when the build fails; the failed run is the signal.
 on:
   schedule:
     - cron: "0 7 * * 1"
@@ -27,12 +29,21 @@ jobs:
         id: pin
         run: |
           set -euo pipefail
-          old=$(sed -nE 's/^music = \{ git = "([^"]+)", rev = "([0-9a-f]+)".*/\2/p' Cargo.toml)
+          rev() { sed -nE "s#^$1 = \{ git = \"https://github.com/$2\", rev = \"([0-9a-f]+)\".*#\1#p" "$3" | head -1; }
+          old=$(rev music sonorahq/sonora Cargo.toml)
           new=$(git ls-remote https://github.com/sonorahq/sonora HEAD | cut -f1)
           echo "old=$old new=$new"
           if [ "$old" = "$new" ]; then echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
-          sed -i -E "s/^(music = \{ git = \"[^\"]+\", rev = \")$old\"/\1$new\"/" Cargo.toml
-          grep -q "rev = \"$new\"" Cargo.toml
+          curl -fsSL "https://raw.githubusercontent.com/sonorahq/sonora/$new/Cargo.toml" > /tmp/sonora.toml
+          old_ls=$(rev librespot-core sonorahq/librespot Cargo.toml)
+          new_ls=$(rev librespot-core sonorahq/librespot /tmp/sonora.toml)
+          old_rodio=$(rev rodio RustAudio/rodio Cargo.toml)
+          new_rodio=$(rev rodio RustAudio/rodio /tmp/sonora.toml)
+          test -n "$new_ls" && test -n "$new_rodio"
+          # Each rev is a full sha, unique in the file, so a plain substitution
+          # moves music, storage and every librespot crate together.
+          sed -i -e "s/$old/$new/g" -e "s/$old_ls/$new_ls/g" -e "s/$old_rodio/$new_rodio/g" Cargo.toml
+          test "$(grep -c "$old\|$old_ls\|$old_rodio" Cargo.toml)" = 0
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "old=${old:0:7}" >> "$GITHUB_OUTPUT"
           echo "new=${new:0:7}" >> "$GITHUB_OUTPUT"
@@ -47,13 +58,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.pin.outputs.changed == 'true'
 
-      # Same gate as CI, run here because a PR opened with GITHUB_TOKEN does
-      # not trigger CI on its own.
+      # A build without --locked moves only what the changed pins need and
+      # leaves every other locked version, mediaplayer's included, alone;
+      # `cargo update` would not (CONTRIBUTING). Same gate as CI, run here
+      # because a PR opened with GITHUB_TOKEN does not trigger CI on its own.
       - name: Update the lockfile, build and test
         if: steps.pin.outputs.changed == 'true'
         run: |
-          cargo update -p music
-          cargo build --locked --all-targets
+          cargo build --all-targets
           cargo test --locked
 
       - uses: peter-evans/create-pull-request@v8
