@@ -167,8 +167,12 @@ impl Inner {
                 follow_artists: true,
                 radio: true,
                 playcounts: false,
-                library: false,
                 pins: false,
+                transcode: false,
+                keeps: false,
+                downloads: false,
+                qualities: &[],
+                download_gap: Duration::ZERO,
             },
         }
     }

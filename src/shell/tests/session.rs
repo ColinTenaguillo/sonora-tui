@@ -595,18 +595,18 @@ fn the_equaliser_setting_reaches_the_shared_equaliser_at_once() {
     app.config_path = None;
     app.config.audio.equalizer = "rock".into();
     app.apply_equalizer();
-    assert!(app.equalizer.enabled());
+    assert!(app.equalizer.0.enabled());
     assert_eq!(
-        app.equalizer.gains(),
-        music::equalizer::Preset::Rock.gains()
+        *app.equalizer.0.curve(),
+        music::equalizer::Preset::Rock.curve()
     );
 
     app.config.audio.equalizer = "off".into();
     app.apply_equalizer();
-    assert!(!app.equalizer.enabled());
+    assert!(!app.equalizer.0.enabled());
     assert_eq!(
-        app.equalizer.gains(),
-        music::equalizer::Preset::Flat.gains(),
+        *app.equalizer.0.curve(),
+        music::equalizer::Preset::Flat.curve(),
         "flat for next time"
     );
 }

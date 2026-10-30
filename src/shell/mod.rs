@@ -964,6 +964,28 @@ pub enum Showing {
     Section(sidebar::Section),
 }
 
+/// The one writer of the equaliser the engine reads, off and flat until
+/// `apply_equalizer` puts the config's preset in. `EqualizerWriter` is
+/// neither `Default` nor `Debug`, which `App` derives.
+pub struct Equaliser(pub music::equalizer::EqualizerWriter);
+
+impl Default for Equaliser {
+    fn default() -> Self {
+        Self(music::equalizer::EqualizerWriter::new(
+            false,
+            music::equalizer::Preset::Flat.curve(),
+        ))
+    }
+}
+
+impl std::fmt::Debug for Equaliser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Equaliser")
+            .field("enabled", &self.0.enabled())
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct App {
     pub should_quit: bool,
@@ -981,9 +1003,9 @@ pub struct App {
     /// The sign-in task under way, to stop when the service is left: a
     /// session it opened afterwards would be the wrong service's.
     pub login_task: Option<tokio::task::AbortHandle>,
-    /// The equaliser the engine reads: a preset's gains, or flat and off.
+    /// The equaliser the engine reads: a preset's curve, or flat and off.
     /// Shared with the engine, so a change reaches the output at once.
-    pub equalizer: music::Equalizer,
+    pub equalizer: Equaliser,
     /// The sleep timer, when one is set.
     pub sleep: Option<Sleep>,
     /// The service the config names, signed in or not. `None` in a test,
@@ -1581,23 +1603,24 @@ impl App {
         crate::playback::Options {
             normalisation: self.config.audio.normalisation,
             gapless: self.config.audio.gapless,
-            equalizer: self.equalizer.clone(),
+            equalizer: self.equalizer.0.reader(),
         }
     }
 
     /// Put the config's preset into the equaliser the engine reads. `off`
     /// turns it off and leaves the gains flat, so turning it back on is
     /// not a surprise.
-    pub fn apply_equalizer(&self) {
+    pub fn apply_equalizer(&mut self) {
+        use music::equalizer::{Edit, Preset};
+        let eq = &mut self.equalizer.0;
         match settings::equalizer_preset(&self.config) {
             Some(preset) => {
-                self.equalizer.set_gains(&preset.gains());
-                self.equalizer.set_enabled(true);
+                eq.set_curve(preset.curve(), Edit::Replace);
+                eq.set_enabled(true);
             }
             None => {
-                self.equalizer.set_enabled(false);
-                self.equalizer
-                    .set_gains(&music::equalizer::Preset::Flat.gains());
+                eq.set_enabled(false);
+                eq.set_curve(Preset::Flat.curve(), Edit::Replace);
             }
         }
     }
