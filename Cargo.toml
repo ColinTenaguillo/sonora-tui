@@ -37,7 +37,7 @@ path = "src/main.rs"
 anyhow = "1"
 # `music::engine::Fetch` is an async-trait trait, so implementing it is too.
 async-trait = "0.1"
-base64 = "0.22"
+base64 = "0.23"
 # Needed for EventStream, which ratatui's crossterm re-export does not expose.
 # MUST track ratatui's crossterm version, or KeyEvent becomes two distinct types.
 crossterm = { version = "0.29", features = ["event-stream"] }
@@ -95,17 +95,17 @@ storage = { git = "https://github.com/sonorahq/sonora", rev = "b525b2a702ed81035
 # The OS media keys. MPRIS is a D-Bus interface, so it is Linux-only by
 # definition; macOS has its own below.
 [target.'cfg(target_os = "linux")'.dependencies]
-mpris-server = "0.10"
+mpris-server = "0.11"
 
 # Only to drive the MPRIS interface from the test suite, as a desktop would.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-zbus = "5"
+zbus = "6"
 
 # macOS has no MPRIS. Its media keys go to whatever registered with
 # MPRemoteCommandCenter, which needs a Core Foundation run loop on the main
 # thread -- see src/shell/mediakeys_macos.rs.
 [target.'cfg(target_os = "macos")'.dependencies]
-mediaplayer = "0.4.3"
+mediaplayer = "0.5.1"
 # The Core Foundation run loop. Held at 0.7 by the lockfile: mediaplayer
 # 0.4.3 builds against 0.7's CGRect and fails against 0.9's.
 apple-cf = "0.7"
