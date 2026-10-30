@@ -19,7 +19,12 @@ updates:
         patterns: ["*"]
     ignore:
       - dependency-name: apple-cf
+  # release.yml is cargo-dist's: `dist plan` fails when the file differs
+  # from what it generates, so actions/checkout there moves only when dist
+  # is upgraded (dist-workspace.toml) and the file regenerated.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: actions/checkout
