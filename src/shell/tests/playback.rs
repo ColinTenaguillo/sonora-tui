@@ -886,7 +886,10 @@ fn the_history_is_a_list_the_keys_work_in() {
     let back = key(&mut app, KeyCode::Esc).expect("escape steps back");
     app.update(back);
     assert!(app.list != Some(List::History), "escape leaves it");
-    assert!(app.take_repaint(), "and asks for the covers under it back");
+    assert!(
+        app.take_repaint() == Repaint::Wipe,
+        "and asks for the covers under it back"
+    );
 
     // One list at a time: opening one is a step forward from the other.
     key(&mut app, KeyCode::Char('H'));

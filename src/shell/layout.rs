@@ -76,6 +76,26 @@ pub fn split(area: Rect) -> Regions {
     }
 }
 
+/// As [`split`], with no sidebar: the pane takes the whole width above the
+/// bar.
+pub fn without_sidebar(area: Rect) -> Regions {
+    let full = split(area);
+    let none = Rect {
+        width: 0,
+        ..full.sidebar
+    };
+    Regions {
+        sidebar: none,
+        divider: none,
+        main: Rect {
+            x: area.x,
+            width: area.width,
+            ..full.main
+        },
+        now_playing: full.now_playing,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ratatui::layout::Rect;

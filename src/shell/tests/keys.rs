@@ -156,18 +156,19 @@ fn closing_the_help_repaints_what_it_covered() {
     // leaves. This checks the flag that asks for one.
     let mut app = signed_in(sidebar::Section::Music);
     app.showing_help = true;
-    assert!(!app.needs_repaint, "nothing to undo yet");
+    assert_eq!(app.repaint, Repaint::None, "nothing to undo yet");
 
     key(&mut app, KeyCode::Esc);
     assert!(!app.showing_help, "the help closed");
-    assert!(
-        app.needs_repaint,
+    assert_eq!(
+        app.repaint,
+        Repaint::Wipe,
         "and asked for the frame under it to be drawn again"
     );
 
     // Taken by the draw, so it does not repaint on every frame after.
-    assert!(app.take_repaint());
-    assert!(!app.take_repaint(), "once, not for ever");
+    assert_eq!(app.take_repaint(), Repaint::Wipe);
+    assert_eq!(app.take_repaint(), Repaint::None, "once, not for ever");
 }
 
 #[test]

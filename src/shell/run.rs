@@ -366,22 +366,7 @@ pub async fn run(
             can_previous: app.queue.len() > 1,
         });
 
-        if app.take_repaint() {
-            // Not `Terminal::clear`: since ratatui 0.30 it reads the cursor
-            // position back from the terminal first, and with the event
-            // stream holding stdin that read times out after two seconds
-            // and the error ends the run. The screen is wiped and the
-            // buffer the next draw diffs against is emptied, which is the
-            // rest of what `clear` does.
-            use ratatui::backend::Backend as _;
-            terminal
-                .backend_mut()
-                .clear_region(ratatui::backend::ClearType::All)?;
-            terminal.swap_buffers();
-            terminal.current_buffer_mut().reset();
-            unsettle(terminal.current_buffer_mut());
-            terminal.swap_buffers();
-        }
+        repaint(terminal, app.take_repaint())?;
         terminal.draw(|frame| draw(frame, &mut app))?;
 
         let action = tokio::select! {
@@ -1133,6 +1118,33 @@ async fn sign_in(
 /// the cover is written after it -- but only if it is written at all. A
 /// modal's empty cells equal the wiped buffer's and are left out, and the
 /// cover comes back in full underneath the modal that is meant to hide it.
+/// Make the next draw write every cell, after clearing the screen when
+/// `how` asks for a wipe.
+///
+/// Not `Terminal::clear`: since ratatui 0.30 it reads the cursor position
+/// back from the terminal first, and with the event stream holding stdin
+/// that read times out after two seconds and the error ends the run. The
+/// buffer the next draw diffs against is emptied, which is the rest of what
+/// `clear` does.
+fn repaint<B: ratatui::backend::Backend>(
+    terminal: &mut ratatui::Terminal<B>,
+    how: Repaint,
+) -> Result<(), B::Error> {
+    if how == Repaint::None {
+        return Ok(());
+    }
+    if how == Repaint::Wipe {
+        terminal
+            .backend_mut()
+            .clear_region(ratatui::backend::ClearType::All)?;
+    }
+    terminal.swap_buffers();
+    terminal.current_buffer_mut().reset();
+    unsettle(terminal.current_buffer_mut());
+    terminal.swap_buffers();
+    Ok(())
+}
+
 fn unsettle(buf: &mut ratatui::buffer::Buffer) {
     use ratatui::buffer::CellDiffOption;
     for cell in &mut buf.content {
@@ -1142,9 +1154,61 @@ fn unsettle(buf: &mut ratatui::buffer::Buffer) {
 
 #[cfg(test)]
 mod tests {
-    use super::unsettle;
+    use super::{repaint, unsettle};
+    use crate::shell::Repaint;
+    use ratatui::backend::{Backend as _, TestBackend};
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
+    use ratatui::widgets::Paragraph;
+    use ratatui::Terminal;
+
+    /// A terminal showing "lyrics" in its first cells, as the last frame left it.
+    fn shown() -> Terminal<TestBackend> {
+        let mut terminal = Terminal::new(TestBackend::new(6, 1)).unwrap();
+        terminal
+            .draw(|f| f.render_widget(Paragraph::new("lyrics"), f.area()))
+            .unwrap();
+        terminal
+    }
+
+    #[test]
+    fn a_redraw_leaves_the_screen_up_and_writes_every_cell_again() {
+        // A wipe blanks the terminal until the next frame lands, and a large
+        // cover takes the terminal a moment to put back: a blank flash.
+        let mut terminal = shown();
+        repaint(&mut terminal, Repaint::Redraw).unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(0, 0)].symbol(),
+            "l",
+            "nothing wiped"
+        );
+        // The screen no longer matches the last frame -- as when a modal
+        // went over cells an image protocol marks `Skip`. The same frame
+        // again writes nothing by diff; after a redraw it writes it all.
+        let mut terminal = shown();
+        terminal
+            .backend_mut()
+            .clear_region(ratatui::backend::ClearType::All)
+            .unwrap();
+        repaint(&mut terminal, Repaint::Redraw).unwrap();
+        terminal
+            .draw(|f| f.render_widget(Paragraph::new("lyrics"), f.area()))
+            .unwrap();
+        assert_eq!(
+            super::super::geometry::row(terminal.backend().buffer(), 0),
+            "lyrics",
+            "every cell written again"
+        );
+    }
+
+    #[test]
+    fn a_wipe_clears_the_screen_and_none_leaves_it() {
+        let mut terminal = shown();
+        repaint(&mut terminal, Repaint::None).unwrap();
+        assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "l");
+        repaint(&mut terminal, Repaint::Wipe).unwrap();
+        assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), " ");
+    }
 
     #[test]
     fn a_blank_cell_over_a_wiped_screen_is_still_written() {

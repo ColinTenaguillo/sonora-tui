@@ -71,7 +71,11 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         &app.favourites.playlists,
     );
     let liked = |t: &carousel::Target| liked_in(t, followed, fav_albums, fav_playlists);
-    let regions = layout::split(frame.area());
+    let showing = app.showing();
+    let regions = match showing {
+        Showing::Zen => layout::without_sidebar(frame.area()),
+        _ => layout::split(frame.area()),
+    };
     let palette = app.palette;
     app.last_main_width = regions.main.width;
     app.last_main_height = regions.main.height;
@@ -107,7 +111,6 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     // status line below still get their turn.
     // Asked once, and every branch below reads it: exactly one view is
     // drawn, the one `showing` names, whatever else is set behind it.
-    let showing = app.showing();
     if let (Showing::Search(_), Some(search)) = (showing, app.search.as_ref()) {
         // `artwork` needs &mut while the renderer borrows `app`, so take it
         // out for the duration and put it back — as the other views do.
@@ -187,7 +190,8 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         | Showing::Search(_)
         | Showing::Loading
         | Showing::Queue
-        | Showing::History => None,
+        | Showing::History
+        | Showing::Zen => None,
         // An opened row of covers is a grid, not a track list — Albums is
         // the section whose renderer draws two-line cards.
         Showing::Tracks => Some(sidebar::Section::Tracks),
@@ -444,28 +448,57 @@ pub fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         app.artwork = art;
     }
 
-    let mut art = app.artwork.take();
-    nowplaying::render_with_cover(
-        frame,
-        regions.now_playing,
-        &palette,
-        &app.now_playing,
-        // Straight from the queue, so the bar cannot disagree with what
-        // actually plays next.
-        nowplaying::Modes {
-            shuffled: app.queue.shuffled(),
-            repeat: app.queue.repeat,
-            sleep: app.sleep_mark(),
-            // Only while something plays: a paused track's last frame
-            // frozen under the badge read as the music still going.
-            spectrum: match (&app.spectrum, app.now_playing.playing) {
-                (Some(bands), true) => bands.levels(),
-                _ => Vec::new(),
-            },
+    if showing == Showing::Zen {
+        let liked = app
+            .now_playing
+            .track
+            .as_ref()
+            .is_some_and(|t| app.favourites.tracks.contains(&t.id));
+        let mut art = app.artwork.take();
+        zenview::render(
+            frame,
+            regions.main,
+            &palette,
+            app.now_playing.track.as_ref(),
+            liked,
+            cover_drawer(&mut art),
+        );
+        app.artwork = art;
+    }
+
+    // Straight from the queue, so the bar cannot disagree with what
+    // actually plays next.
+    let modes = nowplaying::Modes {
+        shuffled: app.queue.shuffled(),
+        repeat: app.queue.repeat,
+        sleep: app.sleep_mark(),
+        // Only while something plays: a paused track's last frame
+        // frozen under the badge read as the music still going.
+        spectrum: match (&app.spectrum, app.now_playing.playing) {
+            (Some(bands), true) => bands.levels(),
+            _ => Vec::new(),
         },
-        cover_drawer(&mut art),
-    );
-    app.artwork = art;
+    };
+    if showing == Showing::Zen {
+        nowplaying::render_transport_only(
+            frame,
+            regions.now_playing,
+            &palette,
+            &app.now_playing,
+            modes,
+        );
+    } else {
+        let mut art = app.artwork.take();
+        nowplaying::render_with_cover(
+            frame,
+            regions.now_playing,
+            &palette,
+            &app.now_playing,
+            modes,
+            cover_drawer(&mut art),
+        );
+        app.artwork = art;
+    }
 
     if let Some(status) = &app.status {
         // Tucked into the top right rather than laid across the whole line.

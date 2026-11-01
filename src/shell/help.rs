@@ -187,6 +187,10 @@ const BINDINGS: &[Binding] = &[
         keys: "L",
         what: "the lyrics, synced where they are; j k to scroll, esc to close",
     },
+    Binding {
+        keys: "Z",
+        what: "zen: the playing track's cover alone; Z or esc to leave",
+    },
     Binding { keys: "", what: "" },
     Binding {
         keys: "?",

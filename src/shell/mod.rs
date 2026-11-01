@@ -23,6 +23,7 @@ mod mediakeys_linux;
 pub mod mediakeys_macos;
 pub mod queueview;
 mod run;
+pub mod zenview;
 
 /// Register with the desktop's media keys, where the platform has them.
 ///
@@ -457,6 +458,8 @@ impl App {
         // whichever favourite that hidden list had highlighted -- which is
         // what "the key does nothing" looked like from the outside.
         match self.showing() {
+            // Nothing is listed there but the track that plays.
+            Showing::Zen => self.now_playing.track.clone(),
             Showing::Queue => self
                 .queue
                 .entries()
@@ -524,7 +527,7 @@ impl App {
         // nowhere to go.
         match self.showing() {
             // Enter is the list's own key there, and never reaches this.
-            Showing::Queue | Showing::History => (Vec::new(), 0, None),
+            Showing::Queue | Showing::History | Showing::Zen => (Vec::new(), 0, None),
             Showing::Artist => {
                 let Some(page) = self.artist.page.as_ref() else {
                     return (Vec::new(), 0, None);
@@ -926,7 +929,21 @@ pub struct Level {
     awaiting: bool,
 }
 
-/// The two lists that open over the pane as views of their own. One at a
+/// How much of the next frame the loop must write regardless of the diff.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Repaint {
+    /// The diff alone.
+    #[default]
+    None,
+    /// Every cell written again over what is up. Enough to undo a pane
+    /// drawn over a cover: the image is sent again where it stands, and
+    /// the screen never goes blank while the terminal takes it.
+    Redraw,
+    /// The screen cleared first, then every cell written.
+    Wipe,
+}
+
+/// The views that open over the pane as levels of their own. One at a
 /// time: two flags could both be set, and nothing but care kept them from
 /// being.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -935,6 +952,8 @@ pub enum List {
     Queue,
     /// What has been played.
     History,
+    /// The playing track's cover over the whole screen, and the bar.
+    Zen,
 }
 
 /// What the main pane is drawing, asked once and read by everything that
@@ -960,6 +979,8 @@ pub enum Showing {
     Queue,
     /// What has been played, the same way.
     History,
+    /// The playing track alone: its cover, its name, the bar.
+    Zen,
     /// No view over it: whatever the sidebar points at.
     Section(sidebar::Section),
 }
@@ -1139,7 +1160,7 @@ pub struct App {
     pub history_list: tracklist::TrackListState,
     /// Set when something drew over the artwork and the next frame has to
     /// be painted in full rather than diffed. See `take_repaint`.
-    pub needs_repaint: bool,
+    pub repaint: Repaint,
     /// The search box and its results, on "s".
     ///
     /// Kept apart from `filtering`, which narrows what is already on screen.
@@ -1288,9 +1309,10 @@ impl App {
     /// enter means the same thing in both: open what the card points at.
     pub fn selected_card(&self) -> Option<carousel::Card> {
         // Whatever is drawn is what enter acts on: reading the cards under
-        // the queue opened whatever the hidden page had highlighted.
+        // the queue opened whatever the hidden page had highlighted. The
+        // queue, the history and zen fall to `on_home` and `on_grid`
+        // below, which read `showing` too and say no.
         match self.showing() {
-            Showing::Queue | Showing::History => return None,
             Showing::Artist => {
                 let page = self.artist.page.as_ref()?;
                 let section = artistview::Section::from_index(self.artist.section);
@@ -1584,7 +1606,7 @@ impl App {
             // every open on the new service below that mark, and none of
             // them would ever be fetched.
             requests: kept.requests,
-            needs_repaint: true,
+            repaint: Repaint::Wipe,
             ..App::default()
         };
         self.queue.restore_history(history);
@@ -1854,8 +1876,8 @@ impl App {
     /// — the help modal — is therefore not undone by the next frame, which
     /// marks the same cells `Skip` again and writes nothing. A full repaint
     /// is the only thing that puts the artwork back.
-    pub fn take_repaint(&mut self) -> bool {
-        std::mem::take(&mut self.needs_repaint)
+    pub fn take_repaint(&mut self) -> Repaint {
+        std::mem::take(&mut self.repaint)
     }
 
     /// How many rows the queue or the history shows, for the keys to
@@ -2152,7 +2174,7 @@ impl App {
         // Its rows drew covers into cells the image protocols mark `Skip`,
         // which the next frame writes nothing over: a full paint.
         if self.list.is_some() {
-            self.needs_repaint = true;
+            self.repaint = Repaint::Wipe;
         }
         // Read before anything is taken: the fields below are moved out as
         // the struct is built, so asking afterwards always says "nothing
@@ -2218,7 +2240,7 @@ impl App {
         // Back onto a list: its rows go over covers the view being left
         // drew, in cells the diff never writes.
         if self.list.is_some() {
-            self.needs_repaint = true;
+            self.repaint = Repaint::Wipe;
         }
         if let Some(explore) = level.explore {
             self.explore = explore;
@@ -2509,6 +2531,7 @@ impl App {
         match self.list {
             Some(List::Queue) => return Showing::Queue,
             Some(List::History) => return Showing::History,
+            Some(List::Zen) => return Showing::Zen,
             None => {}
         }
         // A page of rows opened from Explore: drawn by the rows renderer
@@ -2568,7 +2591,8 @@ impl App {
             | Showing::Rows
             | Showing::Loading
             | Showing::Queue
-            | Showing::History => false,
+            | Showing::History
+            | Showing::Zen => false,
             Showing::Section(section) => matches!(
                 section,
                 sidebar::Section::Playlists | sidebar::Section::Albums | sidebar::Section::Profiles
@@ -2733,11 +2757,11 @@ impl App {
                     }
                     None => drmview::Cdm::Wanted,
                 };
-                self.needs_repaint = true;
+                self.repaint = Repaint::Wipe;
                 None
             }
             Action::AnswerCdm(yes) => {
-                self.needs_repaint = true;
+                self.repaint = Repaint::Wipe;
                 match (&self.cdm, yes) {
                     (drmview::Cdm::Wanted, true) => {
                         self.cdm = drmview::Cdm::Offering;
@@ -2769,13 +2793,13 @@ impl App {
             }
             Action::CdmReady(origin) => {
                 self.cdm = drmview::Cdm::Ready(origin);
-                self.needs_repaint = true;
+                self.repaint = Repaint::Wipe;
                 self.say(drmview::describe(origin));
                 None
             }
             Action::CdmFailed(message) => {
                 self.cdm = drmview::Cdm::Missing;
-                self.needs_repaint = true;
+                self.repaint = Repaint::Wipe;
                 self.say(message);
                 None
             }
@@ -3066,9 +3090,11 @@ impl App {
             }
             Action::ToggleLyrics => {
                 self.lyrics.toggle();
-                // Like the help: the pane wrote over cells the image
-                // protocols skip, and only a full repaint clears that.
-                self.needs_repaint = true;
+                // The pane goes over cells the image protocols skip, so
+                // every cell is written again -- but over what is up,
+                // without a clear: a wipe blanked the cover until the
+                // terminal had taken it again, which a large one shows.
+                self.repaint = self.repaint.max(Repaint::Redraw);
                 self.lyrics_wanted()
             }
             // The search is the loop's.
@@ -3666,7 +3692,7 @@ impl App {
             Action::SettingChanged(setting) => match setting {
                 settings::Setting::Theme => {
                     self.palette = theme::Palette::from_config(&self.config.ui).0;
-                    self.needs_repaint = true;
+                    self.repaint = Repaint::Wipe;
                     None
                 }
                 // The folders are the library: it is read again, the way
@@ -4049,12 +4075,12 @@ impl App {
                 playlistedit::Outcome::Kept => None,
                 playlistedit::Outcome::Closed => {
                     self.prompt = None;
-                    self.needs_repaint = true;
+                    self.repaint = Repaint::Wipe;
                     None
                 }
                 playlistedit::Outcome::Done(edit) => {
                     self.prompt = None;
-                    self.needs_repaint = true;
+                    self.repaint = Repaint::Wipe;
                     Some(Action::Edit(edit))
                 }
             };
@@ -4067,12 +4093,12 @@ impl App {
                 }
                 KeyCode::Enter => {
                     let edit = self.setting_edit.take().expect("checked");
-                    self.needs_repaint = true;
+                    self.repaint = Repaint::Wipe;
                     return Some(Action::SettingTyped(edit.setting, edit.typed));
                 }
                 KeyCode::Esc => {
                     self.setting_edit = None;
-                    self.needs_repaint = true;
+                    self.repaint = Repaint::Wipe;
                 }
                 _ => {}
             }
@@ -4194,7 +4220,7 @@ impl App {
                     if len > 0 {
                         // Taking a track out shortens the list and uncovers
                         // a row of whatever was drawn there before.
-                        self.needs_repaint = true;
+                        self.repaint = Repaint::Wipe;
                         return Some(Action::RemoveQueued(self.queue_list.selected));
                     }
                     return None;
@@ -4236,6 +4262,22 @@ impl App {
                     return (len > 0).then_some(Action::QueueTrackNext);
                 }
                 KeyCode::Char('H') => return Some(Action::GoBack),
+                _ => {}
+            }
+        }
+        // Zen has nothing to move through: the keys that would move a
+        // cursor or open a row reach nothing, rather than the view hidden
+        // under it. The transport and the playing track's keys fall through.
+        if self.showing() == Showing::Zen {
+            match key.code {
+                KeyCode::Char('Z') => return Some(Action::GoBack),
+                KeyCode::Enter
+                | KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::Left
+                | KeyCode::Right
+                | KeyCode::Char('j' | 'k' | 'h' | 'l' | 'J' | 'K' | '/' | 'o' | 't')
+                | KeyCode::Tab => return None,
                 _ => {}
             }
         }
@@ -4299,7 +4341,7 @@ impl App {
             // `Skip`, and on the next frame they go back to `Skip` — so
             // nothing is written to undo it and a patch of the help stays
             // on the artwork. Only a full repaint clears that.
-            self.needs_repaint = true;
+            self.repaint = Repaint::Wipe;
             return None;
         }
 
@@ -4432,6 +4474,16 @@ impl App {
                     context = ?self.queue.context_name(),
                     "queue opened"
                 );
+                None
+            }
+            // The playing track alone, the rest of the app out of sight.
+            KeyCode::Char('Z') if self.session.is_some() => {
+                self.push_level();
+                self.open = None;
+                self.list = Some(List::Zen);
+                // The sidebar's columns hold whatever was drawn there, and
+                // the image protocols will not overwrite them.
+                self.repaint = Repaint::Wipe;
                 None
             }
             // What has been played. Beside `Q` on the keyboard, and the
