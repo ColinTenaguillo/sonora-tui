@@ -29,7 +29,7 @@ in the terminal, over [sonora](https://github.com/sonorahq/sonora)'s `music` cra
 </div>
 
 <p align="center">
-  <img src="docs/demo.gif" alt="A tour: the home page, a hi-res album playing, a search, an artist page and biography, the queue, Explore, a filtered list and the key list">
+  <img src="docs/demo.gif" alt="A tour: the home page, a search, a hi-res album playing, the artist page and biography, a track queued next, synced lyrics, an Explore genre, a fuzzy-filtered and sorted list, zen, themes switched live in Settings, and the key list">
 </p>
 
 > **Not a piracy tool.** Each service wants the subscription it wants — a
