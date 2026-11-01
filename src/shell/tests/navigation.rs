@@ -950,3 +950,46 @@ fn local_files_without_a_folder_ask_for_one_and_write_it() {
     ));
     assert_eq!(app.config.local.folders, vec![here]);
 }
+
+#[test]
+fn what_opens_over_the_panes_is_drawn_on_top_of_them() {
+    let shown = |app: &mut App| {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(130, 40)).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>()
+    };
+
+    let mut app = signed_in(sidebar::Section::Music);
+    assert!(!shown(&mut app).contains("Nothing is playing."));
+    app.lyrics.open = true;
+    assert!(
+        shown(&mut app).contains("Nothing is playing."),
+        "the lyrics pane"
+    );
+
+    let mut app = signed_in(sidebar::Section::Music);
+    assert!(!shown(&mut app).contains(" Keys "));
+    app.showing_help = true;
+    app.help_scroll = u16::MAX;
+    let help = shown(&mut app);
+    assert!(help.contains(" Keys "), "the help sheet");
+    assert!(
+        app.help_scroll < u16::MAX,
+        "the scroll is clamped to the sheet"
+    );
+
+    let mut app = signed_in(sidebar::Section::Music);
+    app.session = None;
+    app.login = login::LoginState::Failed("network unreachable".into());
+    assert!(
+        shown(&mut app).contains("network unreachable"),
+        "the sign-in"
+    );
+}

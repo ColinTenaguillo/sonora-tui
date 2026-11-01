@@ -362,3 +362,199 @@ fn o_sorts_an_opened_album_too() {
     key(&mut app, KeyCode::Char('O'));
     assert_eq!(first(&app), "Alpha", "O sorts the album by title");
 }
+
+/// Search open over the home page, its query sent and the box closed.
+fn on_search_results() -> App {
+    let mut app = signed_in(sidebar::Section::Music);
+    app.update(Action::BeginSearch);
+    for c in "daft punk".chars() {
+        key(&mut app, KeyCode::Char(c));
+    }
+    let run = key(&mut app, KeyCode::Enter).expect("enter sends the query");
+    app.update(run);
+    app
+}
+
+#[test]
+fn a_sent_search_waits_until_its_results_arrive() {
+    let mut app = on_search_results();
+    assert!(app.search.as_ref().expect("search is open").pending);
+    app.update(Action::SearchLoaded(Box::new(some_results())));
+    assert!(!app.search.as_ref().expect("search is open").pending);
+}
+
+#[test]
+fn keys_that_share_a_letter_do_what_the_screen_on_top_says() {
+    // The search results: escape leaves search, `/` goes back to the
+    // box, and h, l and t move within the results.
+    let mut app = on_search_results();
+    app.update(Action::SearchLoaded(Box::new(some_results())));
+    assert!(matches!(
+        key(&mut app, KeyCode::Esc),
+        Some(Action::CloseSearch)
+    ));
+    assert!(matches!(
+        key(&mut app, KeyCode::Char('/')),
+        Some(Action::BeginSearch)
+    ));
+    assert!(matches!(
+        key(&mut app, KeyCode::Char('l')),
+        Some(Action::SearchRight)
+    ));
+    assert!(matches!(
+        key(&mut app, KeyCode::Left),
+        Some(Action::SearchLeft)
+    ));
+    assert!(matches!(
+        key(&mut app, KeyCode::Char('t')),
+        Some(Action::NextSearchTab)
+    ));
+    assert!(matches!(
+        key(&mut app, KeyCode::Tab),
+        Some(Action::NextSearchTab)
+    ));
+
+    // An artist's page: h and l move on the page, and back closes the
+    // bio before it leaves the page.
+    let mut app = with_artist_open();
+    assert!(matches!(
+        key(&mut app, KeyCode::Right),
+        Some(Action::ArtistRight)
+    ));
+    assert!(matches!(
+        key(&mut app, KeyCode::Char('h')),
+        Some(Action::ArtistLeft)
+    ));
+    assert!(key(&mut app, KeyCode::Char('b')).is_none());
+    assert!(app.artist.bio_open);
+    assert!(key(&mut app, KeyCode::Char('[')).is_none());
+    assert!(!app.artist.bio_open, "[ closes the bio");
+    key(&mut app, KeyCode::Char('b'));
+    assert!(key(&mut app, KeyCode::Esc).is_none());
+    assert!(!app.artist.bio_open, "escape closes the bio");
+    assert!(matches!(key(&mut app, KeyCode::Esc), Some(Action::GoBack)));
+    assert!(matches!(
+        key(&mut app, KeyCode::Char('[')),
+        Some(Action::GoBack)
+    ));
+
+    // A grid: h and l move the cards, and `/` opens the filter.
+    let mut app = with_albums(3);
+    assert!(matches!(
+        key(&mut app, KeyCode::Char('l')),
+        Some(Action::CarouselNext)
+    ));
+    assert!(matches!(
+        key(&mut app, KeyCode::Left),
+        Some(Action::CarouselPrevious)
+    ));
+    assert!(key(&mut app, KeyCode::Char('/')).is_none());
+    assert!(app.filtering);
+
+    // The home page has no filter box.
+    let mut app = signed_in(sidebar::Section::Music);
+    assert!(key(&mut app, KeyCode::Char('/')).is_none());
+    assert!(!app.filtering);
+
+    // Signed out, only enter and q mean anything.
+    let mut app = App::default();
+    assert!(key(&mut app, KeyCode::Esc).is_none());
+    assert!(key(&mut app, KeyCode::Char('[')).is_none());
+    assert!(key(&mut app, KeyCode::Char('l')).is_none());
+    assert!(key(&mut app, KeyCode::Char('n')).is_none());
+    assert!(matches!(
+        key(&mut app, KeyCode::Enter),
+        Some(Action::BeginLogin)
+    ));
+    assert!(matches!(
+        key(&mut app, KeyCode::Char('q')),
+        Some(Action::Quit)
+    ));
+}
+
+#[test]
+fn shift_e_queues_the_highlighted_track_last_and_says_so() {
+    let mut app = signed_in(sidebar::Section::Tracks);
+    app.tracks = some_tracks(&["Alpha", "Beta"]);
+    let queued = key(&mut app, KeyCode::Char('E'));
+    assert!(matches!(queued, Some(Action::QueueTrackLast)));
+    app.update(queued.unwrap());
+    assert_eq!(app.queue.len(), 1);
+    assert_eq!(app.status.as_deref(), Some("Alpha — queued"));
+}
+
+#[test]
+fn a_playlist_edit_says_what_it_is_doing_while_it_waits() {
+    let mut app = signed_in(sidebar::Section::Playlists);
+    app.update(Action::Edit(playlistedit::Edit::Create {
+        name: "Road".into(),
+        then_add: None,
+    }));
+    assert_eq!(app.status.as_deref(), Some("creating Road…"));
+    app.update(Action::Edit(playlistedit::Edit::Rename {
+        uuid: "u1".into(),
+        name: "Trip".into(),
+    }));
+    assert_eq!(app.status.as_deref(), Some("renaming to Trip…"));
+    app.update(Action::Edit(playlistedit::Edit::Delete {
+        uuid: "u1".into(),
+    }));
+    assert_eq!(app.status.as_deref(), Some("deleting the playlist…"));
+}
+
+#[test]
+fn a_player_error_is_said_and_stops_the_bar() {
+    let mut app = signed_in(sidebar::Section::Music);
+    app.now_playing.playing = true;
+    let next = app.update(Action::Playback(crate::playback::PlaybackEvent::Error(
+        "the stream broke".into(),
+    )));
+    assert!(next.is_none());
+    assert_eq!(app.status.as_deref(), Some("the stream broke"));
+    assert!(!app.now_playing.playing);
+    let next = app.update(Action::Playback(
+        crate::playback::PlaybackEvent::SessionExpired,
+    ));
+    assert!(matches!(next, Some(Action::SessionExpired)));
+}
+
+#[test]
+fn skipping_past_the_end_of_an_empty_queue_stops_the_bar() {
+    let mut app = signed_in(sidebar::Section::Music);
+    app.now_playing.playing = true;
+    assert!(app.update(Action::QueueNext).is_none());
+    assert!(!app.now_playing.playing);
+}
+
+#[test]
+fn a_new_theme_repaints_the_whole_screen() {
+    let mut app = signed_in(sidebar::Section::Settings);
+    app.repaint = Repaint::default();
+    assert!(app
+        .update(Action::SettingChanged(settings::Setting::Theme))
+        .is_none());
+    assert!(app.repaint == Repaint::Wipe);
+}
+
+#[test]
+fn enter_signs_in_only_when_signed_out_and_h_steps_back_only_when_signed_in() {
+    let mut out = App::default();
+    assert!(matches!(
+        key(&mut out, KeyCode::Enter),
+        Some(Action::BeginLogin)
+    ));
+    assert!(
+        key(&mut out, KeyCode::Char('h')).is_none(),
+        "nothing to step back on"
+    );
+
+    let mut app = signed_in(sidebar::Section::Music);
+    assert!(!matches!(
+        key(&mut app, KeyCode::Enter),
+        Some(Action::BeginLogin)
+    ));
+    assert!(matches!(
+        key(&mut app, KeyCode::Char('h')),
+        Some(Action::CarouselPrevious)
+    ));
+}

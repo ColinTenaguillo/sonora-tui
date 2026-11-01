@@ -2601,6 +2601,10 @@ impl App {
     }
 
     /// Apply one action. Returns a follow-up action when one is implied.
+    ///
+    /// A flat dispatcher: every arm that decides anything does so in a
+    /// method of its own, below. The guards stay here, in this order, since
+    /// they are what picks between the arms that share a pattern.
     pub fn update(&mut self, action: Action) -> Option<Action> {
         match action {
             Action::Quit => {
@@ -2608,39 +2612,12 @@ impl App {
                 None
             }
             Action::Key(key) => self.on_key(key),
-            Action::Error(message) => {
-                // A failed request is still an answer: the pane stops
-                // waiting, or a view whose fetch died says "loading" for
-                // the rest of the session.
-                self.awaiting = false;
-                if let Some(state) = self.search.as_mut() {
-                    state.pending = false;
-                }
-                // The login modal paints over `status`, so while it is
-                // showing (no session yet) an error must go where it is
-                // actually visible.
-                if self.session.is_none() {
-                    self.login = login::LoginState::Failed(message);
-                } else {
-                    self.say(message);
-                }
-                None
-            }
+            Action::Error(message) => self.on_error(message),
             Action::Tick => {
                 self.expire_status();
                 self.sleep_due()
             }
-            Action::BeginLogin => {
-                // A Subsonic server asks for its password first; any other
-                // service is contacted now, and says what it wants next.
-                self.login = match self.login_prompt() {
-                    login::LoginState::Idle => {
-                        login::LoginState::Busy(format!("Contacting {}…", self.service_name()))
-                    }
-                    other => other,
-                };
-                None
-            }
+            Action::BeginLogin => self.begin_login(),
             Action::BeginGuest => {
                 self.login = login::LoginState::Busy("Continuing as a guest…".into());
                 None
@@ -2658,17 +2635,7 @@ impl App {
             // for every service passed on the way to the wanted one would
             // open seven browser tabs. The new service waits for Enter --
             // except a folder of files, which has nothing to ask.
-            Action::CancelLogin => {
-                if let Some(task) = self.login_task.take() {
-                    task.abort();
-                }
-                if let Some(provider) = &self.provider {
-                    provider.abandon();
-                }
-                self.login_input = None;
-                self.login = login::LoginState::Idle;
-                None
-            }
+            Action::CancelLogin => self.cancel_login(),
             Action::NextService => {
                 settings::cycle(&mut self.config, settings::Setting::Service, true);
                 self.save_config();
@@ -2676,27 +2643,7 @@ impl App {
                 let local = self.config.provider.kind == crate::config::ProviderKind::Local;
                 (local && !self.config.local.folders().is_empty()).then_some(Action::BeginLogin)
             }
-            Action::Typed(field, typed) => {
-                match field {
-                    login::Field::Folder => {
-                        let probe = crate::config::LocalConfig {
-                            folders: vec![typed.clone()],
-                        };
-                        if !probe.folders().first().is_some_and(|p| p.is_dir()) {
-                            self.login =
-                                login::LoginState::Failed(format!("{typed} is not a folder"));
-                            return None;
-                        }
-                        self.config.local.folders.push(typed);
-                    }
-                    login::Field::Server => self.config.subsonic.server = typed,
-                    login::Field::Username => self.config.subsonic.username = typed,
-                }
-                self.save_config();
-                // On to what the service wants next: the user after the
-                // server, the password after that; a folder is read now.
-                Some(Action::BeginLogin)
-            }
+            Action::Typed(field, typed) => self.on_typed(field, typed),
             Action::SessionOpened(session) => {
                 self.session = Some(session.clone());
                 self.login_input = None;
@@ -2705,84 +2652,16 @@ impl App {
                 self.status_since = None;
                 Some(Action::SessionReady)
             }
-            Action::SessionExpired => {
-                // Log the sign-out, not just a failure. Silence here made a
-                // spurious one impossible to trace: the token was gone with
-                // nothing in the log to say who removed it.
-                tracing::warn!("session rejected — signing out");
-                self.session = None;
-                if let Some(provider) = &self.provider {
-                    provider.sign_out();
-                }
-                self.login = login::LoginState::Failed(
-                    "your session expired — press Enter to sign in again".into(),
-                );
-                self.tracks.clear();
-                None
-            }
-            Action::LoginPrompt(prompt) => {
-                self.login = match prompt {
-                    music::SignInPrompt::Code { code, url } => {
-                        login::LoginState::Waiting { code, url }
-                    }
-                    music::SignInPrompt::Url(url) => login::LoginState::Url(url),
-                    music::SignInPrompt::Secret => login::LoginState::Secret {
-                        typed: login::Secret::default(),
-                    },
-                    music::SignInPrompt::Accounts(choices) => login::LoginState::Accounts {
-                        choices,
-                        selected: 0,
-                    },
-                };
-                None
-            }
+            Action::SessionExpired => self.on_session_expired(),
+            Action::LoginPrompt(prompt) => self.on_login_prompt(prompt),
             // A service whose streams are encrypted needs the module, and
             // the machine is searched once an account is in -- never for
             // a service that does not need it.
-            Action::SessionReady => {
-                let protected = self.provider.as_ref().is_some_and(|p| p.protected());
-                if protected && self.cdm == drmview::Cdm::Unneeded {
-                    self.cdm = drmview::Cdm::Looking;
-                    return Some(Action::LookForCdm);
-                }
-                None
-            }
+            Action::SessionReady => self.on_session_ready(),
             // Both are the loop's.
             Action::LookForCdm | Action::DownloadCdm => None,
-            Action::CdmFound(found) => {
-                self.cdm = match found {
-                    Some(origin) => {
-                        self.say(drmview::describe(origin));
-                        drmview::Cdm::Ready(origin)
-                    }
-                    None => drmview::Cdm::Wanted,
-                };
-                self.repaint = Repaint::Wipe;
-                None
-            }
-            Action::AnswerCdm(yes) => {
-                self.repaint = Repaint::Wipe;
-                match (&self.cdm, yes) {
-                    (drmview::Cdm::Wanted, true) => {
-                        self.cdm = drmview::Cdm::Offering;
-                        return Some(Action::DownloadCdm);
-                    }
-                    (drmview::Cdm::Offered { .. }, true) => {
-                        if let Some(answer) = self.cdm_answer.take() {
-                            let _ = answer.send(true);
-                        }
-                        self.cdm = drmview::Cdm::Installing;
-                    }
-                    _ => {
-                        if let Some(answer) = self.cdm_answer.take() {
-                            let _ = answer.send(false);
-                        }
-                        self.cdm = drmview::Cdm::Declined;
-                        self.say("without the Widevine module, this service will not play");
-                    }
-                }
-                None
-            }
+            Action::CdmFound(found) => self.on_cdm_found(found),
+            Action::AnswerCdm(yes) => self.answer_cdm(yes),
             Action::CdmOffered { version, license } => {
                 self.cdm = drmview::Cdm::Offered {
                     version,
@@ -2819,139 +2698,22 @@ impl App {
                 self.go_to_section(false);
                 self.load_if_needed()
             }
-            Action::TracksLoaded(tracks) => {
-                // The reply is here, so the pane stops waiting.
-                self.awaiting = false;
-                // Favourites only fill the Tracks view. Writing them in
-                // while an album is open would replace its contents with
-                // something else entirely.
-                // The favourites are the only list that says what is one,
-                // so they are remembered whether or not they are on screen.
-                self.favourites.tracks = tracks.iter().map(|t| t.id.clone()).collect();
-                if self.open.is_none() {
-                    self.tracks = tracks;
-                    self.tracklist.selected = 0;
-                }
-                None
-            }
+            Action::TracksLoaded(tracks) => self.on_tracks_loaded(tracks),
             Action::CollectionLoaded { request, tracks } => {
-                match self.open.as_ref() {
-                    Some(open) if open.request == request => {
-                        // The reply that was waited for: the pane stops
-                        // waiting. A stray one for a view already left
-                        // must not end the wait of the view on screen.
-                        self.awaiting = false;
-                        // The banner's own line, from the tracks that just
-                        // arrived: they carry their durations, so it needs
-                        // no second request and works for a playlist as
-                        // well as an album.
-                        let total: std::time::Duration = tracks.iter().map(|t| t.duration).sum();
-                        let detail = carousel::collection_detail(tracks.len() as u32, Some(total));
-                        self.tracks = tracks;
-                        self.tracklist.selected = 0;
-                        if let Some(open) = self.open.as_mut() {
-                            open.detail = detail;
-                        }
-                    }
-                    // Closed, or already moved on to another album: this
-                    // reply is for a view that is no longer on screen.
-                    _ => tracing::info!("dropping tracks for {request:?}, no longer open"),
-                }
-                None
+                self.on_collection_loaded(request, tracks)
             }
-            Action::ArtistLoaded { request, mut page } => {
-                // Same rule as any other reply: one for a view the user has
-                // since left would arrive under the wrong heading, and must
-                // not end the wait of the one on screen.
-                match self.open.as_ref() {
-                    Some(open) if open.request == request => {
-                        self.awaiting = false;
-                        match page.kind {
-                            // The server's word on whether this account
-                            // follows them, which is what `F` reads.
-                            crate::library::PageKind::Artist => {
-                                if page.following {
-                                    self.favourites.artists.insert(page.id.clone());
-                                } else {
-                                    self.favourites.artists.remove(&page.id);
-                                }
-                            }
-                            // An album's page is built from its detail,
-                            // which does not say whether it is a favourite;
-                            // the ids fetched at sign-in do. Without this
-                            // an album opened from the favourites drew no
-                            // heart in its header.
-                            crate::library::PageKind::Album => {
-                                page.following |= self.favourites.albums.contains(&page.id);
-                                if page.following {
-                                    self.favourites.albums.insert(page.id.clone());
-                                }
-                            }
-                        }
-                        self.artist.page = Some(*page);
-                    }
-                    _ => tracing::info!("dropping the page for {:?}", page.name),
-                }
-                None
-            }
+            Action::ArtistLoaded { request, page } => self.on_artist_loaded(request, *page),
             Action::PageLoaded {
                 request,
                 title,
                 home,
-            } => {
-                // Same rule as any other reply.
-                if self
-                    .open
-                    .as_ref()
-                    .is_none_or(|open| open.request != request)
-                {
-                    tracing::info!("dropping the page {title:?}, no longer open");
-                    return None;
-                }
-                // The reply that was waited for: the pane stops waiting.
-                self.awaiting = false;
-                // A genre is a page of rows, so it is drawn by the rows
-                // renderer under its own heading -- not by `open`, which
-                // hands the pane to the collection view. It used to set
-                // `open` as well, and that view draws `open_cards`, which
-                // a page of rows never fills: the pane went empty and
-                // opening a genre looked like it did nothing at all.
-                //
-                // The level was pushed when the card was activated, and
-                // Explore's own rows went onto it then, so back puts the
-                // genre list back.
-                self.open = None;
-                self.explore.heading = Some(title);
-                self.explore.rows = home
-                    .rows
-                    .into_iter()
-                    .map(|row| home::Row {
-                        heading: row.heading,
-                        kind: row.kind,
-                        cards: row.cards,
-                        state: carousel::CarouselState::default(),
-                    })
-                    .collect();
-                self.explore.row = 0;
-                self.explore.scroll = 0;
-                None
-            }
+            } => self.on_page_loaded(request, title, home.rows),
             Action::ExploreLoaded(home) => {
-                let home = *home;
                 // Explore's own list is named by the nav entry, not by a
                 // heading of its own -- a genre's name left over here would
                 // sit above the list of genres.
                 self.explore.heading = None;
-                self.explore.rows = home
-                    .rows
-                    .into_iter()
-                    .map(|row| home::Row {
-                        heading: row.heading,
-                        kind: row.kind,
-                        cards: row.cards,
-                        state: carousel::CarouselState::default(),
-                    })
-                    .collect();
+                self.explore.rows = home_rows(home.rows);
                 self.explore_empty = self.explore.rows.is_empty();
                 self.explore_loaded = true;
                 None
@@ -2976,19 +2738,9 @@ impl App {
                 None
             }
             Action::HomeLoaded(home) => {
-                let home = *home;
                 self.home_loaded = true;
                 self.home_from_collection = home.rows.is_empty();
-                self.home.rows = home
-                    .rows
-                    .into_iter()
-                    .map(|row| home::Row {
-                        heading: row.heading,
-                        kind: row.kind,
-                        cards: row.cards,
-                        state: carousel::CarouselState::default(),
-                    })
-                    .collect();
+                self.home.rows = home_rows(home.rows);
                 self.refresh_collection_home();
                 None
             }
@@ -3028,38 +2780,8 @@ impl App {
             }
             // The request is a side effect in run(); the view only notes
             // that it is out.
-            Action::RunSearch(_) => {
-                if let Some(state) = self.search.as_mut() {
-                    state.pending = true;
-                }
-                None
-            }
-            Action::SearchLoaded(results) => {
-                if let Some(state) = self.search.as_mut() {
-                    // A reply for a query the user has since retyped would
-                    // show results under text that no longer produced them.
-                    if state.query.trim() == results.query {
-                        state.pending = false;
-                        state.results = *results;
-                        state.tab = 0;
-                        // New results: every tab's position means nothing.
-                        state.tracks = tracklist::TrackListState::default();
-                        state.albums = grid::GridState::default();
-                        state.artists = grid::GridState::default();
-                        state.playlists = grid::GridState::default();
-                        state.top_artists = carousel::CarouselState::default();
-                        state.top_albums = carousel::CarouselState::default();
-                        state.top_scroll = 0;
-                    } else {
-                        tracing::info!(
-                            "dropping results for {:?}, the query is now {:?}",
-                            results.query,
-                            state.query
-                        );
-                    }
-                }
-                None
-            }
+            Action::RunSearch(_) => self.search_sent(),
+            Action::SearchLoaded(results) => self.on_search_loaded(*results),
             Action::CloseSearch => {
                 self.search = None;
                 None
@@ -3067,19 +2789,8 @@ impl App {
             // Moving through the queue is decided here; the loop turns the
             // resulting track into a stream. Split that way so the rules can
             // be tested without a sound card.
-            Action::QueueNext => {
-                if self.queue.next().is_some() && self.skip_blocked(true) {
-                    return Some(Action::PlayQueued);
-                }
-                self.now_playing.playing = false;
-                None
-            }
-            Action::QueuePrevious => {
-                if self.queue.previous().is_some() && self.skip_blocked(false) {
-                    return Some(Action::PlayQueued);
-                }
-                None
-            }
+            Action::QueueNext => self.queue_next(),
+            Action::QueuePrevious => self.queue_previous(),
             // Sent on to the player by the loop; nothing to change here.
             Action::SetVolume(_) => None,
             // Both are the loop's: it has the engine.
@@ -3103,25 +2814,7 @@ impl App {
                 self.lyrics.found.insert(id, found);
                 None
             }
-            Action::ScrobblersLinked(linked, refused) => {
-                let mut words = Vec::new();
-                if !linked.is_empty() {
-                    let names: Vec<String> = linked.iter().map(|l| l.label()).collect();
-                    words.push(format!("scrobbling to {}", names.join(", ")));
-                } else if !self.scrobblers.is_empty() {
-                    // Only worth a word when something was linked before:
-                    // at start, no scrobbler is the ordinary case.
-                    words.push("scrobbling off".to_string());
-                }
-                // A refusal is said whatever else happened: a token typed
-                // wrong in Settings read "set" and nothing else.
-                words.extend(refused);
-                if !words.is_empty() {
-                    self.say(words.join("; "));
-                }
-                self.scrobblers = linked;
-                None
-            }
+            Action::ScrobblersLinked(linked, refused) => self.on_scrobblers_linked(linked, refused),
             Action::ToggleShuffle => {
                 let on = !self.queue.shuffled();
                 self.queue
@@ -3146,68 +2839,14 @@ impl App {
                 self.autoplay_dead_end = Some(seed);
                 None
             }
-            Action::HalfPage { down } => {
-                // The key `j` or `k` stands for in this config, pressed as
-                // many times as half the screen holds: every view's own
-                // idea of down applies, and so does the scrolling.
-                let default = KeyCode::Char(if down { 'j' } else { 'k' });
-                let key = KeyEvent::new(
-                    self.keymap.pressed_for(default),
-                    crossterm::event::KeyModifiers::NONE,
-                );
-                for _ in 0..self.half_page() {
-                    let mut next = self.on_key(key);
-                    while let Some(action) = next {
-                        next = self.update(action);
-                    }
-                }
-                None
-            }
-            Action::ToggleAutoplay => {
-                self.config.playback.autoplay = !self.config.playback.autoplay;
-                if let Some(path) = self.config_path.as_ref() {
-                    if let Err(e) = self.config.save_to(path) {
-                        tracing::warn!("the settings could not be saved: {e}");
-                        self.say(format!("could not save settings: {e}"));
-                        return None;
-                    }
-                }
-                self.say(if self.config.playback.autoplay {
-                    "autoplay on"
-                } else {
-                    "autoplay off"
-                });
-                None
-            }
+            Action::HalfPage { down } => self.on_half_page(down),
+            Action::ToggleAutoplay => self.toggle_autoplay(),
             // The pane is taken now, under the name the row knows, rather
             // than when the track comes back: the fetch is a round trip
             // before the one that brings the album, and for that first
             // trip nothing changed on screen -- the key looked dead.
-            Action::FetchTrackAlbum(id) => {
-                let track = self.selected_track()?;
-                let title = album_heading(&track);
-                let target = Some(Collection::TrackAlbum(id));
-                self.open_for(
-                    target,
-                    false,
-                    title,
-                    track.artist.clone(),
-                    track.cover.clone(),
-                );
-                None
-            }
-            Action::FetchTrackArtist(id) => {
-                let track = self.selected_track()?;
-                let target = Some(Collection::TrackArtist(id));
-                self.open_for(
-                    target,
-                    true,
-                    first_artist(&track.artist),
-                    String::new(),
-                    None,
-                );
-                None
-            }
+            Action::FetchTrackAlbum(id) => self.fetch_track_album(id),
+            Action::FetchTrackArtist(id) => self.fetch_track_artist(id),
             // What the fetch found. The pane is already waiting under the
             // name the row knew; the reply is named by the API, and that
             // is the name the tracks or the page will arrive under, so the
@@ -3219,105 +2858,14 @@ impl App {
                 title,
                 subtitle,
                 cover,
-            } => {
-                let round = matches!(target, Collection::Artist(_));
-                let next = self.next_request();
-                match self.open.as_mut() {
-                    // The view that asked, by its request: a wait for
-                    // another track, opened since, must not take this.
-                    Some(open) if open.request == request => {
-                        open.title = title;
-                        open.subtitle = subtitle;
-                        open.cover = cover;
-                        open.round_cover = round;
-                        // Now known, and not yet fetched: the loop does.
-                        open.target = Some(target);
-                        open.request = next;
-                    }
-                    // The wait was left before the track came back: the
-                    // same rule as any other late reply.
-                    _ => tracing::info!("dropping {title:?}, no longer waited for"),
-                }
-                None
-            }
-            Action::QueueRadio(tracks) => {
-                self.autoplay_fetching = false;
-                // Marked as autoplay, which is what it is: what TIDAL
-                // suggested following the end of the queue. That marking
-                // is what lets the next album the user starts throw it away
-                // rather than play a radio chosen for a track from twenty
-                // minutes ago.
-                //
-                // Appended, never started: whatever is playing moves on to
-                // it by itself. The one exception is a queue that ran out
-                // before this landed -- then nothing is playing, and the
-                // first of these has to be started by hand.
-                self.queue.append_autoplay(tracks);
-                if self.ran_dry && self.queue.next().is_some() && self.skip_blocked(true) {
-                    self.ran_dry = false;
-                    return Some(Action::PlayQueued);
-                }
-                None
-            }
+            } => self.on_open_target(request, target, title, subtitle, cover),
+            Action::QueueRadio(tracks) => self.on_queue_radio(tracks),
             Action::ToggleFavourite | Action::ToggleFollow => None,
             Action::FollowChanged {
                 what,
                 name,
                 following,
-            } => {
-                let said = match (&what, following) {
-                    (Favourable::Artist(_), true) => format!("Following {name}"),
-                    (Favourable::Artist(_), false) => format!("Unfollowed {name}"),
-                    (_, true) => format!("Added {name} to favourites"),
-                    (_, false) => format!("Removed {name} from favourites"),
-                };
-                match &what {
-                    Favourable::Artist(id) => {
-                        if following {
-                            self.favourites.artists.insert(id.clone());
-                        } else {
-                            self.favourites.artists.remove(id);
-                        }
-                        // The page on screen says so too, count included,
-                        // rather than waiting to be opened again.
-                        if let Some(page) = self.artist.page.as_mut().filter(|p| p.id == *id) {
-                            page.following = following;
-                            page.fans = page.fans.map(|n| {
-                                if following {
-                                    n + 1
-                                } else {
-                                    n.saturating_sub(1)
-                                }
-                            });
-                        }
-                    }
-                    Favourable::Album(id) => {
-                        if following {
-                            self.favourites.albums.insert(id.clone());
-                        } else {
-                            self.favourites.albums.remove(id);
-                        }
-                        // The album's page, when it is up, shows the heart
-                        // at once rather than on the next open.
-                        if let Some(page) =
-                            self.artist.page.as_mut().filter(|p| {
-                                p.kind == crate::library::PageKind::Album && p.id == *id
-                            })
-                        {
-                            page.following = following;
-                        }
-                    }
-                    Favourable::Playlist(uuid) => {
-                        if following {
-                            self.favourites.playlists.insert(uuid.clone());
-                        } else {
-                            self.favourites.playlists.remove(uuid);
-                        }
-                    }
-                }
-                self.say(said);
-                None
-            }
+            } => self.on_follow_changed(what, name, following),
             Action::RadioNamed { seed, playlist } => {
                 self.favourites.radios.insert(seed, playlist);
                 None
@@ -3331,87 +2879,23 @@ impl App {
             // Applied here rather than in the loop, for the same reason
             // opening is: the loop's copy could only be exercised by running
             // the whole app.
-            Action::SeeAll if self.on_artist() => {
-                // An artist's sections are already in hand — the page came
-                // back with forty-odd albums and fifty singles — so this
-                // opens what is held rather than asking for it again.
-                let page = self.artist.page.as_ref()?;
-                // The section the selection is actually in: an artist with
-                // no top tracks starts on a section they do not have, and
-                // asking for its cards gave an empty list.
-                let present = artistview::Section::present(page);
-                let wanted = artistview::Section::from_index(self.artist.section);
-                let section = if present.contains(&wanted) {
-                    wanted
-                } else {
-                    *present.first()?
-                };
-                let heading = format!("{} — {}", page.name, section.heading(page.kind));
-                if section == artistview::Section::Tracks {
-                    if page.top_tracks.is_empty() {
-                        return None;
-                    }
-                    let identity = self.heading_only(heading);
-                    self.open_view(identity, Vec::new());
-                    return None;
-                }
-                let cards = artistview::cards(page, section);
-                if cards.is_empty() {
-                    return None;
-                }
-                let identity = self.heading_only(heading);
-                self.open_view(identity, cards);
-                None
-            }
+            Action::SeeAll if self.on_artist() => self.see_all_on_artist(),
             // A Feed section is whole in hand -- the four are cut from one
             // reply -- so this opens what is held rather than asking for a
             // page that was never fetched.
-            Action::SeeAll if self.on_feed() => {
-                let row = self.rows_on_screen().current_row()?;
-                let (heading, cards) = (row.heading.clone(), row.cards.clone());
-                let identity = self.heading_only(heading);
-                self.open_view(identity, cards);
-                None
-            }
+            Action::SeeAll if self.on_feed() => self.see_all_of_row(),
             // A Top results row offers "See all" when its cards run past the
             // edge; the whole of what was found is on the kind's own tab.
-            Action::SeeAll if self.on_search() => {
-                let state = self.search.as_mut()?;
-                if searchview::Tab::from_index(state.tab) != searchview::Tab::Top {
-                    return None;
-                }
-                let tab = match state.top {
-                    searchview::TopSection::Artists => searchview::Tab::Artists,
-                    searchview::TopSection::Albums => searchview::Tab::Albums,
-                    searchview::TopSection::Tracks => return None,
-                };
-                state.tab = searchview::Tab::ALL.iter().position(|t| *t == tab)?;
-                None
-            }
+            Action::SeeAll if self.on_search() => self.see_all_on_search(),
             // A home row, or one of a page opened from Explore: whole in
             // hand, like the Feed's, so it opens from what is held.
-            Action::SeeAll if self.on_home() => {
-                let row = self.rows_on_screen().current_row()?;
-                let (heading, cards) = (row.heading.clone(), row.cards.clone());
-                let identity = self.heading_only(heading);
-                self.open_view(identity, cards);
-                None
-            }
+            Action::SeeAll if self.on_home() => self.see_all_of_row(),
             Action::SeeAll => None,
             // The edits are requests the loop makes; the answer comes
             // back as `PlaylistEdited` or `Error`. Said now, so the wait
             // for the service -- several round trips on TIDAL -- is not
             // silence.
-            Action::Edit(edit) => {
-                use playlistedit::Edit;
-                self.say(match edit {
-                    Edit::AddTo { title, .. } => format!("adding to {title}…"),
-                    Edit::Create { name, .. } => format!("creating {name}…"),
-                    Edit::Rename { name, .. } => format!("renaming to {name}…"),
-                    Edit::Delete { .. } => "deleting the playlist…".to_string(),
-                });
-                None
-            }
+            Action::Edit(edit) => self.on_edit(edit),
             Action::RemoveFromPlaylist { .. } => {
                 self.say("taking the track out…");
                 None
@@ -3421,44 +2905,8 @@ impl App {
                 uuid,
                 deleted,
                 count_delta,
-            } => {
-                self.say(message);
-                if let Some(p) = self.playlists.iter_mut().find(|p| p.uuid == uuid) {
-                    p.track_count = p.track_count.saturating_add_signed(count_delta);
-                }
-                let open_is_it = matches!(
-                    self.open.as_ref().and_then(|o| o.target.as_ref()),
-                    Some(Collection::Playlist(open)) if *open == uuid
-                );
-                // The playlists arrived just before this; the open view's
-                // heading takes the name they now carry, so a rename shows
-                // without reopening.
-                if open_is_it && !deleted {
-                    let name = self
-                        .playlists
-                        .iter()
-                        .find(|p| p.uuid == uuid)
-                        .map(|p| p.title.clone());
-                    // A fresh request: its tracks are fetched again, so
-                    // the edit shows.
-                    let request = self.next_request();
-                    if let Some(open) = self.open.as_mut() {
-                        if let Some(name) = name {
-                            open.title = name;
-                        }
-                        open.request = request;
-                    }
-                }
-                (deleted && open_is_it).then_some(Action::CloseCollection)
-            }
-            Action::FavouriteChanged { id, favourite } => {
-                if favourite {
-                    self.favourites.tracks.insert(id);
-                } else {
-                    self.favourites.tracks.remove(&id);
-                }
-                None
-            }
+            } => self.on_playlist_edited(message, uuid, deleted, count_delta),
+            Action::FavouriteChanged { id, favourite } => self.on_favourite_changed(id, favourite),
             Action::ArtistRight => {
                 self.artist_move(Dir::Right);
                 None
@@ -3475,170 +2923,15 @@ impl App {
                 self.search_move(Dir::Left);
                 None
             }
-            Action::NextSearchTab => {
-                if let Some(state) = self.search.as_mut() {
-                    // Each tab keeps its own position now that each is one
-                    // of the app's own views, so coming back to a tab finds
-                    // it where it was left.
-                    state.tab = (state.tab + 1) % searchview::Tab::ALL.len();
-                }
-                None
-            } // the fetch is a side effect in run()
-            Action::PlaybackFailed { id, message } => {
-                // The bar is filled the moment a track is chosen, so the
-                // keypress has a visible effect before the request
-                // returns. When that request fails the guess has to be
-                // taken back: otherwise the cover and title of a track
-                // that never started sit there looking exactly like one
-                // that is playing. Only if it is still the same track —
-                // a later choice has already replaced it.
-                if self.now_playing.track.as_ref().is_some_and(|t| t.id == id) {
-                    self.now_playing = nowplaying::NowPlaying::default();
-                }
-                self.say(message);
-                None
-            }
+            Action::NextSearchTab => self.next_search_tab(), // the fetch is a side effect in run()
+            Action::PlaybackFailed { id, message } => self.on_playback_failed(id, message),
             Action::TogglePause => {
                 self.now_playing.playing = !self.now_playing.playing;
                 None
             }
-            Action::SeekForward => {
-                if let Some(to) = self.seek_target(true) {
-                    self.now_playing.position = to;
-                }
-                None
-            }
-            Action::SeekBack => {
-                if let Some(to) = self.seek_target(false) {
-                    self.now_playing.position = to;
-                }
-                None
-            }
-            Action::Playback(event) => {
-                match event {
-                    crate::playback::PlaybackEvent::Position(p) => {
-                        self.now_playing.position = p;
-                        // Filled while the track is still playing rather
-                        // than at the silence after the last one: the web
-                        // client's "up next" is never empty, and fetching
-                        // at the end means the user waits for the request
-                        // with nothing in their ears. The reply appends, so
-                        // this does not interrupt anything.
-                        if let Some(fetch) = self.autoplay_seed() {
-                            return Some(fetch);
-                        }
-                    }
-                    crate::playback::PlaybackEvent::Length(length) => {
-                        // A track that came without a duration -- YouTube
-                        // Music's quick picks -- drew a clock over an
-                        // empty bar. The stream knows how long it is.
-                        if let Some(track) = self.now_playing.track.as_mut() {
-                            if track.duration.is_zero() {
-                                track.duration = length;
-                            }
-                        }
-                    }
-                    crate::playback::PlaybackEvent::Started {
-                        bit_depth,
-                        sample_rate,
-                        delivered,
-                    } => {
-                        // The track before this one is over, however far it
-                        // got: the position is still its own here.
-                        self.settle_listen(self.now_playing.position);
-                        // Report what was DELIVERED.
-                        let bits = bit_depth.map(|b| format!("{b}-bit ")).unwrap_or_default();
-                        // Two decimals, then one trailing zero dropped:
-                        // 44.1, 48.0, 22.05. A fixed ".1" rounded HE-AAC's
-                        // 22050 Hz to "22.1".
-                        let khz = format!("{:.2}", sample_rate as f64 / 1000.0);
-                        let khz = khz.strip_suffix('0').unwrap_or(&khz);
-                        // A file of your own reports no rate: no badge,
-                        // rather than "0.0kHz".
-                        self.now_playing.quality =
-                            (sample_rate > 0).then(|| format!("{bits}{khz}kHz"));
-                        self.now_playing.tier =
-                            nowplaying::Tier::of_quality(delivered, bit_depth, sample_rate);
-                        // A new stream starts at the beginning. Without this
-                        // the previous track's position survived into the new
-                        // one, and if that track was the longer of the two
-                        // the ratio saturated and drew a full bar over a
-                        // track that had barely started.
-                        self.now_playing.position = std::time::Duration::ZERO;
-                        self.now_playing.playing = true;
-                        self.ran_dry = false;
-                        self.begin_listen();
-                        // A new track: the lyrics pane follows it from the
-                        // top, and asks for its words if it is open.
-                        self.lyrics.restart();
-                        if let Some(ask) = self.lyrics_wanted() {
-                            return Some(ask);
-                        }
-                    }
-                    // The whole track is here: fetch the next one, so it
-                    // starts at once and a gapless engine joins the two.
-                    // Not with the sleep timer set to the end of the
-                    // track: the next is not to be lined up.
-                    crate::playback::PlaybackEvent::Downloaded(id) => {
-                        if self.now_playing.track.as_ref().is_some_and(|t| t.id == id)
-                            && self.sleep != Some(Sleep::EndOfTrack)
-                        {
-                            if let Some(next) = self.queue.upcoming() {
-                                if self.why_blocked(next).is_none() {
-                                    return Some(Action::Preload(next.id.clone()));
-                                }
-                            }
-                        }
-                    }
-                    crate::playback::PlaybackEvent::Finished => {
-                        // Played to the end: the whole of it counts.
-                        let whole = self.listen.as_ref().map(|p| p.duration);
-                        self.settle_listen(whole.unwrap_or(self.now_playing.position));
-                        self.now_playing.position = std::time::Duration::ZERO;
-                        // The sleep timer set to the end of the track: this
-                        // is it. Paused rather than left, since a gapless
-                        // engine may already have the next lined up.
-                        if self.sleep == Some(Sleep::EndOfTrack) {
-                            self.sleep = None;
-                            return self.now_playing.playing.then_some(Action::TogglePause);
-                        }
-                        // A track ending on its own moves the queue on, which
-                        // is what makes an album play through. `advance`
-                        // rather than `next`: repeat-one applies to a track
-                        // that ends, not to the skip button.
-                        if self.queue.advance().is_some() && self.skip_blocked(true) {
-                            return Some(Action::PlayQueued);
-                        }
-                        self.now_playing.playing = false;
-                        // The queue is out. The radio was asked for while
-                        // the last track played; if it has not landed, or
-                        // was never asked for, this is the last resort.
-                        self.ran_dry = true;
-                        if let Some(fetch) = self.autoplay_seed() {
-                            tracing::info!("queue empty, following the last track's radio");
-                            return Some(fetch);
-                        }
-                    }
-                    crate::playback::PlaybackEvent::Error(e) => {
-                        self.say(e);
-                        self.now_playing.playing = false;
-                    }
-                    crate::playback::PlaybackEvent::Spectrum(bands) => {
-                        self.spectrum = Some(bands);
-                    }
-                    // The engine's verdicts on a track it could not play,
-                    // handled where the shell already handles them.
-                    crate::playback::PlaybackEvent::Failed { id, message } => {
-                        // Never played, so never a listen.
-                        self.listen = None;
-                        return Some(Action::PlaybackFailed { id, message });
-                    }
-                    crate::playback::PlaybackEvent::SessionExpired => {
-                        return Some(Action::SessionExpired);
-                    }
-                }
-                None
-            }
+            Action::SeekForward => self.seek(true),
+            Action::SeekBack => self.seek(false),
+            Action::Playback(event) => self.on_playback(event),
             // Opening is applied here rather than in the loop so it can be
             // tested: the loop's copy could only be exercised by running the
             // whole app, and a test that called the helpers directly passed
@@ -3646,100 +2939,19 @@ impl App {
             // Enter on the Service row is the switch itself; on a text or
             // folder row it opens the box; on the link row it links; on a
             // toggle it flips, as l would.
-            Action::ActivateSelection if self.on_settings() => {
-                let which = self.settings.current();
-                match (which, which.kind()) {
-                    (settings::Setting::Service, _) => Some(Action::SwitchProvider),
-                    (_, settings::Kind::Text { .. } | settings::Kind::Folders) => {
-                        self.setting_edit = Some(settings::Edit {
-                            setting: which,
-                            typed: settings::text_of(&self.config, which),
-                        });
-                        None
-                    }
-                    // Linked already, Enter switches the account off and
-                    // on, keeping its session: there is no other way to
-                    // stop Last.fm short of clearing the key. Otherwise
-                    // it links.
-                    (_, settings::Kind::Link) => {
-                        let Some(linked) = which.scrobbler().and_then(|id| {
-                            self.scrobblers.iter_mut().find(|l| l.service.id() == id)
-                        }) else {
-                            return Some(Action::SettingChanged(which));
-                        };
-                        linked.account.enabled = !linked.account.enabled;
-                        let said = match linked.account.enabled {
-                            true => format!("scrobbling to {} again", linked.label()),
-                            false => format!("{} off", linked.label()),
-                        };
-                        crate::scrobble::store(
-                            crate::config::paths::scrobble_file().as_deref(),
-                            &self.scrobblers,
-                        );
-                        self.say(said);
-                        None
-                    }
-                    (_, settings::Kind::Toggle) => self.change_setting(true),
-                    (_, settings::Kind::Cycle) => None,
-                }
-            }
+            Action::ActivateSelection if self.on_settings() => self.activate_setting(),
             Action::SettingTyped(setting, text) => {
                 settings::set_text(&mut self.config, setting, &text);
                 self.save_config();
                 Some(Action::SettingChanged(setting))
             }
             // What the shell itself reads live; the loop does the rest.
-            Action::SettingChanged(setting) => match setting {
-                settings::Setting::Theme => {
-                    self.palette = theme::Palette::from_config(&self.config.ui).0;
-                    self.repaint = Repaint::Wipe;
-                    None
-                }
-                // The folders are the library: it is read again, the way
-                // a service switch reads it, when that is the service on.
-                settings::Setting::LocalFolders
-                    if self.config.provider.kind == crate::config::ProviderKind::Local =>
-                {
-                    Some(Action::SwitchProvider)
-                }
-                _ => None,
-            },
+            Action::SettingChanged(setting) => self.on_setting_changed(setting),
             Action::SwitchProvider => {
                 self.leave_service();
                 Some(Action::BeginLogin)
             }
-            Action::ActivateSelection if self.on_grid() || self.on_home() => {
-                // A shortcut into one of the app's own views is a change
-                // of section, the same as pressing its number.
-                if let Some(carousel::Target::Section(section)) =
-                    self.selected_card().and_then(|c| c.target)
-                {
-                    return Some(Action::GoToSection(section));
-                }
-                if self.selected_collection().is_some() {
-                    // Read before the level is put away: `push_level` takes
-                    // the cards with it, and the identity is read off the
-                    // card the user pressed enter on.
-                    let identity = self.selected_identity();
-                    // The sidebar stays where it is. Moving it to Tracks made
-                    // an opened album look like the favourites view and
-                    // highlighted the wrong nav entry.
-                    self.open_view(identity, Vec::new());
-                    // A page opened from Explore replaces its rows, and the
-                    // reply takes a moment to arrive. Left in place, the
-                    // pane went on drawing the genres under the new
-                    // heading, so pressing enter looked like nothing at
-                    // all. They go on the level, which is what back
-                    // restores.
-                    if self.sidebar.section() == sidebar::Section::Explore {
-                        let replaced = std::mem::take(&mut self.explore);
-                        if let Some(level) = self.back.last_mut() {
-                            level.explore = Some(replaced);
-                        }
-                    }
-                }
-                None
-            }
+            Action::ActivateSelection if self.on_grid() || self.on_home() => self.activate_card(),
             Action::ActivateSelection => None, // playback is a side effect in run()
             // The fetch belongs to the loop, which has the client. These
             // arms keep the match exhaustive.
@@ -3748,68 +2960,17 @@ impl App {
             // nothing opened one -- every album and artist a key asked for
             // came back and was dropped as "no longer open". The loop reads
             // the target before this runs, so it sees the same selection.
-            Action::OpenTrackAlbum => {
-                let track = self.selected_track()?;
-                let (target, title) = album_of(&track)?;
-                self.open_for(
-                    Some(target),
-                    false,
-                    title,
-                    track.artist.clone(),
-                    track.cover.clone(),
-                );
-                None
-            }
-            Action::OpenTrackArtist => {
-                let track = self.selected_track()?;
-                let (target, name) = artist_of(&track)?;
-                self.open_for(Some(target), true, name, String::new(), None);
-                None
-            }
+            Action::OpenTrackAlbum => self.open_track_album(),
+            Action::OpenTrackArtist => self.open_track_artist(),
             // Both change what is playing, which only the loop can do: it
             // owns the channel to the audio thread.
             Action::RemoveQueued(_) | Action::JumpInQueue(_) => None,
             // These only add to the queue, so nothing has to reach the
             // audio thread: what is playing carries on.
-            Action::QueueTrackNext | Action::QueueTrackLast => {
-                let track = self.selected_track()?;
-                let title = track.title.clone();
-                if matches!(action, Action::QueueTrackNext) {
-                    self.queue.play_next(track);
-                    self.say(format!("{title} — next"));
-                } else {
-                    self.queue.play_last(track);
-                    self.say(format!("{title} — queued"));
-                }
-                None
-            }
-            Action::PlayTrackRadio => {
-                // The same step opening anything else takes: what is on
-                // screen goes on the history, and the radio takes the pane.
-                let seed = self.track_radio()?;
-                let title = self.track_radio_title();
-                // The track's own artwork: a radio built from it is about
-                // that record, and the mix's own cover is not in hand until
-                // its items arrive.
-                let cover = self
-                    .selected_track()
-                    .or_else(|| self.now_playing.track.clone())
-                    .and_then(|t| t.cover);
-                let identity =
-                    self.heading_with_cover(seed, format!("{title} Radio"), cover, false);
-                self.open_view(identity, Vec::new());
-                None
-            }
-            Action::GoToSection(section) => {
-                if self.sidebar.section() == section && self.open.is_none() {
-                    // Already there and nothing over it: pressing the number
-                    // again should not fill the history with the same place.
-                    return None;
-                }
-                self.leave_for_a_new_place();
-                self.sidebar.select(section);
-                self.load_if_needed()
-            }
+            Action::QueueTrackNext => self.queue_track(true),
+            Action::QueueTrackLast => self.queue_track(false),
+            Action::PlayTrackRadio => self.play_track_radio(),
+            Action::GoToSection(section) => self.go_to(section),
             Action::GoHome => {
                 // A step in the history like any other, so `[` returns to
                 // whatever the user pressed escape from.
@@ -3825,17 +2986,982 @@ impl App {
                 self.go_forward();
                 self.load_if_needed()
             }
-            Action::CloseCollection => {
-                // One step back, to whatever was on screen when this view
-                // was opened — the view below it when they are nested, and
-                // the sidebar's section at the bottom of the stack. Its own
-                // selection comes back with it.
-                if !self.go_back() {
-                    self.clear_open();
+            Action::CloseCollection => self.close_collection(),
+        }
+    }
+
+    // What `update` hands each arm that decides something. In the order the
+    // arms appear there.
+
+    fn on_error(&mut self, message: String) -> Option<Action> {
+        // A failed request is still an answer: the pane stops
+        // waiting, or a view whose fetch died says "loading" for
+        // the rest of the session.
+        self.awaiting = false;
+        if let Some(state) = self.search.as_mut() {
+            state.pending = false;
+        }
+        // The login modal paints over `status`, so while it is
+        // showing (no session yet) an error must go where it is
+        // actually visible.
+        if self.session.is_none() {
+            self.login = login::LoginState::Failed(message);
+        } else {
+            self.say(message);
+        }
+        None
+    }
+
+    fn begin_login(&mut self) -> Option<Action> {
+        // A Subsonic server asks for its password first; any other
+        // service is contacted now, and says what it wants next.
+        self.login = match self.login_prompt() {
+            login::LoginState::Idle => {
+                login::LoginState::Busy(format!("Contacting {}…", self.service_name()))
+            }
+            other => other,
+        };
+        None
+    }
+
+    fn cancel_login(&mut self) -> Option<Action> {
+        if let Some(task) = self.login_task.take() {
+            task.abort();
+        }
+        if let Some(provider) = &self.provider {
+            provider.abandon();
+        }
+        self.login_input = None;
+        self.login = login::LoginState::Idle;
+        None
+    }
+
+    fn on_typed(&mut self, field: login::Field, typed: String) -> Option<Action> {
+        match field {
+            login::Field::Folder => {
+                let probe = crate::config::LocalConfig {
+                    folders: vec![typed.clone()],
+                };
+                if !probe.folders().first().is_some_and(|p| p.is_dir()) {
+                    self.login = login::LoginState::Failed(format!("{typed} is not a folder"));
+                    return None;
                 }
-                None
+                self.config.local.folders.push(typed);
+            }
+            login::Field::Server => self.config.subsonic.server = typed,
+            login::Field::Username => self.config.subsonic.username = typed,
+        }
+        self.save_config();
+        // On to what the service wants next: the user after the
+        // server, the password after that; a folder is read now.
+        Some(Action::BeginLogin)
+    }
+
+    fn on_session_expired(&mut self) -> Option<Action> {
+        // Log the sign-out, not just a failure. Silence here made a
+        // spurious one impossible to trace: the token was gone with
+        // nothing in the log to say who removed it.
+        tracing::warn!("session rejected — signing out");
+        self.session = None;
+        if let Some(provider) = &self.provider {
+            provider.sign_out();
+        }
+        self.login =
+            login::LoginState::Failed("your session expired — press Enter to sign in again".into());
+        self.tracks.clear();
+        None
+    }
+
+    fn on_login_prompt(&mut self, prompt: music::SignInPrompt) -> Option<Action> {
+        self.login = match prompt {
+            music::SignInPrompt::Code { code, url } => login::LoginState::Waiting { code, url },
+            music::SignInPrompt::Url(url) => login::LoginState::Url(url),
+            music::SignInPrompt::Secret => login::LoginState::Secret {
+                typed: login::Secret::default(),
+            },
+            music::SignInPrompt::Accounts(choices) => login::LoginState::Accounts {
+                choices,
+                selected: 0,
+            },
+        };
+        None
+    }
+
+    fn on_session_ready(&mut self) -> Option<Action> {
+        let protected = self.provider.as_ref().is_some_and(|p| p.protected());
+        if protected && self.cdm == drmview::Cdm::Unneeded {
+            self.cdm = drmview::Cdm::Looking;
+            return Some(Action::LookForCdm);
+        }
+        None
+    }
+
+    fn on_cdm_found(&mut self, found: Option<music::drm::Origin>) -> Option<Action> {
+        self.cdm = match found {
+            Some(origin) => {
+                self.say(drmview::describe(origin));
+                drmview::Cdm::Ready(origin)
+            }
+            None => drmview::Cdm::Wanted,
+        };
+        self.repaint = Repaint::Wipe;
+        None
+    }
+
+    fn answer_cdm(&mut self, yes: bool) -> Option<Action> {
+        self.repaint = Repaint::Wipe;
+        match (&self.cdm, yes) {
+            (drmview::Cdm::Wanted, true) => {
+                self.cdm = drmview::Cdm::Offering;
+                return Some(Action::DownloadCdm);
+            }
+            (drmview::Cdm::Offered { .. }, true) => {
+                if let Some(answer) = self.cdm_answer.take() {
+                    let _ = answer.send(true);
+                }
+                self.cdm = drmview::Cdm::Installing;
+            }
+            _ => {
+                if let Some(answer) = self.cdm_answer.take() {
+                    let _ = answer.send(false);
+                }
+                self.cdm = drmview::Cdm::Declined;
+                self.say("without the Widevine module, this service will not play");
             }
         }
+        None
+    }
+
+    fn on_tracks_loaded(&mut self, tracks: Vec<crate::domain::Track>) -> Option<Action> {
+        // The reply is here, so the pane stops waiting.
+        self.awaiting = false;
+        // Favourites only fill the Tracks view. Writing them in
+        // while an album is open would replace its contents with
+        // something else entirely.
+        // The favourites are the only list that says what is one,
+        // so they are remembered whether or not they are on screen.
+        self.favourites.tracks = tracks.iter().map(|t| t.id.clone()).collect();
+        if self.open.is_none() {
+            self.tracks = tracks;
+            self.tracklist.selected = 0;
+        }
+        None
+    }
+
+    fn on_collection_loaded(
+        &mut self,
+        request: RequestId,
+        tracks: Vec<crate::domain::Track>,
+    ) -> Option<Action> {
+        match self.open.as_ref() {
+            Some(open) if open.request == request => {
+                // The reply that was waited for: the pane stops
+                // waiting. A stray one for a view already left
+                // must not end the wait of the view on screen.
+                self.awaiting = false;
+                // The banner's own line, from the tracks that just
+                // arrived: they carry their durations, so it needs
+                // no second request and works for a playlist as
+                // well as an album.
+                let total: std::time::Duration = tracks.iter().map(|t| t.duration).sum();
+                let detail = carousel::collection_detail(tracks.len() as u32, Some(total));
+                self.tracks = tracks;
+                self.tracklist.selected = 0;
+                if let Some(open) = self.open.as_mut() {
+                    open.detail = detail;
+                }
+            }
+            // Closed, or already moved on to another album: this
+            // reply is for a view that is no longer on screen.
+            _ => tracing::info!("dropping tracks for {request:?}, no longer open"),
+        }
+        None
+    }
+
+    fn on_artist_loaded(
+        &mut self,
+        request: RequestId,
+        mut page: crate::library::ArtistPage,
+    ) -> Option<Action> {
+        // Same rule as any other reply: one for a view the user has
+        // since left would arrive under the wrong heading, and must
+        // not end the wait of the one on screen.
+        match self.open.as_ref() {
+            Some(open) if open.request == request => {
+                self.awaiting = false;
+                self.note_page_following(&mut page);
+                self.artist.page = Some(page);
+            }
+            _ => tracing::info!("dropping the page for {:?}", page.name),
+        }
+        None
+    }
+
+    fn note_page_following(&mut self, page: &mut crate::library::ArtistPage) {
+        match page.kind {
+            // The server's word on whether this account
+            // follows them, which is what `F` reads.
+            crate::library::PageKind::Artist => {
+                if page.following {
+                    self.favourites.artists.insert(page.id.clone());
+                } else {
+                    self.favourites.artists.remove(&page.id);
+                }
+            }
+            // An album's page is built from its detail,
+            // which does not say whether it is a favourite;
+            // the ids fetched at sign-in do. Without this
+            // an album opened from the favourites drew no
+            // heart in its header.
+            crate::library::PageKind::Album => {
+                page.following |= self.favourites.albums.contains(&page.id);
+                if page.following {
+                    self.favourites.albums.insert(page.id.clone());
+                }
+            }
+        }
+    }
+
+    fn on_page_loaded(
+        &mut self,
+        request: RequestId,
+        title: String,
+        rows: Vec<crate::browse::HomeRow>,
+    ) -> Option<Action> {
+        // Same rule as any other reply.
+        if self
+            .open
+            .as_ref()
+            .is_none_or(|open| open.request != request)
+        {
+            tracing::info!("dropping the page {title:?}, no longer open");
+            return None;
+        }
+        // The reply that was waited for: the pane stops waiting.
+        self.awaiting = false;
+        // A genre is a page of rows, so it is drawn by the rows
+        // renderer under its own heading -- not by `open`, which
+        // hands the pane to the collection view. It used to set
+        // `open` as well, and that view draws `open_cards`, which
+        // a page of rows never fills: the pane went empty and
+        // opening a genre looked like it did nothing at all.
+        //
+        // The level was pushed when the card was activated, and
+        // Explore's own rows went onto it then, so back puts the
+        // genre list back.
+        self.open = None;
+        self.explore.heading = Some(title);
+        self.explore.rows = home_rows(rows);
+        self.explore.row = 0;
+        self.explore.scroll = 0;
+        None
+    }
+
+    fn search_sent(&mut self) -> Option<Action> {
+        if let Some(state) = self.search.as_mut() {
+            state.pending = true;
+        }
+        None
+    }
+
+    fn on_search_loaded(&mut self, results: crate::search::Results) -> Option<Action> {
+        if let Some(state) = self.search.as_mut() {
+            // A reply for a query the user has since retyped would
+            // show results under text that no longer produced them.
+            if state.query.trim() == results.query {
+                state.pending = false;
+                state.results = results;
+                state.tab = 0;
+                // New results: every tab's position means nothing.
+                state.tracks = tracklist::TrackListState::default();
+                state.albums = grid::GridState::default();
+                state.artists = grid::GridState::default();
+                state.playlists = grid::GridState::default();
+                state.top_artists = carousel::CarouselState::default();
+                state.top_albums = carousel::CarouselState::default();
+                state.top_scroll = 0;
+            } else {
+                tracing::info!(
+                    "dropping results for {:?}, the query is now {:?}",
+                    results.query,
+                    state.query
+                );
+            }
+        }
+        None
+    }
+
+    fn queue_next(&mut self) -> Option<Action> {
+        if self.queue.next().is_some() && self.skip_blocked(true) {
+            return Some(Action::PlayQueued);
+        }
+        self.now_playing.playing = false;
+        None
+    }
+
+    fn queue_previous(&mut self) -> Option<Action> {
+        if self.queue.previous().is_some() && self.skip_blocked(false) {
+            return Some(Action::PlayQueued);
+        }
+        None
+    }
+
+    fn on_scrobblers_linked(
+        &mut self,
+        linked: Vec<crate::scrobble::Linked>,
+        refused: Vec<String>,
+    ) -> Option<Action> {
+        let mut words = Vec::new();
+        if !linked.is_empty() {
+            let names: Vec<String> = linked.iter().map(|l| l.label()).collect();
+            words.push(format!("scrobbling to {}", names.join(", ")));
+        } else if !self.scrobblers.is_empty() {
+            // Only worth a word when something was linked before:
+            // at start, no scrobbler is the ordinary case.
+            words.push("scrobbling off".to_string());
+        }
+        // A refusal is said whatever else happened: a token typed
+        // wrong in Settings read "set" and nothing else.
+        words.extend(refused);
+        if !words.is_empty() {
+            self.say(words.join("; "));
+        }
+        self.scrobblers = linked;
+        None
+    }
+
+    fn on_half_page(&mut self, down: bool) -> Option<Action> {
+        // The key `j` or `k` stands for in this config, pressed as
+        // many times as half the screen holds: every view's own
+        // idea of down applies, and so does the scrolling.
+        let default = KeyCode::Char(if down { 'j' } else { 'k' });
+        let key = KeyEvent::new(
+            self.keymap.pressed_for(default),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        for _ in 0..self.half_page() {
+            let mut next = self.on_key(key);
+            while let Some(action) = next {
+                next = self.update(action);
+            }
+        }
+        None
+    }
+
+    fn toggle_autoplay(&mut self) -> Option<Action> {
+        self.config.playback.autoplay = !self.config.playback.autoplay;
+        if let Some(path) = self.config_path.as_ref() {
+            if let Err(e) = self.config.save_to(path) {
+                tracing::warn!("the settings could not be saved: {e}");
+                self.say(format!("could not save settings: {e}"));
+                return None;
+            }
+        }
+        self.say(if self.config.playback.autoplay {
+            "autoplay on"
+        } else {
+            "autoplay off"
+        });
+        None
+    }
+
+    fn fetch_track_album(&mut self, id: crate::domain::TrackId) -> Option<Action> {
+        let track = self.selected_track()?;
+        let title = album_heading(&track);
+        let target = Some(Collection::TrackAlbum(id));
+        self.open_for(
+            target,
+            false,
+            title,
+            track.artist.clone(),
+            track.cover.clone(),
+        );
+        None
+    }
+
+    fn fetch_track_artist(&mut self, id: crate::domain::TrackId) -> Option<Action> {
+        let track = self.selected_track()?;
+        let target = Some(Collection::TrackArtist(id));
+        self.open_for(
+            target,
+            true,
+            first_artist(&track.artist),
+            String::new(),
+            None,
+        );
+        None
+    }
+
+    fn on_open_target(
+        &mut self,
+        request: RequestId,
+        target: Collection,
+        title: String,
+        subtitle: String,
+        cover: Option<String>,
+    ) -> Option<Action> {
+        let round = matches!(target, Collection::Artist(_));
+        let next = self.next_request();
+        match self.open.as_mut() {
+            // The view that asked, by its request: a wait for
+            // another track, opened since, must not take this.
+            Some(open) if open.request == request => {
+                open.title = title;
+                open.subtitle = subtitle;
+                open.cover = cover;
+                open.round_cover = round;
+                // Now known, and not yet fetched: the loop does.
+                open.target = Some(target);
+                open.request = next;
+            }
+            // The wait was left before the track came back: the
+            // same rule as any other late reply.
+            _ => tracing::info!("dropping {title:?}, no longer waited for"),
+        }
+        None
+    }
+
+    fn on_queue_radio(&mut self, tracks: Vec<crate::domain::Track>) -> Option<Action> {
+        self.autoplay_fetching = false;
+        // Marked as autoplay, which is what it is: what TIDAL
+        // suggested following the end of the queue. That marking
+        // is what lets the next album the user starts throw it away
+        // rather than play a radio chosen for a track from twenty
+        // minutes ago.
+        //
+        // Appended, never started: whatever is playing moves on to
+        // it by itself. The one exception is a queue that ran out
+        // before this landed -- then nothing is playing, and the
+        // first of these has to be started by hand.
+        self.queue.append_autoplay(tracks);
+        if self.ran_dry && self.queue.next().is_some() && self.skip_blocked(true) {
+            self.ran_dry = false;
+            return Some(Action::PlayQueued);
+        }
+        None
+    }
+
+    fn on_follow_changed(
+        &mut self,
+        what: Favourable,
+        name: String,
+        following: bool,
+    ) -> Option<Action> {
+        let said = match (&what, following) {
+            (Favourable::Artist(_), true) => format!("Following {name}"),
+            (Favourable::Artist(_), false) => format!("Unfollowed {name}"),
+            (_, true) => format!("Added {name} to favourites"),
+            (_, false) => format!("Removed {name} from favourites"),
+        };
+        match &what {
+            Favourable::Artist(id) => self.artist_followed(id, following),
+            Favourable::Album(id) => self.album_followed(id, following),
+            Favourable::Playlist(uuid) => {
+                if following {
+                    self.favourites.playlists.insert(uuid.clone());
+                } else {
+                    self.favourites.playlists.remove(uuid);
+                }
+            }
+        }
+        self.say(said);
+        None
+    }
+
+    fn artist_followed(&mut self, id: &str, following: bool) {
+        if following {
+            self.favourites.artists.insert(id.to_owned());
+        } else {
+            self.favourites.artists.remove(id);
+        }
+        // The page on screen says so too, count included,
+        // rather than waiting to be opened again.
+        if let Some(page) = self.artist.page.as_mut().filter(|p| p.id == *id) {
+            page.following = following;
+            page.fans = page.fans.map(|n| {
+                if following {
+                    n + 1
+                } else {
+                    n.saturating_sub(1)
+                }
+            });
+        }
+    }
+
+    fn album_followed(&mut self, id: &str, following: bool) {
+        if following {
+            self.favourites.albums.insert(id.to_owned());
+        } else {
+            self.favourites.albums.remove(id);
+        }
+        // The album's page, when it is up, shows the heart
+        // at once rather than on the next open.
+        if let Some(page) = self
+            .artist
+            .page
+            .as_mut()
+            .filter(|p| p.kind == crate::library::PageKind::Album && p.id == *id)
+        {
+            page.following = following;
+        }
+    }
+
+    fn see_all_on_artist(&mut self) -> Option<Action> {
+        // An artist's sections are already in hand — the page came
+        // back with forty-odd albums and fifty singles — so this
+        // opens what is held rather than asking for it again.
+        let page = self.artist.page.as_ref()?;
+        // The section the selection is actually in: an artist with
+        // no top tracks starts on a section they do not have, and
+        // asking for its cards gave an empty list.
+        let present = artistview::Section::present(page);
+        let wanted = artistview::Section::from_index(self.artist.section);
+        let section = if present.contains(&wanted) {
+            wanted
+        } else {
+            *present.first()?
+        };
+        let heading = format!("{} — {}", page.name, section.heading(page.kind));
+        if section == artistview::Section::Tracks {
+            if page.top_tracks.is_empty() {
+                return None;
+            }
+            let identity = self.heading_only(heading);
+            self.open_view(identity, Vec::new());
+            return None;
+        }
+        let cards = artistview::cards(page, section);
+        if cards.is_empty() {
+            return None;
+        }
+        let identity = self.heading_only(heading);
+        self.open_view(identity, cards);
+        None
+    }
+
+    /// The Feed's section, or a row of the home page or of a page opened
+    /// from Explore, opened whole from what is held.
+    fn see_all_of_row(&mut self) -> Option<Action> {
+        let row = self.rows_on_screen().current_row()?;
+        let (heading, cards) = (row.heading.clone(), row.cards.clone());
+        let identity = self.heading_only(heading);
+        self.open_view(identity, cards);
+        None
+    }
+
+    fn see_all_on_search(&mut self) -> Option<Action> {
+        let state = self.search.as_mut()?;
+        if searchview::Tab::from_index(state.tab) != searchview::Tab::Top {
+            return None;
+        }
+        let tab = match state.top {
+            searchview::TopSection::Artists => searchview::Tab::Artists,
+            searchview::TopSection::Albums => searchview::Tab::Albums,
+            searchview::TopSection::Tracks => return None,
+        };
+        state.tab = searchview::Tab::ALL.iter().position(|t| *t == tab)?;
+        None
+    }
+
+    fn on_edit(&mut self, edit: playlistedit::Edit) -> Option<Action> {
+        use playlistedit::Edit;
+        self.say(match edit {
+            Edit::AddTo { title, .. } => format!("adding to {title}…"),
+            Edit::Create { name, .. } => format!("creating {name}…"),
+            Edit::Rename { name, .. } => format!("renaming to {name}…"),
+            Edit::Delete { .. } => "deleting the playlist…".to_string(),
+        });
+        None
+    }
+
+    fn on_playlist_edited(
+        &mut self,
+        message: String,
+        uuid: String,
+        deleted: bool,
+        count_delta: i32,
+    ) -> Option<Action> {
+        self.say(message);
+        if let Some(p) = self.playlists.iter_mut().find(|p| p.uuid == uuid) {
+            p.track_count = p.track_count.saturating_add_signed(count_delta);
+        }
+        let open_is_it = matches!(
+            self.open.as_ref().and_then(|o| o.target.as_ref()),
+            Some(Collection::Playlist(open)) if *open == uuid
+        );
+        // The playlists arrived just before this; the open view's
+        // heading takes the name they now carry, so a rename shows
+        // without reopening.
+        if open_is_it && !deleted {
+            self.rename_open_playlist(&uuid);
+        }
+        (deleted && open_is_it).then_some(Action::CloseCollection)
+    }
+
+    fn rename_open_playlist(&mut self, uuid: &str) {
+        let name = self
+            .playlists
+            .iter()
+            .find(|p| p.uuid == uuid)
+            .map(|p| p.title.clone());
+        // A fresh request: its tracks are fetched again, so
+        // the edit shows.
+        let request = self.next_request();
+        if let Some(open) = self.open.as_mut() {
+            if let Some(name) = name {
+                open.title = name;
+            }
+            open.request = request;
+        }
+    }
+
+    fn on_favourite_changed(
+        &mut self,
+        id: crate::domain::TrackId,
+        favourite: bool,
+    ) -> Option<Action> {
+        if favourite {
+            self.favourites.tracks.insert(id);
+        } else {
+            self.favourites.tracks.remove(&id);
+        }
+        None
+    }
+
+    fn next_search_tab(&mut self) -> Option<Action> {
+        if let Some(state) = self.search.as_mut() {
+            // Each tab keeps its own position now that each is one
+            // of the app's own views, so coming back to a tab finds
+            // it where it was left.
+            state.tab = (state.tab + 1) % searchview::Tab::ALL.len();
+        }
+        None
+    }
+
+    fn on_playback_failed(
+        &mut self,
+        id: crate::domain::TrackId,
+        message: String,
+    ) -> Option<Action> {
+        // The bar is filled the moment a track is chosen, so the
+        // keypress has a visible effect before the request
+        // returns. When that request fails the guess has to be
+        // taken back: otherwise the cover and title of a track
+        // that never started sit there looking exactly like one
+        // that is playing. Only if it is still the same track —
+        // a later choice has already replaced it.
+        if self.now_playing.track.as_ref().is_some_and(|t| t.id == id) {
+            self.now_playing = nowplaying::NowPlaying::default();
+        }
+        self.say(message);
+        None
+    }
+
+    fn seek(&mut self, forward: bool) -> Option<Action> {
+        if let Some(to) = self.seek_target(forward) {
+            self.now_playing.position = to;
+        }
+        None
+    }
+
+    fn on_playback(&mut self, event: crate::playback::PlaybackEvent) -> Option<Action> {
+        use crate::playback::PlaybackEvent;
+        match event {
+            PlaybackEvent::Position(p) => self.on_position(p),
+            PlaybackEvent::Length(length) => self.on_length(length),
+            PlaybackEvent::Started {
+                bit_depth,
+                sample_rate,
+                delivered,
+            } => self.on_started(bit_depth, sample_rate, delivered),
+            // The whole track is here: fetch the next one, so it
+            // starts at once and a gapless engine joins the two.
+            // Not with the sleep timer set to the end of the
+            // track: the next is not to be lined up.
+            PlaybackEvent::Downloaded(id) => self.on_downloaded(id),
+            PlaybackEvent::Finished => self.on_finished(),
+            PlaybackEvent::Error(e) => {
+                self.say(e);
+                self.now_playing.playing = false;
+                None
+            }
+            PlaybackEvent::Spectrum(bands) => {
+                self.spectrum = Some(bands);
+                None
+            }
+            // The engine's verdicts on a track it could not play,
+            // handled where the shell already handles them.
+            PlaybackEvent::Failed { id, message } => {
+                // Never played, so never a listen.
+                self.listen = None;
+                Some(Action::PlaybackFailed { id, message })
+            }
+            PlaybackEvent::SessionExpired => Some(Action::SessionExpired),
+        }
+    }
+
+    fn on_position(&mut self, p: std::time::Duration) -> Option<Action> {
+        self.now_playing.position = p;
+        // Filled while the track is still playing rather
+        // than at the silence after the last one: the web
+        // client's "up next" is never empty, and fetching
+        // at the end means the user waits for the request
+        // with nothing in their ears. The reply appends, so
+        // this does not interrupt anything.
+        self.autoplay_seed()
+    }
+
+    fn on_length(&mut self, length: std::time::Duration) -> Option<Action> {
+        // A track that came without a duration -- YouTube
+        // Music's quick picks -- drew a clock over an
+        // empty bar. The stream knows how long it is.
+        if let Some(track) = self.now_playing.track.as_mut() {
+            if track.duration.is_zero() {
+                track.duration = length;
+            }
+        }
+        None
+    }
+
+    fn on_started(
+        &mut self,
+        bit_depth: Option<u8>,
+        sample_rate: u32,
+        delivered: crate::domain::Quality,
+    ) -> Option<Action> {
+        // The track before this one is over, however far it
+        // got: the position is still its own here.
+        self.settle_listen(self.now_playing.position);
+        // Report what was DELIVERED.
+        let bits = bit_depth.map(|b| format!("{b}-bit ")).unwrap_or_default();
+        // Two decimals, then one trailing zero dropped:
+        // 44.1, 48.0, 22.05. A fixed ".1" rounded HE-AAC's
+        // 22050 Hz to "22.1".
+        let khz = format!("{:.2}", sample_rate as f64 / 1000.0);
+        let khz = khz.strip_suffix('0').unwrap_or(&khz);
+        // A file of your own reports no rate: no badge,
+        // rather than "0.0kHz".
+        self.now_playing.quality = (sample_rate > 0).then(|| format!("{bits}{khz}kHz"));
+        self.now_playing.tier = nowplaying::Tier::of_quality(delivered, bit_depth, sample_rate);
+        // A new stream starts at the beginning. Without this
+        // the previous track's position survived into the new
+        // one, and if that track was the longer of the two
+        // the ratio saturated and drew a full bar over a
+        // track that had barely started.
+        self.now_playing.position = std::time::Duration::ZERO;
+        self.now_playing.playing = true;
+        self.ran_dry = false;
+        self.begin_listen();
+        // A new track: the lyrics pane follows it from the
+        // top, and asks for its words if it is open.
+        self.lyrics.restart();
+        self.lyrics_wanted()
+    }
+
+    fn on_downloaded(&mut self, id: crate::domain::TrackId) -> Option<Action> {
+        if self.now_playing.track.as_ref().is_some_and(|t| t.id == id)
+            && self.sleep != Some(Sleep::EndOfTrack)
+        {
+            if let Some(next) = self.queue.upcoming() {
+                if self.why_blocked(next).is_none() {
+                    return Some(Action::Preload(next.id.clone()));
+                }
+            }
+        }
+        None
+    }
+
+    fn on_finished(&mut self) -> Option<Action> {
+        // Played to the end: the whole of it counts.
+        let whole = self.listen.as_ref().map(|p| p.duration);
+        self.settle_listen(whole.unwrap_or(self.now_playing.position));
+        self.now_playing.position = std::time::Duration::ZERO;
+        // The sleep timer set to the end of the track: this
+        // is it. Paused rather than left, since a gapless
+        // engine may already have the next lined up.
+        if self.sleep == Some(Sleep::EndOfTrack) {
+            self.sleep = None;
+            return self.now_playing.playing.then_some(Action::TogglePause);
+        }
+        // A track ending on its own moves the queue on, which
+        // is what makes an album play through. `advance`
+        // rather than `next`: repeat-one applies to a track
+        // that ends, not to the skip button.
+        if self.queue.advance().is_some() && self.skip_blocked(true) {
+            return Some(Action::PlayQueued);
+        }
+        self.now_playing.playing = false;
+        // The queue is out. The radio was asked for while
+        // the last track played; if it has not landed, or
+        // was never asked for, this is the last resort.
+        self.ran_dry = true;
+        let fetch = self.autoplay_seed()?;
+        tracing::info!("queue empty, following the last track's radio");
+        Some(fetch)
+    }
+
+    fn activate_setting(&mut self) -> Option<Action> {
+        let which = self.settings.current();
+        match (which, which.kind()) {
+            (settings::Setting::Service, _) => Some(Action::SwitchProvider),
+            (_, settings::Kind::Text { .. } | settings::Kind::Folders) => {
+                self.setting_edit = Some(settings::Edit {
+                    setting: which,
+                    typed: settings::text_of(&self.config, which),
+                });
+                None
+            }
+            // Linked already, Enter switches the account off and
+            // on, keeping its session: there is no other way to
+            // stop Last.fm short of clearing the key. Otherwise
+            // it links.
+            (_, settings::Kind::Link) => self.toggle_scrobbler(which),
+            (_, settings::Kind::Toggle) => self.change_setting(true),
+            (_, settings::Kind::Cycle) => None,
+        }
+    }
+
+    fn toggle_scrobbler(&mut self, which: settings::Setting) -> Option<Action> {
+        let Some(linked) = which
+            .scrobbler()
+            .and_then(|id| self.scrobblers.iter_mut().find(|l| l.service.id() == id))
+        else {
+            return Some(Action::SettingChanged(which));
+        };
+        linked.account.enabled = !linked.account.enabled;
+        let said = match linked.account.enabled {
+            true => format!("scrobbling to {} again", linked.label()),
+            false => format!("{} off", linked.label()),
+        };
+        crate::scrobble::store(
+            crate::config::paths::scrobble_file().as_deref(),
+            &self.scrobblers,
+        );
+        self.say(said);
+        None
+    }
+
+    fn on_setting_changed(&mut self, setting: settings::Setting) -> Option<Action> {
+        match setting {
+            settings::Setting::Theme => {
+                self.palette = theme::Palette::from_config(&self.config.ui).0;
+                self.repaint = Repaint::Wipe;
+                None
+            }
+            // The folders are the library: it is read again, the way
+            // a service switch reads it, when that is the service on.
+            settings::Setting::LocalFolders
+                if self.config.provider.kind == crate::config::ProviderKind::Local =>
+            {
+                Some(Action::SwitchProvider)
+            }
+            _ => None,
+        }
+    }
+
+    fn activate_card(&mut self) -> Option<Action> {
+        // A shortcut into one of the app's own views is a change
+        // of section, the same as pressing its number.
+        if let Some(carousel::Target::Section(section)) =
+            self.selected_card().and_then(|c| c.target)
+        {
+            return Some(Action::GoToSection(section));
+        }
+        if self.selected_collection().is_some() {
+            // Read before the level is put away: `push_level` takes
+            // the cards with it, and the identity is read off the
+            // card the user pressed enter on.
+            let identity = self.selected_identity();
+            // The sidebar stays where it is. Moving it to Tracks made
+            // an opened album look like the favourites view and
+            // highlighted the wrong nav entry.
+            self.open_view(identity, Vec::new());
+            // A page opened from Explore replaces its rows, and the
+            // reply takes a moment to arrive. Left in place, the
+            // pane went on drawing the genres under the new
+            // heading, so pressing enter looked like nothing at
+            // all. They go on the level, which is what back
+            // restores.
+            if self.sidebar.section() == sidebar::Section::Explore {
+                let replaced = std::mem::take(&mut self.explore);
+                if let Some(level) = self.back.last_mut() {
+                    level.explore = Some(replaced);
+                }
+            }
+        }
+        None
+    }
+
+    fn open_track_album(&mut self) -> Option<Action> {
+        let track = self.selected_track()?;
+        let (target, title) = album_of(&track)?;
+        self.open_for(
+            Some(target),
+            false,
+            title,
+            track.artist.clone(),
+            track.cover.clone(),
+        );
+        None
+    }
+
+    fn open_track_artist(&mut self) -> Option<Action> {
+        let track = self.selected_track()?;
+        let (target, name) = artist_of(&track)?;
+        self.open_for(Some(target), true, name, String::new(), None);
+        None
+    }
+
+    fn queue_track(&mut self, next: bool) -> Option<Action> {
+        let track = self.selected_track()?;
+        let title = track.title.clone();
+        if next {
+            self.queue.play_next(track);
+            self.say(format!("{title} — next"));
+        } else {
+            self.queue.play_last(track);
+            self.say(format!("{title} — queued"));
+        }
+        None
+    }
+
+    fn play_track_radio(&mut self) -> Option<Action> {
+        // The same step opening anything else takes: what is on
+        // screen goes on the history, and the radio takes the pane.
+        let seed = self.track_radio()?;
+        let title = self.track_radio_title();
+        // The track's own artwork: a radio built from it is about
+        // that record, and the mix's own cover is not in hand until
+        // its items arrive.
+        let cover = self
+            .selected_track()
+            .or_else(|| self.now_playing.track.clone())
+            .and_then(|t| t.cover);
+        let identity = self.heading_with_cover(seed, format!("{title} Radio"), cover, false);
+        self.open_view(identity, Vec::new());
+        None
+    }
+
+    fn go_to(&mut self, section: sidebar::Section) -> Option<Action> {
+        if self.sidebar.section() == section && self.open.is_none() {
+            // Already there and nothing over it: pressing the number
+            // again should not fill the history with the same place.
+            return None;
+        }
+        self.leave_for_a_new_place();
+        self.sidebar.select(section);
+        self.load_if_needed()
+    }
+
+    fn close_collection(&mut self) -> Option<Action> {
+        // One step back, to whatever was on screen when this view
+        // was opened — the view below it when they are nested, and
+        // the sidebar's section at the bottom of the stack. Its own
+        // selection comes back with it.
+        if !self.go_back() {
+            self.clear_open();
+        }
+        None
     }
 
     /// The login screen for the service the config names: TIDAL waits for
@@ -4063,61 +4189,21 @@ impl App {
     /// Public so a test can drive the app the way a person does: keys in,
     /// buffer out. Reaching past this and calling the handlers directly is
     /// how a hint has twice been drawn for a key that did nothing.
+    ///
+    /// Whatever has the keyboard is asked first, in this order; each takes
+    /// the key or lets it through to the next, and the commands come last.
     pub fn on_key(&mut self, key: KeyEvent) -> Option<Action> {
         // A playlist prompt owns the keyboard while it is up: what is
         // typed into it is a name, `q` included, and the keymap does not
         // apply to text.
-        if let Some(prompt) = self.prompt.as_mut() {
-            let owned: Vec<crate::library::Playlist> =
-                self.playlists.iter().filter(|p| p.owned).cloned().collect();
-            let outcome = playlistedit::on_key(prompt, key.code, &owned);
-            return match outcome {
-                playlistedit::Outcome::Kept => None,
-                playlistedit::Outcome::Closed => {
-                    self.prompt = None;
-                    self.repaint = Repaint::Wipe;
-                    None
-                }
-                playlistedit::Outcome::Done(edit) => {
-                    self.prompt = None;
-                    self.repaint = Repaint::Wipe;
-                    Some(Action::Edit(edit))
-                }
-            };
+        if self.prompt.is_some() {
+            return self.on_prompt_key(key.code);
         }
-        if let Some(edit) = self.setting_edit.as_mut() {
-            match key.code {
-                KeyCode::Char(c) => edit.typed.push(c),
-                KeyCode::Backspace => {
-                    edit.typed.pop();
-                }
-                KeyCode::Enter => {
-                    let edit = self.setting_edit.take().expect("checked");
-                    self.repaint = Repaint::Wipe;
-                    return Some(Action::SettingTyped(edit.setting, edit.typed));
-                }
-                KeyCode::Esc => {
-                    self.setting_edit = None;
-                    self.repaint = Repaint::Wipe;
-                }
-                _ => {}
-            }
-            return None;
+        if self.setting_edit.is_some() {
+            return self.on_setting_edit_key(key.code);
         }
-        // Read before the keymap: the map knows keys, not modifiers, and
-        // would translate the `d` of ctrl-d as a bare `d`. Not while a box
-        // has the keyboard, where nothing is a command.
-        if key
-            .modifiers
-            .contains(crossterm::event::KeyModifiers::CONTROL)
-            && !self.filtering
-            && !self.search.as_ref().is_some_and(|s| s.typing)
-        {
-            match key.code {
-                KeyCode::Char('d') => return Some(Action::HalfPage { down: true }),
-                KeyCode::Char('u') => return Some(Action::HalfPage { down: false }),
-                _ => {}
-            }
+        if let Some(half) = self.half_page_key(key) {
+            return Some(half);
         }
         // What the user asked this key to mean, before anything reads it.
         // Rebinding is a translation rather than a table of its own: every
@@ -4127,377 +4213,459 @@ impl App {
         // Not applied to the text boxes below: while one has the keyboard
         // `q` is a letter, and a config that could change that would be a
         // config that breaks typing.
-        let key = KeyEvent {
-            code: self.keymap.resolve(key.code),
-            ..key
-        };
+        let code = self.keymap.resolve(key.code);
 
         // The search box takes the keyboard before anything else. Same
         // reason as the filter box below: while text is being typed, "q" is
         // a letter, not a command.
         if self.search.as_ref().is_some_and(|s| s.typing) {
-            let mut query = self
-                .search
-                .as_ref()
-                .map(|s| s.query.clone())
-                .unwrap_or_default();
-            match key.code {
-                KeyCode::Esc => {
-                    // Escape backs out of search entirely rather than only
-                    // leaving the box: a box with no way back to the app
-                    // would be a trap.
-                    return Some(Action::CloseSearch);
-                }
-                KeyCode::Enter => {
-                    if let Some(state) = self.search.as_mut() {
-                        state.typing = false;
-                    }
-                    return Some(Action::RunSearch(query));
-                }
-                KeyCode::Backspace => {
-                    query.pop();
-                }
-                KeyCode::Char(c) => query.push(c),
-                _ => return None,
-            }
-            if let Some(state) = self.search.as_mut() {
-                state.query = query;
-            }
-            return None;
+            return self.on_search_box_key(code);
         }
-
         // While the filter box has the keyboard, printable keys are text.
         // Without this "q" would quit rather than filter.
         if self.filtering {
-            match key.code {
-                KeyCode::Esc | KeyCode::Enter => {
-                    self.filtering = false;
-                    if key.code == KeyCode::Esc {
-                        self.set_filter(String::new());
-                    }
-                }
-                KeyCode::Backspace => {
-                    let mut f = self.filter_text().to_string();
-                    f.pop();
-                    self.set_filter(f);
-                }
-                KeyCode::Char(c) => {
-                    let mut f = self.filter_text().to_string();
-                    f.push(c);
-                    self.set_filter(f);
-                }
-                _ => {}
-            }
-            return None;
+            return self.on_filter_key(code);
         }
-
-        // Any key closes the help, including the one that opened it. A modal
-        // that takes a specific key to dismiss is one more thing to know.
-        // The queue is a view rather than a notice: it moves and it edits,
-        // so only the keys it does not use close it. Nothing is passed on
-        // to the app behind -- pressing `q` to shut it must not also quit.
-        // The queue's own keys. Only these: it used to take every key and
-        // close on any it did not know, which made each command a way out
-        // and none of them a command -- `A` over the track that was playing
-        // shut the queue instead of liking it. The rest fall through to what
-        // they always do, and act on the row under the cursor, which
-        // `selected_track` reads from the queue while it is showing.
-        if self.showing() == Showing::Queue {
-            let len = self.queue.len();
-            match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    self.queue_list.next(len, self.over_list_visible());
-                    return None;
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    self.queue_list.previous(self.over_list_visible());
-                    return None;
-                }
-                // Take it out. Removing what is playing has to stop or move
-                // the player, which the loop does -- `update` cannot reach
-                // the audio thread.
-                KeyCode::Char('x') | KeyCode::Delete | KeyCode::Backspace => {
-                    if len > 0 {
-                        // Taking a track out shortens the list and uncovers
-                        // a row of whatever was drawn there before.
-                        self.repaint = Repaint::Wipe;
-                        return Some(Action::RemoveQueued(self.queue_list.selected));
-                    }
-                    return None;
-                }
-                // Jump to it, which is what enter means in every list here.
-                // Taken even when there is nothing to jump to: falling
-                // through would open whatever the hidden page had selected.
-                KeyCode::Enter => {
-                    return (len > 0).then_some(Action::JumpInQueue(self.queue_list.selected));
-                }
-                // Whether the queue has an end. Apple Music puts the same
-                // switch at the top of its Playing Next list: the place
-                // you look when wondering what comes after the last row.
-                KeyCode::Char('i') => return Some(Action::ToggleAutoplay),
-                // The key that opened it closes it, which is a step back:
-                // the queue is a view of its own. Escape and `[` reach the
-                // same step below, as they do from any view.
-                KeyCode::Char('Q') => return Some(Action::GoBack),
-                _ => {}
-            }
-        }
-        // The history's keys, as the queue's: only its own, the rest fall
-        // through and act on the row under the cursor.
-        if self.showing() == Showing::History {
-            let len = self.queue.history().count();
-            match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    self.history_list.next(len, self.over_list_visible());
-                    return None;
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    self.history_list.previous(self.over_list_visible());
-                    return None;
-                }
-                // Bringing a played track back means queuing it next; `n`
-                // then reaches it. Taken even with nothing to queue, or it
-                // would open whatever the hidden page had selected.
-                KeyCode::Enter => {
-                    return (len > 0).then_some(Action::QueueTrackNext);
-                }
-                KeyCode::Char('H') => return Some(Action::GoBack),
-                _ => {}
-            }
-        }
-        // Zen has nothing to move through: the keys that would move a
-        // cursor or open a row reach nothing, rather than the view hidden
-        // under it. The transport and the playing track's keys fall through.
-        if self.showing() == Showing::Zen {
-            match key.code {
-                KeyCode::Char('Z') => return Some(Action::GoBack),
-                KeyCode::Enter
-                | KeyCode::Up
-                | KeyCode::Down
-                | KeyCode::Left
-                | KeyCode::Right
-                | KeyCode::Char('j' | 'k' | 'h' | 'l' | 'J' | 'K' | '/' | 'o' | 't')
-                | KeyCode::Tab => return None,
-                _ => {}
-            }
+        if let Some(taken) = self.on_list_key(code) {
+            return taken;
         }
         // A question about the Widevine module takes every key: y or n
         // answer it, j and k scroll the terms, nothing else gets through.
         if self.cdm.asking() {
-            // Matched on the letter rather than the key, so the help's
-            // own scan does not count these among the app's bindings: they
-            // are the modal's, and it says them itself.
-            let typed = match key.code {
-                KeyCode::Char(c) => Some(c),
-                _ => None,
-            };
-            return match (typed, key.code) {
-                (Some('y'), _) => Some(Action::AnswerCdm(true)),
-                (Some('n'), _) | (_, KeyCode::Esc) => Some(Action::AnswerCdm(false)),
-                (Some('j'), _) | (_, KeyCode::Down) => {
-                    self.cdm.scroll_by(true);
-                    None
-                }
-                (Some('k'), _) | (_, KeyCode::Up) => {
-                    self.cdm.scroll_by(false);
-                    None
-                }
-                _ => None,
-            };
+            return self.on_cdm_key(code);
         }
-        // The lyrics pane takes the keys that move it and lets the rest
-        // through: pausing and skipping are still wanted while reading.
-        if self.lyrics.open {
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('L') => return Some(Action::ToggleLyrics),
-                KeyCode::Char('j') | KeyCode::Down => {
-                    self.lyrics.scroll_by(true);
-                    return None;
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    self.lyrics.scroll_by(false);
-                    return None;
-                }
-                _ => {}
-            }
+        if let Some(taken) = self.on_lyrics_key(code) {
+            return taken;
         }
         if self.showing_help {
-            // Too short a terminal cut the end of the list off, with no
-            // way to reach it: j and k scroll, anything else closes.
-            match key.code {
-                KeyCode::Char('j') | KeyCode::Down => {
-                    self.help_scroll = self.help_scroll.saturating_add(1);
-                    return None;
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    self.help_scroll = self.help_scroll.saturating_sub(1);
-                    return None;
-                }
-                _ => {}
+            return self.on_help_key(code);
+        }
+        if self.session.is_none() {
+            if let Some(taken) = self.on_login_key(code) {
+                return taken;
             }
-            self.showing_help = false;
-            self.help_scroll = 0;
-            // The modal wrote over cells the image protocols had marked
-            // `Skip`, and on the next frame they go back to `Skip` — so
-            // nothing is written to undo it and a patch of the help stays
-            // on the artwork. Only a full repaint clears that.
-            self.repaint = Repaint::Wipe;
+        }
+        self.on_command_key(code)
+    }
+
+    // What `on_key` hands each part of the screen that can take a key. One
+    // returning `Option<Option<Action>>` takes the key when it is `Some`,
+    // and lets it through to the next when it is `None`.
+
+    fn on_prompt_key(&mut self, code: KeyCode) -> Option<Action> {
+        let owned: Vec<crate::library::Playlist> =
+            self.playlists.iter().filter(|p| p.owned).cloned().collect();
+        let outcome = playlistedit::on_key(self.prompt.as_mut()?, code, &owned);
+        match outcome {
+            playlistedit::Outcome::Kept => None,
+            playlistedit::Outcome::Closed => {
+                self.prompt = None;
+                self.repaint = Repaint::Wipe;
+                None
+            }
+            playlistedit::Outcome::Done(edit) => {
+                self.prompt = None;
+                self.repaint = Repaint::Wipe;
+                Some(Action::Edit(edit))
+            }
+        }
+    }
+
+    fn on_setting_edit_key(&mut self, code: KeyCode) -> Option<Action> {
+        let edit = self.setting_edit.as_mut()?;
+        match code {
+            KeyCode::Char(c) => edit.typed.push(c),
+            KeyCode::Backspace => {
+                edit.typed.pop();
+            }
+            KeyCode::Enter => {
+                let edit = self.setting_edit.take().expect("checked");
+                self.repaint = Repaint::Wipe;
+                return Some(Action::SettingTyped(edit.setting, edit.typed));
+            }
+            KeyCode::Esc => {
+                self.setting_edit = None;
+                self.repaint = Repaint::Wipe;
+            }
+            _ => {}
+        }
+        None
+    }
+
+    fn half_page_key(&self, key: KeyEvent) -> Option<Action> {
+        // Read before the keymap: the map knows keys, not modifiers, and
+        // would translate the `d` of ctrl-d as a bare `d`. Not while a box
+        // has the keyboard, where nothing is a command.
+        let command = key
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::CONTROL)
+            && !self.filtering
+            && !self.search.as_ref().is_some_and(|s| s.typing);
+        match key.code {
+            KeyCode::Char('d') if command => Some(Action::HalfPage { down: true }),
+            KeyCode::Char('u') if command => Some(Action::HalfPage { down: false }),
+            _ => None,
+        }
+    }
+
+    fn on_search_box_key(&mut self, code: KeyCode) -> Option<Action> {
+        let mut query = self
+            .search
+            .as_ref()
+            .map(|s| s.query.clone())
+            .unwrap_or_default();
+        match code {
+            KeyCode::Esc => {
+                // Escape backs out of search entirely rather than only
+                // leaving the box: a box with no way back to the app
+                // would be a trap.
+                return Some(Action::CloseSearch);
+            }
+            KeyCode::Enter => {
+                if let Some(state) = self.search.as_mut() {
+                    state.typing = false;
+                }
+                return Some(Action::RunSearch(query));
+            }
+            KeyCode::Backspace => {
+                query.pop();
+            }
+            KeyCode::Char(c) => query.push(c),
+            _ => return None,
+        }
+        if let Some(state) = self.search.as_mut() {
+            state.query = query;
+        }
+        None
+    }
+
+    fn on_filter_key(&mut self, code: KeyCode) -> Option<Action> {
+        match code {
+            KeyCode::Esc | KeyCode::Enter => {
+                self.filtering = false;
+                if code == KeyCode::Esc {
+                    self.set_filter(String::new());
+                }
+            }
+            KeyCode::Backspace => {
+                let mut f = self.filter_text().to_string();
+                f.pop();
+                self.set_filter(f);
+            }
+            KeyCode::Char(c) => {
+                let mut f = self.filter_text().to_string();
+                f.push(c);
+                self.set_filter(f);
+            }
+            _ => {}
+        }
+        None
+    }
+
+    // Any key closes the help, including the one that opened it. A modal
+    // that takes a specific key to dismiss is one more thing to know.
+    // The queue is a view rather than a notice: it moves and it edits,
+    // so only the keys it does not use close it. Nothing is passed on
+    // to the app behind -- pressing `q` to shut it must not also quit.
+    fn on_list_key(&mut self, code: KeyCode) -> Option<Option<Action>> {
+        match self.showing() {
+            Showing::Queue => self.on_queue_key(code),
+            Showing::History => self.on_history_key(code),
+            Showing::Zen => Self::on_zen_key(code),
+            _ => None,
+        }
+    }
+
+    /// The queue's own keys. Only these: it used to take every key and
+    /// close on any it did not know, which made each command a way out
+    /// and none of them a command -- `A` over the track that was playing
+    /// shut the queue instead of liking it. The rest fall through to what
+    /// they always do, and act on the row under the cursor, which
+    /// `selected_track` reads from the queue while it is showing.
+    fn on_queue_key(&mut self, code: KeyCode) -> Option<Option<Action>> {
+        let len = self.queue.len();
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.queue_list.next(len, self.over_list_visible());
+                Some(None)
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.queue_list.previous(self.over_list_visible());
+                Some(None)
+            }
+            // Take it out. Removing what is playing has to stop or move
+            // the player, which the loop does -- `update` cannot reach
+            // the audio thread.
+            KeyCode::Char('x') | KeyCode::Delete | KeyCode::Backspace => {
+                if len > 0 {
+                    // Taking a track out shortens the list and uncovers
+                    // a row of whatever was drawn there before.
+                    self.repaint = Repaint::Wipe;
+                    return Some(Some(Action::RemoveQueued(self.queue_list.selected)));
+                }
+                Some(None)
+            }
+            // Jump to it, which is what enter means in every list here.
+            // Taken even when there is nothing to jump to: falling
+            // through would open whatever the hidden page had selected.
+            KeyCode::Enter => {
+                Some((len > 0).then_some(Action::JumpInQueue(self.queue_list.selected)))
+            }
+            // Whether the queue has an end. Apple Music puts the same
+            // switch at the top of its Playing Next list: the place
+            // you look when wondering what comes after the last row.
+            KeyCode::Char('i') => Some(Some(Action::ToggleAutoplay)),
+            // The key that opened it closes it, which is a step back:
+            // the queue is a view of its own. Escape and `[` reach the
+            // same step below, as they do from any view.
+            KeyCode::Char('Q') => Some(Some(Action::GoBack)),
+            _ => None,
+        }
+    }
+
+    /// The history's keys, as the queue's: only its own, the rest fall
+    /// through and act on the row under the cursor.
+    fn on_history_key(&mut self, code: KeyCode) -> Option<Option<Action>> {
+        let len = self.queue.history().count();
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.history_list.next(len, self.over_list_visible());
+                Some(None)
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.history_list.previous(self.over_list_visible());
+                Some(None)
+            }
+            // Bringing a played track back means queuing it next; `n`
+            // then reaches it. Taken even with nothing to queue, or it
+            // would open whatever the hidden page had selected.
+            KeyCode::Enter => Some((len > 0).then_some(Action::QueueTrackNext)),
+            KeyCode::Char('H') => Some(Some(Action::GoBack)),
+            _ => None,
+        }
+    }
+
+    /// Zen has nothing to move through: the keys that would move a
+    /// cursor or open a row reach nothing, rather than the view hidden
+    /// under it. The transport and the playing track's keys fall through.
+    fn on_zen_key(code: KeyCode) -> Option<Option<Action>> {
+        match code {
+            KeyCode::Char('Z') => Some(Some(Action::GoBack)),
+            KeyCode::Enter
+            | KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Char('j' | 'k' | 'h' | 'l' | 'J' | 'K' | '/' | 'o' | 't')
+            | KeyCode::Tab => Some(None),
+            _ => None,
+        }
+    }
+
+    fn on_cdm_key(&mut self, code: KeyCode) -> Option<Action> {
+        // Matched on the letter rather than the key, so the help's
+        // own scan does not count these among the app's bindings: they
+        // are the modal's, and it says them itself.
+        let typed = match code {
+            KeyCode::Char(c) => Some(c),
+            _ => None,
+        };
+        match (typed, code) {
+            (Some('y'), _) => Some(Action::AnswerCdm(true)),
+            (Some('n'), _) | (_, KeyCode::Esc) => Some(Action::AnswerCdm(false)),
+            (Some('j'), _) | (_, KeyCode::Down) => {
+                self.cdm.scroll_by(true);
+                None
+            }
+            (Some('k'), _) | (_, KeyCode::Up) => {
+                self.cdm.scroll_by(false);
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// The lyrics pane takes the keys that move it and lets the rest
+    /// through: pausing and skipping are still wanted while reading.
+    fn on_lyrics_key(&mut self, code: KeyCode) -> Option<Option<Action>> {
+        if !self.lyrics.open {
             return None;
         }
-
-        if self.session.is_none() {
-            // The login screen's own prompts take every key: what is typed
-            // into them is a password or a cookie, `q` included.
-            match &mut self.login {
-                login::LoginState::Password { typed, .. } => {
-                    match key.code {
-                        KeyCode::Char(c) => typed.0.push(c),
-                        KeyCode::Backspace => {
-                            typed.0.pop();
-                        }
-                        KeyCode::Enter if !typed.0.is_empty() => {
-                            return Some(Action::Connect(std::mem::take(typed)));
-                        }
-                        KeyCode::Tab => return Some(Action::NextService),
-                        KeyCode::Esc => return Some(Action::CancelLogin),
-                        _ => {}
-                    }
-                    return None;
-                }
-                login::LoginState::Text { field, typed } => {
-                    match key.code {
-                        KeyCode::Char(c) => typed.push(c),
-                        KeyCode::Backspace => {
-                            typed.pop();
-                        }
-                        KeyCode::Enter if !typed.trim().is_empty() => {
-                            return Some(Action::Typed(*field, typed.trim().to_owned()));
-                        }
-                        KeyCode::Tab => return Some(Action::NextService),
-                        KeyCode::Esc => return Some(Action::CancelLogin),
-                        _ => {}
-                    }
-                    return None;
-                }
-                login::LoginState::Secret { typed } => {
-                    match key.code {
-                        KeyCode::Char(c) => typed.0.push(c),
-                        KeyCode::Backspace => {
-                            typed.0.pop();
-                        }
-                        KeyCode::Enter if !typed.0.trim().is_empty() => {
-                            return Some(Action::Answer(std::mem::take(typed).0));
-                        }
-                        KeyCode::Esc => return Some(Action::CancelLogin),
-                        _ => {}
-                    }
-                    return None;
-                }
-                login::LoginState::Accounts { choices, selected } => {
-                    match key.code {
-                        KeyCode::Char('j') | KeyCode::Down => {
-                            *selected = (*selected + 1).min(choices.len().saturating_sub(1));
-                        }
-                        KeyCode::Char('k') | KeyCode::Up => {
-                            *selected = selected.saturating_sub(1);
-                        }
-                        KeyCode::Enter => {
-                            return choices.get(*selected).map(|c| Action::Answer(c.id.clone()));
-                        }
-                        KeyCode::Esc => return Some(Action::CancelLogin),
-                        _ => {}
-                    }
-                    return None;
-                }
-                // Nothing to answer while the service works, or waits on
-                // the browser: Enter must not start a second sign-in.
-                login::LoginState::Busy(_)
-                | login::LoginState::Url(_)
-                | login::LoginState::Waiting { .. } => {
-                    return match key.code {
-                        KeyCode::Esc => Some(Action::CancelLogin),
-                        // The sign-in under way is abandoned: a service
-                        // waiting on a browser that will never confirm
-                        // was a screen with no way out but quitting.
-                        KeyCode::Tab => Some(Action::NextService),
-                        _ => None,
-                    };
-                }
-                login::LoginState::Idle | login::LoginState::Failed(_) => {
-                    if key.code == KeyCode::Char(Self::GUEST_KEY) && self.guest_allowed() {
-                        return Some(Action::BeginGuest);
-                    }
-                    if key.code == KeyCode::Tab {
-                        return Some(Action::NextService);
-                    }
-                }
+        match code {
+            KeyCode::Esc | KeyCode::Char('L') => Some(Some(Action::ToggleLyrics)),
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.lyrics.scroll_by(true);
+                Some(None)
             }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.lyrics.scroll_by(false);
+                Some(None)
+            }
+            _ => None,
         }
+    }
 
-        match key.code {
-            // "s" puts the keyboard back in the box, whether search is open
-            // or not: with the box already up it did nothing at all, so
-            // there was no way back to the query except closing search and
-            // starting over.
-            KeyCode::Char('s') if self.session.is_some() => Some(Action::BeginSearch),
+    fn on_help_key(&mut self, code: KeyCode) -> Option<Action> {
+        // Too short a terminal cut the end of the list off, with no
+        // way to reach it: j and k scroll, anything else closes.
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.help_scroll = self.help_scroll.saturating_add(1);
+                return None;
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.help_scroll = self.help_scroll.saturating_sub(1);
+                return None;
+            }
+            _ => {}
+        }
+        self.showing_help = false;
+        self.help_scroll = 0;
+        // The modal wrote over cells the image protocols had marked
+        // `Skip`, and on the next frame they go back to `Skip` — so
+        // nothing is written to undo it and a patch of the help stays
+        // on the artwork. Only a full repaint clears that.
+        self.repaint = Repaint::Wipe;
+        None
+    }
+
+    /// The login screen's own prompts take every key: what is typed
+    /// into them is a password or a cookie, `q` included.
+    fn on_login_key(&mut self, code: KeyCode) -> Option<Option<Action>> {
+        let taken = match &mut self.login {
+            login::LoginState::Password { typed, .. } => Self::password_key(typed, code),
+            login::LoginState::Text { field, typed } => Self::text_key(*field, typed, code),
+            login::LoginState::Secret { typed } => Self::secret_key(typed, code),
+            login::LoginState::Accounts { choices, selected } => {
+                Self::accounts_key(choices, selected, code)
+            }
+            // Nothing to answer while the service works, or waits on
+            // the browser: Enter must not start a second sign-in.
+            login::LoginState::Busy(_)
+            | login::LoginState::Url(_)
+            | login::LoginState::Waiting { .. } => match code {
+                KeyCode::Esc => Some(Action::CancelLogin),
+                // The sign-in under way is abandoned: a service
+                // waiting on a browser that will never confirm
+                // was a screen with no way out but quitting.
+                KeyCode::Tab => Some(Action::NextService),
+                _ => None,
+            },
+            login::LoginState::Idle | login::LoginState::Failed(_) => {
+                return self.idle_login_key(code)
+            }
+        };
+        Some(taken)
+    }
+
+    fn password_key(typed: &mut login::Secret, code: KeyCode) -> Option<Action> {
+        match code {
+            KeyCode::Char(c) => typed.0.push(c),
+            KeyCode::Backspace => {
+                typed.0.pop();
+            }
+            KeyCode::Enter if !typed.0.is_empty() => {
+                return Some(Action::Connect(std::mem::take(typed)));
+            }
+            KeyCode::Tab => return Some(Action::NextService),
+            KeyCode::Esc => return Some(Action::CancelLogin),
+            _ => {}
+        }
+        None
+    }
+
+    fn text_key(field: login::Field, typed: &mut String, code: KeyCode) -> Option<Action> {
+        match code {
+            KeyCode::Char(c) => typed.push(c),
+            KeyCode::Backspace => {
+                typed.pop();
+            }
+            KeyCode::Enter if !typed.trim().is_empty() => {
+                return Some(Action::Typed(field, typed.trim().to_owned()));
+            }
+            KeyCode::Tab => return Some(Action::NextService),
+            KeyCode::Esc => return Some(Action::CancelLogin),
+            _ => {}
+        }
+        None
+    }
+
+    fn secret_key(typed: &mut login::Secret, code: KeyCode) -> Option<Action> {
+        match code {
+            KeyCode::Char(c) => typed.0.push(c),
+            KeyCode::Backspace => {
+                typed.0.pop();
+            }
+            KeyCode::Enter if !typed.0.trim().is_empty() => {
+                return Some(Action::Answer(std::mem::take(typed).0));
+            }
+            KeyCode::Esc => return Some(Action::CancelLogin),
+            _ => {}
+        }
+        None
+    }
+
+    fn accounts_key(
+        choices: &[music::AccountChoice],
+        selected: &mut usize,
+        code: KeyCode,
+    ) -> Option<Action> {
+        match code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                *selected = (*selected + 1).min(choices.len().saturating_sub(1));
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                *selected = selected.saturating_sub(1);
+            }
+            KeyCode::Enter => {
+                return choices.get(*selected).map(|c| Action::Answer(c.id.clone()));
+            }
+            KeyCode::Esc => return Some(Action::CancelLogin),
+            _ => {}
+        }
+        None
+    }
+
+    /// Nothing to type into: the guest key and Tab are the screen's own,
+    /// and every other key goes on to the commands.
+    fn idle_login_key(&self, code: KeyCode) -> Option<Option<Action>> {
+        if code == KeyCode::Char(Self::GUEST_KEY) && self.guest_allowed() {
+            return Some(Some(Action::BeginGuest));
+        }
+        if code == KeyCode::Tab {
+            return Some(Some(Action::NextService));
+        }
+        None
+    }
+
+    /// The commands, once nothing on screen has taken the key. Grouped by
+    /// key rather than by guard: only arms on the same key ever competed,
+    /// and each group keeps those in the order they were always tried.
+    fn on_command_key(&mut self, code: KeyCode) -> Option<Action> {
+        match code {
+            KeyCode::Esc | KeyCode::Char('[' | '/') => self.on_back_key(code),
+            KeyCode::Char('e' | 'E' | 'c' | 'a' | 'R') => self.on_track_key(code),
+            KeyCode::Char('h' | 'l') | KeyCode::Left | KeyCode::Right => self.on_sideways_key(code),
+            KeyCode::Char('b' | 'O' | 'I' | 'x' | 'F' | 't' | '.' | ',') | KeyCode::Tab => {
+                self.on_view_key(code)
+            }
+            KeyCode::Char('q') => Some(Action::Quit),
+            KeyCode::Enter if self.session.is_none() => Some(Action::BeginLogin),
+            _ if self.session.is_some() => self.on_signed_in_key(code),
+            _ => None,
+        }
+    }
+
+    /// Escape, `[` and `/`, each of which means something different by
+    /// what is on screen.
+    fn on_back_key(&mut self, code: KeyCode) -> Option<Action> {
+        match code {
             // Only when the results are what is on screen: an album opened
             // from a result stands on top of them, and escape there closed
             // the search out from under it -- taking away both views at
             // once when the user meant to leave the one they were in.
             KeyCode::Esc if self.on_search() => Some(Action::CloseSearch),
             KeyCode::Char('/') if self.on_search() => Some(Action::BeginSearch),
-            // Shift-/ on most layouts, so this is the one key to remember.
-            KeyCode::Char('?') if self.session.is_some() => {
-                self.showing_help = true;
-                None
-            }
-            KeyCode::Char('L') if self.session.is_some() => Some(Action::ToggleLyrics),
-            // What is playing next, and where each of it came from. Capital,
-            // because `q` quits and the two would be a bad pair to confuse.
-            KeyCode::Char('Q') if self.session.is_some() => {
-                // A view of its own: what was showing goes onto the stack
-                // and back returns to it -- the history included, so the
-                // two lists are never up at once.
-                self.push_level();
-                self.open = None;
-                self.list = Some(List::Queue);
-                self.queue_list.selected = self.queue.position();
-                let visible = self.over_list_visible();
-                self.queue_list.scroll_into_view(visible);
-                tracing::debug!(
-                    queued = self.queue.len(),
-                    entries = self.queue.entries().len(),
-                    at = self.queue.position(),
-                    selected = self.queue_list.selected,
-                    offset = self.queue_list.offset,
-                    visible,
-                    context = ?self.queue.context_name(),
-                    "queue opened"
-                );
-                None
-            }
-            // The playing track alone, the rest of the app out of sight.
-            KeyCode::Char('Z') if self.session.is_some() => {
-                self.push_level();
-                self.open = None;
-                self.list = Some(List::Zen);
-                // The sidebar's columns hold whatever was drawn there, and
-                // the image protocols will not overwrite them.
-                self.repaint = Repaint::Wipe;
-                None
-            }
-            // What has been played. Beside `Q` on the keyboard, and the
-            // other half of the same question.
-            KeyCode::Char('H') if self.session.is_some() => {
-                // As the queue: a level of its own.
-                self.push_level();
-                self.open = None;
-                self.list = Some(List::History);
-                // From the top, which is the newest: what was just played
-                // is what the eye is after.
-                self.history_list = Default::default();
-                None
-            }
             // The bio is drawn over the artist's page rather than pushed as
             // a view, so back closes it first. Otherwise it popped the page
             // from under the reader, who landed on whatever the artist had
@@ -4511,109 +4679,81 @@ impl App {
             // mean the same thing whichever of the two is pressed. It never
             // quits — `q` alone does that, since a key that usually means
             // "leave this view" should not sometimes close the app instead.
-            KeyCode::Esc if self.session.is_some() => Some(Action::GoBack),
-            KeyCode::Esc => None,
-            // Only on an artist's page, where there is a blurb to open.
-            KeyCode::Char('b') if self.on_artist() => {
-                self.artist.bio_open = !self.artist.bio_open;
-                // From the top each time it opens, as a page would.
-                self.artist.bio_scroll = 0;
-                None
-            }
-            // Queue the highlighted track by hand: `e` next, `E` last.
-            // Both survive a change of album, which is the whole point of
-            // asking for a track by name rather than playing its list.
-            KeyCode::Char('e') if self.selected_track().is_some() => Some(Action::QueueTrackNext),
-            KeyCode::Char('E') if self.selected_track().is_some() => Some(Action::QueueTrackLast),
-            // The album and the artist of the highlighted track. A list of
-            // tracks names both and could open neither, so the only way to
-            // an album from your favourites was to search for it.
             //
-            // `c` for the cover: `a` is the artist and every letter that
-            // says "album" was already spoken for, so this names the thing
-            // on screen rather than a word nobody would guess.
-            KeyCode::Char('c') if self.selected_track_album().is_some() => {
-                let (target, title) = self.selected_track_album()?;
-                (!self.already_showing(&target, &title)).then_some(Action::OpenTrackAlbum)
-            }
-            KeyCode::Char('a') if self.selected_track_artist().is_some() => {
-                let (target, name) = self.selected_track_artist()?;
-                (!self.already_showing(&target, &name)).then_some(Action::OpenTrackArtist)
-            }
-            // The row names an album and an artist but carries the id of
-            // neither -- a card from the home page, a favourite from before
-            // the ids were kept. `R` has the same gap and fills it the same
-            // way: fetch the track, which does carry them, then open.
-            // Without this the key did nothing, in silence, on the one page
-            // most people start from.
-            // The same guard as above: the wait is headed by what the row
-            // knows, and names the track it looks up.
-            KeyCode::Char('c') if self.selected_track().is_some() => {
-                let track = self.selected_track()?;
-                let target = Collection::TrackAlbum(track.id.clone());
-                (!self.already_showing(&target, &album_heading(&track)))
-                    .then_some(Action::FetchTrackAlbum(track.id))
-            }
-            KeyCode::Char('a') if self.selected_track().is_some() => {
-                let track = self.selected_track()?;
-                let target = Collection::TrackArtist(track.id.clone());
-                (!self.already_showing(&target, &first_artist(&track.artist)))
-                    .then_some(Action::FetchTrackArtist(track.id))
-            }
-            // The radio around the selected track, or whatever is playing.
-            // `R` reaches this from anywhere, which is where the user is
-            // when the thought occurs.
-            // Already in that radio: nothing to open.
-            KeyCode::Char('R') if self.track_radio().is_some_and(|s| self.radio_is_open(&s)) => {
-                None
-            }
-            KeyCode::Char('R') if self.track_radio().is_some() => Some(Action::PlayTrackRadio),
-            // The nav by number, 1 through 8: there are exactly eight
-            // entries, Music first and Settings last, and reaching the far
-            // end with J took seven presses.
-            KeyCode::Char(c @ '1'..='8') if self.session.is_some() => {
-                let at = c as usize - '1' as usize;
-                sidebar::Section::ALL
-                    .get(at)
-                    .copied()
-                    .map(Action::GoToSection)
-            }
             // The two arrows, as a browser has them: back through a run of
             // sections as well as of opened views, and forward again, which
             // escape alone cannot do.
-            KeyCode::Char('[') if self.session.is_some() => Some(Action::GoBack),
-            KeyCode::Char(']') if self.session.is_some() => Some(Action::GoForward),
-            KeyCode::Char('q') => Some(Action::Quit),
+            KeyCode::Esc | KeyCode::Char('[') if self.session.is_some() => Some(Action::GoBack),
             // Every view but the home page has a filter box.
             KeyCode::Char('/') if self.session.is_some() && !self.on_home() => {
                 self.filtering = true;
                 None
             }
-            // Order a track list by the next column, or the other way round.
-            // On top of the filter: it orders what the filter kept.
-            KeyCode::Char('O') if self.sort_target().is_some() => {
-                if let Some((columns, list)) = self.sort_target() {
-                    list.next_sort(&columns);
-                }
-                None
-            }
-            KeyCode::Char('I') if self.sort_target().is_some() => {
-                if let Some((_, list)) = self.sort_target() {
-                    list.reverse_sort();
-                }
-                None
-            }
-            KeyCode::Enter if self.session.is_none() => Some(Action::BeginLogin),
-            // j and k always drive the content. The sidebar has J and K to
-            // itself, so moving through a list never depends on remembering
-            // which pane last took focus.
-            KeyCode::Char('j') | KeyCode::Down if self.session.is_some() => {
-                if self.on_home() {
-                    Some(Action::RowNext)
-                } else {
-                    Some(Action::TrackNext)
-                }
-            }
+            _ => None,
+        }
+    }
+
+    /// The keys that act on the highlighted track.
+    fn on_track_key(&mut self, code: KeyCode) -> Option<Action> {
+        match code {
+            // Queue the highlighted track by hand: `e` next, `E` last.
+            // Both survive a change of album, which is the whole point of
+            // asking for a track by name rather than playing its list.
+            KeyCode::Char('e') if self.selected_track().is_some() => Some(Action::QueueTrackNext),
+            KeyCode::Char('E') if self.selected_track().is_some() => Some(Action::QueueTrackLast),
+            KeyCode::Char('c') => self.album_key(),
+            KeyCode::Char('a') => self.artist_key(),
+            KeyCode::Char('R') => self.radio_key(),
+            _ => None,
+        }
+    }
+
+    /// The album and the artist of the highlighted track. A list of
+    /// tracks names both and could open neither, so the only way to
+    /// an album from your favourites was to search for it.
+    ///
+    /// `c` for the cover: `a` is the artist and every letter that
+    /// says "album" was already spoken for, so this names the thing
+    /// on screen rather than a word nobody would guess.
+    fn album_key(&self) -> Option<Action> {
+        if let Some((target, title)) = self.selected_track_album() {
+            return (!self.already_showing(&target, &title)).then_some(Action::OpenTrackAlbum);
+        }
+        // The row names an album and an artist but carries the id of
+        // neither -- a card from the home page, a favourite from before
+        // the ids were kept. `R` has the same gap and fills it the same
+        // way: fetch the track, which does carry them, then open.
+        // Without this the key did nothing, in silence, on the one page
+        // most people start from.
+        // The same guard as above: the wait is headed by what the row
+        // knows, and names the track it looks up.
+        let track = self.selected_track()?;
+        let target = Collection::TrackAlbum(track.id.clone());
+        (!self.already_showing(&target, &album_heading(&track)))
+            .then_some(Action::FetchTrackAlbum(track.id))
+    }
+
+    fn artist_key(&self) -> Option<Action> {
+        if let Some((target, name)) = self.selected_track_artist() {
+            return (!self.already_showing(&target, &name)).then_some(Action::OpenTrackArtist);
+        }
+        let track = self.selected_track()?;
+        let target = Collection::TrackArtist(track.id.clone());
+        (!self.already_showing(&target, &first_artist(&track.artist)))
+            .then_some(Action::FetchTrackArtist(track.id))
+    }
+
+    /// The radio around the selected track, or whatever is playing.
+    /// `R` reaches this from anywhere, which is where the user is
+    /// when the thought occurs.
+    fn radio_key(&self) -> Option<Action> {
+        let seed = self.track_radio()?;
+        // Already in that radio: nothing to open.
+        (!self.radio_is_open(&seed)).then_some(Action::PlayTrackRadio)
+    }
+
+    fn on_sideways_key(&mut self, code: KeyCode) -> Option<Action> {
+        match code {
             // Within an artist's page, which is drawn over everything else.
             KeyCode::Char('l') | KeyCode::Right if self.on_artist() => Some(Action::ArtistRight),
             KeyCode::Char('h') | KeyCode::Left if self.on_artist() => Some(Action::ArtistLeft),
@@ -4622,13 +4762,6 @@ impl App {
             // a row of the home page nothing was drawing.
             KeyCode::Char('l') | KeyCode::Right if self.on_search() => Some(Action::SearchRight),
             KeyCode::Char('h') | KeyCode::Left if self.on_search() => Some(Action::SearchLeft),
-            KeyCode::Char('k') | KeyCode::Up if self.session.is_some() => {
-                if self.on_home() {
-                    Some(Action::RowPrevious)
-                } else {
-                    Some(Action::TrackPrevious)
-                }
-            }
             KeyCode::Char('l') | KeyCode::Right if self.session.is_some() => {
                 Some(Action::CarouselNext)
             }
@@ -4641,84 +4774,205 @@ impl App {
             KeyCode::Char('h') | KeyCode::Left if self.session.is_some() => {
                 Some(Action::CarouselPrevious)
             }
-            // Favouriting the highlighted track, both ways: pressing it on
-            // one that is already a favourite takes it out again.
-            // Playlist edits. Each opens its question; `x` asks none.
-            KeyCode::Char('P') if self.session.is_some() => {
-                if let Some(track) = self.selected_track() {
-                    self.prompt = Some(playlistedit::Prompt::add_to(track.id, track.title));
-                }
+            _ => None,
+        }
+    }
+
+    /// The keys only some views have a use for.
+    fn on_view_key(&mut self, code: KeyCode) -> Option<Action> {
+        match code {
+            // Only on an artist's page, where there is a blurb to open.
+            KeyCode::Char('b') if self.on_artist() => {
+                self.artist.bio_open = !self.artist.bio_open;
+                // From the top each time it opens, as a page would.
+                self.artist.bio_scroll = 0;
                 None
             }
-            KeyCode::Char('N') if self.session.is_some() => {
-                self.prompt = Some(playlistedit::Prompt::NewPlaylist {
-                    name: String::new(),
-                });
-                None
-            }
-            KeyCode::Char('m') | KeyCode::Char('D') if self.session.is_some() => {
-                match self.playlist_in_hand() {
-                    Some(p) if p.owned => {
-                        let (uuid, title) = (p.uuid.clone(), p.title.clone());
-                        self.prompt = Some(match key.code {
-                            KeyCode::Char('m') => {
-                                playlistedit::Prompt::Rename { uuid, name: title }
-                            }
-                            _ => playlistedit::Prompt::Delete { uuid, title },
-                        });
-                    }
-                    Some(_) => self.say("not one of your playlists"),
-                    None => {}
-                }
-                None
-            }
-            KeyCode::Char('x')
-                if self.on_settings()
-                    && self.settings.current() == settings::Setting::LocalFolders =>
-            {
-                settings::remove_last_folder(&mut self.config)?;
-                self.save_config();
-                Some(Action::SettingChanged(settings::Setting::LocalFolders))
-            }
-            KeyCode::Char('x') if self.open_owned_playlist().is_some() => {
-                let uuid = self.open_owned_playlist()?;
-                let track = self.selected_track()?.id;
-                Some(Action::RemoveFromPlaylist { uuid, track })
-            }
-            KeyCode::Char('A') if self.session.is_some() => Some(Action::ToggleFavourite),
+            // Order a track list by the next column, or the other way round.
+            // On top of the filter: it orders what the filter kept.
+            KeyCode::Char('O') => self.sort_key(false),
+            KeyCode::Char('I') => self.sort_key(true),
+            KeyCode::Char('x') => self.remove_key(),
             // The collections' own `A`: the artist, album, playlist or mix
             // under the cursor. Not `A` itself: on an artist's page that
             // key still means the top track selected.
             KeyCode::Char('F') if self.selected_favourable().is_some() => {
                 Some(Action::ToggleFollow)
             }
-            // The web client's "See all": the page hands back six items per
-            // row, and this opens the rest of them.
-            KeyCode::Char('o') if self.session.is_some() => Some(Action::SeeAll),
-            // The transport, which the player bar has always drawn but
-            // nothing was behind.
-            KeyCode::Char('n') if self.session.is_some() => Some(Action::QueueNext),
-            KeyCode::Char('p') if self.session.is_some() => Some(Action::QueuePrevious),
-            KeyCode::Char('z') if self.session.is_some() => Some(Action::ToggleShuffle),
-            KeyCode::Char('r') if self.session.is_some() => Some(Action::CycleRepeat),
-            KeyCode::Char('S') if self.session.is_some() => Some(Action::CycleSleep),
-            KeyCode::Char('t') if self.on_search() => Some(Action::NextSearchTab),
             // Tab keeps working in search too, since it is what the web
             // client's own tab strip responds to.
-            KeyCode::Tab if self.on_search() => Some(Action::NextSearchTab),
-            // Shift-J/K reach the sidebar without moving focus first. Kept
-            // alongside the focus-aware j/k rather than replaced by them:
-            // it is a shortcut people learn and then rely on.
-            KeyCode::Char('J') if self.session.is_some() => Some(Action::SidebarNext),
-            KeyCode::Char('K') if self.session.is_some() => Some(Action::SidebarPrevious),
-            KeyCode::Enter if self.session.is_some() => Some(Action::ActivateSelection),
-            KeyCode::Char(' ') if self.session.is_some() => Some(Action::TogglePause),
+            KeyCode::Char('t') | KeyCode::Tab if self.on_search() => Some(Action::NextSearchTab),
             // Along the track, in steps the ear can place. Only with a track
             // up: a seek with nothing playing has nowhere to go.
             KeyCode::Char('.') if self.now_playing.track.is_some() => Some(Action::SeekForward),
             KeyCode::Char(',') if self.now_playing.track.is_some() => Some(Action::SeekBack),
             _ => None,
         }
+    }
+
+    fn sort_key(&mut self, reverse: bool) -> Option<Action> {
+        if let Some((columns, list)) = self.sort_target() {
+            if reverse {
+                list.reverse_sort();
+            } else {
+                list.next_sort(&columns);
+            }
+        }
+        None
+    }
+
+    /// `x` takes the last folder off the list in Settings, and the
+    /// highlighted track out of a playlist of the user's own.
+    fn remove_key(&mut self) -> Option<Action> {
+        if self.on_settings() && self.settings.current() == settings::Setting::LocalFolders {
+            settings::remove_last_folder(&mut self.config)?;
+            self.save_config();
+            return Some(Action::SettingChanged(settings::Setting::LocalFolders));
+        }
+        let uuid = self.open_owned_playlist()?;
+        let track = self.selected_track()?.id;
+        Some(Action::RemoveFromPlaylist { uuid, track })
+    }
+
+    /// The keys that mean the same wherever the user is, once signed in.
+    fn on_signed_in_key(&mut self, code: KeyCode) -> Option<Action> {
+        match code {
+            // "s" puts the keyboard back in the box, whether search is open
+            // or not: with the box already up it did nothing at all, so
+            // there was no way back to the query except closing search and
+            // starting over.
+            KeyCode::Char('s') => Some(Action::BeginSearch),
+            // Shift-/ on most layouts, so this is the one key to remember.
+            KeyCode::Char('?') => {
+                self.showing_help = true;
+                None
+            }
+            KeyCode::Char('L') => Some(Action::ToggleLyrics),
+            // What is playing next, and where each of it came from. Capital,
+            // because `q` quits and the two would be a bad pair to confuse.
+            KeyCode::Char('Q') => self.open_queue(),
+            // The playing track alone, the rest of the app out of sight.
+            KeyCode::Char('Z') => {
+                self.push_level();
+                self.open = None;
+                self.list = Some(List::Zen);
+                // The sidebar's columns hold whatever was drawn there, and
+                // the image protocols will not overwrite them.
+                self.repaint = Repaint::Wipe;
+                None
+            }
+            // What has been played. Beside `Q` on the keyboard, and the
+            // other half of the same question.
+            KeyCode::Char('H') => {
+                // As the queue: a level of its own.
+                self.push_level();
+                self.open = None;
+                self.list = Some(List::History);
+                // From the top, which is the newest: what was just played
+                // is what the eye is after.
+                self.history_list = Default::default();
+                None
+            }
+            // The nav by number, 1 through 8: there are exactly eight
+            // entries, Music first and Settings last, and reaching the far
+            // end with J took seven presses.
+            KeyCode::Char(c @ '1'..='8') => {
+                let at = c as usize - '1' as usize;
+                sidebar::Section::ALL
+                    .get(at)
+                    .copied()
+                    .map(Action::GoToSection)
+            }
+            KeyCode::Char(']') => Some(Action::GoForward),
+            // j and k always drive the content. The sidebar has J and K to
+            // itself, so moving through a list never depends on remembering
+            // which pane last took focus.
+            KeyCode::Char('j') | KeyCode::Down => Some(if self.on_home() {
+                Action::RowNext
+            } else {
+                Action::TrackNext
+            }),
+            KeyCode::Char('k') | KeyCode::Up => Some(if self.on_home() {
+                Action::RowPrevious
+            } else {
+                Action::TrackPrevious
+            }),
+            // Favouriting the highlighted track, both ways: pressing it on
+            // one that is already a favourite takes it out again.
+            // Playlist edits. Each opens its question; `x` asks none.
+            KeyCode::Char('P') => {
+                if let Some(track) = self.selected_track() {
+                    self.prompt = Some(playlistedit::Prompt::add_to(track.id, track.title));
+                }
+                None
+            }
+            KeyCode::Char('N') => {
+                self.prompt = Some(playlistedit::Prompt::NewPlaylist {
+                    name: String::new(),
+                });
+                None
+            }
+            KeyCode::Char('m') | KeyCode::Char('D') => self.playlist_prompt(code),
+            KeyCode::Char('A') => Some(Action::ToggleFavourite),
+            // The web client's "See all": the page hands back six items per
+            // row, and this opens the rest of them.
+            KeyCode::Char('o') => Some(Action::SeeAll),
+            // The transport, which the player bar has always drawn but
+            // nothing was behind.
+            KeyCode::Char('n') => Some(Action::QueueNext),
+            KeyCode::Char('p') => Some(Action::QueuePrevious),
+            KeyCode::Char('z') => Some(Action::ToggleShuffle),
+            KeyCode::Char('r') => Some(Action::CycleRepeat),
+            KeyCode::Char('S') => Some(Action::CycleSleep),
+            // Shift-J/K reach the sidebar without moving focus first. Kept
+            // alongside the focus-aware j/k rather than replaced by them:
+            // it is a shortcut people learn and then rely on.
+            KeyCode::Char('J') => Some(Action::SidebarNext),
+            KeyCode::Char('K') => Some(Action::SidebarPrevious),
+            KeyCode::Enter => Some(Action::ActivateSelection),
+            KeyCode::Char(' ') => Some(Action::TogglePause),
+            _ => None,
+        }
+    }
+
+    fn open_queue(&mut self) -> Option<Action> {
+        // A view of its own: what was showing goes onto the stack
+        // and back returns to it -- the history included, so the
+        // two lists are never up at once.
+        self.push_level();
+        self.open = None;
+        self.list = Some(List::Queue);
+        self.queue_list.selected = self.queue.position();
+        let visible = self.over_list_visible();
+        self.queue_list.scroll_into_view(visible);
+        tracing::debug!(
+            queued = self.queue.len(),
+            entries = self.queue.entries().len(),
+            at = self.queue.position(),
+            selected = self.queue_list.selected,
+            offset = self.queue_list.offset,
+            visible,
+            context = ?self.queue.context_name(),
+            "queue opened"
+        );
+        None
+    }
+
+    /// `m` renames the playlist in hand and `D` deletes it, each behind
+    /// its question; only one of the user's own.
+    fn playlist_prompt(&mut self, code: KeyCode) -> Option<Action> {
+        match self.playlist_in_hand() {
+            Some(p) if p.owned => {
+                let (uuid, title) = (p.uuid.clone(), p.title.clone());
+                self.prompt = Some(match code {
+                    KeyCode::Char('m') => playlistedit::Prompt::Rename { uuid, name: title },
+                    _ => playlistedit::Prompt::Delete { uuid, title },
+                });
+            }
+            Some(_) => self.say("not one of your playlists"),
+            None => {}
+        }
+        None
     }
 }
 
@@ -4733,6 +4987,18 @@ fn album_of(track: &crate::domain::Track) -> Option<(Collection, String)> {
         Collection::Album(track.album_id.clone()?),
         track.album.clone(),
     ))
+}
+
+/// A page's rows as the rows view holds them, each scrolled to its start.
+fn home_rows(rows: Vec<crate::browse::HomeRow>) -> Vec<home::Row> {
+    rows.into_iter()
+        .map(|row| home::Row {
+            heading: row.heading,
+            kind: row.kind,
+            cards: row.cards,
+            state: carousel::CarouselState::default(),
+        })
+        .collect()
 }
 
 /// What a wait for a track's album is headed by: the album, or the track
