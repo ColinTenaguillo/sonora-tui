@@ -106,9 +106,8 @@ zbus = "6"
 # thread -- see src/shell/mediakeys_macos.rs.
 [target.'cfg(target_os = "macos")'.dependencies]
 mediaplayer = "0.5.1"
-# The Core Foundation run loop. Held at 0.7 by the lockfile: mediaplayer
-# 0.4.3 builds against 0.7's CGRect and fails against 0.9's.
-apple-cf = "0.7"
+# The Core Foundation run loop. Kept on the version mediaplayer uses.
+apple-cf = "0.11"
 
 [dev-dependencies]
 insta = "1"
