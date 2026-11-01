@@ -80,6 +80,14 @@ for a newer release.
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/ColinTenaguillo/sonora-tui/releases/latest/download/sonora-tui-installer.sh | sh
 ```
 
+### Nix
+
+The flake builds on the four platforms above:
+
+```sh
+nix run github:ColinTenaguillo/sonora-tui
+```
+
 ### Prebuilt archive
 
 Each [release](https://github.com/ColinTenaguillo/sonora-tui/releases/latest)
@@ -245,7 +253,8 @@ Press `?` in the app for the full list.
 | `n` / `p` | Next / previous in the queue |
 | `.` / `,` | Ten seconds forward / back in the track |
 | `e` / `E` | Queue the selected track next, or after the rest |
-| `Q` | What is playing next — `j`/`k` to move, `x` to remove, enter to play |
+| `Q` | What is playing next — `j`/`k` to move, `x` to remove, enter to play, `i` to switch autoplay off or on |
+| `H` | What has been played |
 | `z` | Shuffle the queue |
 | `r` | Repeat: off, all, one |
 | `S` | Sleep timer: 15, 30, 45, 60 minutes, end of track, off |
@@ -255,6 +264,29 @@ Press `?` in the app for the full list.
 | `q` | Quit |
 
 `Esc` steps back rather than quitting: only `q` leaves the app.
+
+### Rebinding
+
+Any of the command keys can be moved, by action name, in the config:
+
+```toml
+[keys]
+quit = "x"
+play_pause = "p"
+queue_previous = "P"
+```
+
+The names are `down`, `up`, `left`, `right`, `sidebar_next`,
+`sidebar_previous`, `back`, `forward`, `filter`, `sort`, `sort_reverse`,
+`search`, `see_all`, `biography`, `open_album`, `open_artist`,
+`track_radio`, `sleep`, `lyrics`, `zen`, `next_tab`, `play_pause`,
+`favourite`, `queue_next`, `queue_previous`, `seek_forward`, `seek_back`,
+`shuffle`, `repeat`, `queue`, `history`, `queue_track_next`,
+`queue_track_last`, `help` and `quit`. A key is one character, or `space`,
+`tab`, `enter` or `esc`. A rebound action leaves its default key: binding
+`quit` to `x` frees `q`. An unknown action, an unreadable key or a key bound
+twice is reported in the status bar and skipped. Text typed into a box is
+never remapped.
 
 ### The queue
 
@@ -269,8 +301,8 @@ apart the way the services' own clients keep them:
   queue nears its end, and refilled as long as you keep listening. Seeded
   from the last track queued. Dropped as soon as there is something real to
   play, so a radio picked twenty minutes ago never resurfaces. On by
-  default; `autoplay = false` in the config, or `i` in the queue view, stops
-  the music at the end of the queue.
+  default; `autoplay = false` under `[playback]` in the config, or `i` in the
+  queue view, stops the music at the end of the queue.
 
 The keyboard's media keys work too — play/pause, next, previous — and they
 reach the app whether or not the terminal has focus, since the desktop
@@ -286,6 +318,14 @@ saves on Enter, `x` drops the last music folder. A secret is drawn as dots
 and never shown back. What something reads live follows at once: the
 colours, the scrobblers (linked again, through the browser where needed),
 the Discord presence, the library of local files.
+
+## Content
+
+```toml
+[playback]
+explicit = true   # false: tracks marked explicit do not play
+ai = true         # false: tracks marked AI-generated do not play
+```
 
 ## Sound
 
@@ -383,6 +423,13 @@ theme name falls back to `default` the same way. The app always starts.
 
 Named themes are drawn in truecolor; `default` falls back to 256 colours where
 the terminal cannot do better.
+
+```toml
+[ui]
+nerd_font = true    # Nerd Font glyphs for the icons; off by default, never guessed
+halfblocks = true   # covers as half blocks, for a terminal that claims an image
+                    # protocol and draws it wrong; read at start
+```
 
 ## Where things live
 
