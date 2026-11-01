@@ -597,9 +597,16 @@ fn draw_overlays(frame: &mut ratatui::Frame, app: &mut App, main: ratatui::layou
     }
 
     if app.lyrics.open {
+        // Centred on the whole terminal's width, not the main pane's, but
+        // above the now-playing bar so the progress stays in sight.
+        let across = ratatui::layout::Rect {
+            x: frame.area().x,
+            width: frame.area().width,
+            ..main
+        };
         lyricsview::render(
             frame,
-            main,
+            across,
             &palette,
             &app.lyrics,
             app.now_playing.track.as_ref(),
