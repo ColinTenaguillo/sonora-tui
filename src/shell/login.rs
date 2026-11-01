@@ -152,6 +152,21 @@ pub fn open_in_browser(url: &str) {
 
 /// `service` names what is being signed in to, and `guest` whether it can
 /// be used without an account -- YouTube Music can.
+/// The link the browser was sent to, kept on screen: opening it is best
+/// effort, and on a headless machine this is the only way through.
+fn link_lines(url: &str) -> Vec<Line<'static>> {
+    vec![
+        Line::from(""),
+        Line::from("If it did not open, go to:"),
+        Line::from(""),
+        Line::from(Span::styled(
+            url.to_owned(),
+            Style::default().add_modifier(Modifier::UNDERLINED),
+        )),
+        Line::from(""),
+    ]
+}
+
 pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, guest: bool) {
     let lines: Vec<Line> = match state {
         LoginState::Idle => vec![
@@ -177,18 +192,12 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
                 field.enter()
             )),
         ],
-        LoginState::Url(url) => vec![
-            Line::from("Authorise in your browser — opening it now."),
-            Line::from(""),
-            Line::from("If it did not open, go to:"),
-            Line::from(""),
-            Line::from(Span::styled(
-                url.clone(),
-                Style::default().add_modifier(Modifier::UNDERLINED),
-            )),
-            Line::from(""),
-            Line::from("Waiting for the browser…"),
-        ],
+        LoginState::Url(url) => [
+            vec![Line::from("Authorise in your browser — opening it now.")],
+            link_lines(url),
+            vec![Line::from("Waiting for the browser…")],
+        ]
+        .concat(),
         LoginState::Secret { typed } => vec![
             Line::from(format!("Paste the cookies of a tab signed in to {service}")),
             Line::from(""),
@@ -233,26 +242,22 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
             Line::from(""),
             Line::from("Esc to cancel."),
         ],
-        LoginState::Waiting { code, url } => vec![
+        LoginState::Waiting { code, url } => [
             // The browser is opened for them, but the link stays visible: the
             // open is best effort, and on a headless or locked-down machine
             // this is the only way through.
-            Line::from("Confirm in your browser — opening it now."),
-            Line::from(""),
-            Line::from("If it did not open, go to:"),
-            Line::from(""),
-            Line::from(Span::styled(
-                url.clone(),
-                Style::default().add_modifier(Modifier::UNDERLINED),
-            )),
-            Line::from(""),
-            Line::from(vec![
-                Span::raw("code: "),
-                Span::styled(code.clone(), Style::default().add_modifier(Modifier::BOLD)),
-            ]),
-            Line::from(""),
-            Line::from("Waiting for confirmation…"),
-        ],
+            vec![Line::from("Confirm in your browser — opening it now.")],
+            link_lines(url),
+            vec![
+                Line::from(vec![
+                    Span::raw("code: "),
+                    Span::styled(code.clone(), Style::default().add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(""),
+                Line::from("Waiting for confirmation…"),
+            ],
+        ]
+        .concat(),
         LoginState::Password {
             server,
             username,
@@ -332,6 +337,14 @@ mod tests {
             text.contains("link.tidal.com"),
             "link must be visible:\n{text}"
         );
+    }
+
+    #[test]
+    fn a_browser_link_stays_on_screen_in_case_it_did_not_open() {
+        let text = rendered(&LoginState::Url("https://accounts.example/auth".into()));
+        assert!(text.contains("If it did not open"), "{text}");
+        assert!(text.contains("accounts.example/auth"), "{text}");
+        assert!(text.contains("Waiting for the browser"), "{text}");
     }
 
     #[test]

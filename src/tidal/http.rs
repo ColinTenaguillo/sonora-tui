@@ -1,6 +1,7 @@
 use crate::auth::StoredToken;
 use crate::domain::{Quality, TrackId};
 use crate::playback::{manifest::parse_playback_info, PlaybackInfo};
+use reqwest::Method;
 
 const API_HOST: &str = "https://api.tidal.com";
 
@@ -116,6 +117,13 @@ pub(crate) fn outcome(status: u16, path: &str, body: String) -> Result<String, T
     Ok(body)
 }
 
+/// Send a request and judge its answer.
+async fn send(req: reqwest::RequestBuilder, path: &str) -> Result<String, TidalError> {
+    let resp = req.send().await?;
+    let status = resp.status().as_u16();
+    outcome(status, path, resp.text().await?)
+}
+
 /// Whether a 401 body means the SESSION is finished, as opposed to this one
 /// request being refused.
 ///
@@ -173,20 +181,16 @@ impl Client {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<String, TidalError> {
-        let mut params: Vec<(&str, String)> =
-            vec![("countryCode", self.token.country_code.clone())];
-        params.extend(query.iter().cloned());
+        send(self.request(Method::GET, api, path).query(query), path).await
+    }
 
-        let resp = self
-            .http
-            .get(format!("{API_HOST}{}{path}", api.prefix()))
+    /// Every request starts here, so the bearer token and countryCode
+    /// cannot be forgotten — omitting either produces opaque failures.
+    fn request(&self, method: Method, api: Api, path: &str) -> reqwest::RequestBuilder {
+        self.http
+            .request(method, format!("{API_HOST}{}{path}", api.prefix()))
             .bearer_auth(&self.token.access_token)
-            .query(&params)
-            .send()
-            .await?;
-
-        let status = resp.status().as_u16();
-        outcome(status, path, resp.text().await?)
+            .query(&[("countryCode", self.token.country_code.clone())])
     }
 
     /// POST a form to the v1 API.
@@ -198,17 +202,7 @@ impl Client {
         path: &str,
         form: &[(&str, String)],
     ) -> Result<String, TidalError> {
-        let resp = self
-            .http
-            .post(format!("{API_HOST}{}{path}", Api::V1.prefix()))
-            .bearer_auth(&self.token.access_token)
-            .query(&[("countryCode", self.token.country_code.clone())])
-            .form(form)
-            .send()
-            .await?;
-
-        let status = resp.status().as_u16();
-        outcome(status, path, resp.text().await?)
+        send(self.request(Method::POST, Api::V1, path).form(form), path).await
     }
 
     /// PUT a form to the v2 API: the saved-mixes endpoints live there and
@@ -218,30 +212,14 @@ impl Client {
         path: &str,
         form: &[(&str, String)],
     ) -> Result<String, TidalError> {
-        let resp = self
-            .http
-            .put(format!("{API_HOST}{}{path}", Api::V2.prefix()))
-            .bearer_auth(&self.token.access_token)
-            .query(&[("countryCode", self.token.country_code.clone())])
-            .form(form)
-            .send()
-            .await?;
-
-        let status = resp.status().as_u16();
-        outcome(status, path, resp.text().await?)
+        send(self.request(Method::PUT, Api::V2, path).form(form), path).await
     }
 
     /// The `ETag` of a v1 resource. The playlist edits send it back as
     /// `If-None-Match`, which is how TIDAL keeps two edits from crossing:
     /// without it the endpoints answer 412.
     pub(crate) async fn etag(&self, path: &str) -> Result<Option<String>, TidalError> {
-        let resp = self
-            .http
-            .get(format!("{API_HOST}{}{path}", Api::V1.prefix()))
-            .bearer_auth(&self.token.access_token)
-            .query(&[("countryCode", self.token.country_code.clone())])
-            .send()
-            .await?;
+        let resp = self.request(Method::GET, Api::V1, path).send().await?;
         let etag = resp
             .headers()
             .get(reqwest::header::ETAG)
@@ -259,18 +237,11 @@ impl Client {
         form: &[(&str, String)],
         etag: Option<&str>,
     ) -> Result<String, TidalError> {
-        let mut req = self
-            .http
-            .post(format!("{API_HOST}{}{path}", Api::V1.prefix()))
-            .bearer_auth(&self.token.access_token)
-            .query(&[("countryCode", self.token.country_code.clone())])
-            .form(form);
+        let mut req = self.request(Method::POST, Api::V1, path).form(form);
         if let Some(etag) = etag {
             req = req.header(reqwest::header::IF_NONE_MATCH, etag);
         }
-        let resp = req.send().await?;
-        let status = resp.status().as_u16();
-        outcome(status, path, resp.text().await?)
+        send(req, path).await
     }
 
     /// DELETE against the v1 API under the resource's `If-None-Match`.
@@ -279,31 +250,16 @@ impl Client {
         path: &str,
         etag: Option<&str>,
     ) -> Result<String, TidalError> {
-        let mut req = self
-            .http
-            .delete(format!("{API_HOST}{}{path}", Api::V1.prefix()))
-            .bearer_auth(&self.token.access_token)
-            .query(&[("countryCode", self.token.country_code.clone())]);
+        let mut req = self.request(Method::DELETE, Api::V1, path);
         if let Some(etag) = etag {
             req = req.header(reqwest::header::IF_NONE_MATCH, etag);
         }
-        let resp = req.send().await?;
-        let status = resp.status().as_u16();
-        outcome(status, path, resp.text().await?)
+        send(req, path).await
     }
 
     /// DELETE against the v1 API.
     pub(crate) async fn delete(&self, path: &str) -> Result<String, TidalError> {
-        let resp = self
-            .http
-            .delete(format!("{API_HOST}{}{path}", Api::V1.prefix()))
-            .bearer_auth(&self.token.access_token)
-            .query(&[("countryCode", self.token.country_code.clone())])
-            .send()
-            .await?;
-
-        let status = resp.status().as_u16();
-        outcome(status, path, resp.text().await?)
+        send(self.request(Method::DELETE, Api::V1, path), path).await
     }
 
     /// The raw body of a v2 GET, for probing the API from `live_api`.
@@ -369,6 +325,29 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_request_carries_the_token_and_the_country() {
+        let client = Client::new(StoredToken {
+            access_token: "tok".into(),
+            country_code: "FR".into(),
+            ..StoredToken::default()
+        });
+        let req = client
+            .request(Method::PUT, Api::V2, "/my-collection/mixes/add")
+            .query(&[("limit", "5")])
+            .build()
+            .unwrap();
+        assert_eq!(req.method(), Method::PUT);
+        assert_eq!(
+            req.url().as_str(),
+            format!(
+                "{API_HOST}{}/my-collection/mixes/add?countryCode=FR&limit=5",
+                Api::V2.prefix()
+            )
+        );
+        assert_eq!(req.headers()[reqwest::header::AUTHORIZATION], "Bearer tok");
+    }
 
     #[test]
     fn a_failing_status_is_an_error_and_not_a_body() {

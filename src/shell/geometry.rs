@@ -88,30 +88,9 @@ impl Span {
 /// two glyphs — played and remaining — and a helper that matched only one
 /// would report half the bar and call it the whole thing.
 pub fn longest_run_of(buf: &Buffer, chars: &[char]) -> Option<Span> {
-    let mut best: Option<Span> = None;
-    for y in 0..buf.area.height {
-        let cells: Vec<char> = row(buf, y).chars().collect();
-        let mut x = 0usize;
-        while x < cells.len() {
-            if !chars.contains(&cells[x]) {
-                x += 1;
-                continue;
-            }
-            let start = x;
-            while x < cells.len() && chars.contains(&cells[x]) {
-                x += 1;
-            }
-            let span = Span {
-                start: start as u16,
-                end: x as u16,
-                row: y,
-            };
-            if best.is_none_or(|b| span.width() > b.width()) {
-                best = Some(span);
-            }
-        }
-    }
-    best
+    longest(buf, |y| {
+        row(buf, y).chars().map(|c| chars.contains(&c)).collect()
+    })
 }
 
 /// The longest unbroken run of cells whose foreground is one of `colours`.
@@ -120,46 +99,33 @@ pub fn longest_run_of(buf: &Buffer, chars: &[char]) -> Option<Span> {
 /// frame's own border are drawn with the same rule character, and telling
 /// them apart by colour is what the eye does too.
 pub fn longest_run_coloured(buf: &Buffer, colours: &[ratatui::style::Color]) -> Option<Span> {
-    let mut best: Option<Span> = None;
-    for y in 0..buf.area.height {
-        let mut x = 0u16;
-        while x < buf.area.width {
-            if !colours.contains(&buf[(x, y)].fg) {
-                x += 1;
-                continue;
-            }
-            let start = x;
-            while x < buf.area.width && colours.contains(&buf[(x, y)].fg) {
-                x += 1;
-            }
-            let span = Span {
-                start,
-                end: x,
-                row: y,
-            };
-            if best.is_none_or(|b| span.width() > b.width()) {
-                best = Some(span);
-            }
-        }
-    }
-    best
+    longest(buf, |y| {
+        (0..buf.area.width)
+            .map(|x| colours.contains(&buf[(x, y)].fg))
+            .collect()
+    })
 }
 
 /// The span of the longest unbroken run of `ch` anywhere in the buffer.
 pub fn longest_run(buf: &Buffer, ch: char) -> Option<Span> {
+    longest_run_of(buf, &[ch])
+}
+
+/// The longest run of `true` in any row, `hits(y)` marking each cell of row `y`.
+/// The first of two equal runs wins.
+fn longest(buf: &Buffer, hits: impl Fn(u16) -> Vec<bool>) -> Option<Span> {
     let mut best: Option<Span> = None;
     for y in 0..buf.area.height {
-        let line = row(buf, y);
-        let cells: Vec<char> = line.chars().collect();
+        let cells = hits(y);
         let mut x = 0usize;
         while x < cells.len() {
-            if cells[x] != ch {
+            let start = x;
+            while x < cells.len() && cells[x] {
+                x += 1;
+            }
+            if x == start {
                 x += 1;
                 continue;
-            }
-            let start = x;
-            while x < cells.len() && cells[x] == ch {
-                x += 1;
             }
             let span = Span {
                 start: start as u16,
