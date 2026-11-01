@@ -133,15 +133,21 @@ impl Palette {
     /// tier a white bold title was every other title, and the row that
     /// was playing could not be told from the rows around it.
     pub fn playing_row(&self, tier: super::nowplaying::Tier) -> Style {
-        use super::nowplaying::Tier;
-        let fg = match tier {
-            Tier::Max => self.quality,
-            Tier::High => self.accent,
-            Tier::Low => self.text,
-        };
+        let fg = self.tier_colour(tier);
         Style::default()
             .fg(fg)
             .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    }
+
+    /// The colour a quality tier is shown in: amber for hi-res, green for
+    /// lossless, plain for anything less.
+    fn tier_colour(&self, tier: super::nowplaying::Tier) -> Color {
+        use super::nowplaying::Tier;
+        match tier {
+            Tier::Max => self.quality,
+            Tier::High => self.accent,
+            Tier::Low => self.text,
+        }
     }
 
     /// The mark in front of the playing title: its colour, not its
@@ -162,12 +168,7 @@ impl Palette {
     /// amber for hi-res, green for lossless, plain for anything less. The
     /// point of the badge is telling those apart at a glance.
     pub fn quality_badge(&self, tier: super::nowplaying::Tier) -> Style {
-        use super::nowplaying::Tier;
-        let fg = match tier {
-            Tier::Max => self.quality,
-            Tier::High => self.accent,
-            Tier::Low => self.text,
-        };
+        let fg = self.tier_colour(tier);
         // No background: a filled chip drew the eye harder than the track
         // name beside it, and the colour already says which tier this is.
         Style::default().fg(fg).add_modifier(Modifier::BOLD)
@@ -527,6 +528,36 @@ pub fn selection_band(frame: &mut ratatui::Frame, area: ratatui::layout::Rect, p
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_band_fills_between_its_caps_and_not_under_them() {
+        use ratatui::{backend::TestBackend, layout::Rect, Terminal};
+        let palette = Palette::default();
+        let mut terminal = Terminal::new(TestBackend::new(12, 1)).unwrap();
+        let area = Rect::new(2, 0, 8, 1);
+        terminal
+            .draw(|f| selection_band(f, area, &palette))
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let band = palette.row_focused().bg;
+        assert_eq!(buf[(2, 0)].symbol(), "▐");
+        assert_ne!(Some(buf[(2, 0)].bg), band, "the left cap is not the band");
+        for x in 3..9 {
+            assert_eq!(Some(buf[(x, 0)].bg), band, "column {x} is in the band");
+        }
+    }
+
+    #[test]
+    fn the_playing_mark_is_the_title_colour_without_its_underline() {
+        use super::super::nowplaying::Tier;
+        let palette = Palette::default();
+        for tier in [Tier::Max, Tier::High, Tier::Low] {
+            let mark = palette.playing_mark(tier);
+            assert_eq!(mark.fg, palette.playing_row(tier).fg);
+            assert!(mark.add_modifier.contains(Modifier::BOLD));
+            assert!(!mark.add_modifier.contains(Modifier::UNDERLINED));
+        }
+    }
 
     /// A config naming a theme and nothing else.
     fn ui(theme: &str) -> crate::config::UiConfig {
