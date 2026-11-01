@@ -103,20 +103,11 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "apple-cf"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67ba5e8f49a0239ddb14da08ad41bb28b46880252bf4831380de20709c996574"
-dependencies = [
- "doom-fish-utils 0.2.1",
-]
-
-[[package]]
-name = "apple-cf"
 version = "0.11.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a47effd5b5e7afd1c51ef8d1bacf86060565461c1fb6cf67aae433417c4048c"
 dependencies = [
- "doom-fish-utils 0.4.3",
+ "doom-fish-utils",
 ]
 
 [[package]]
@@ -1191,12 +1182,6 @@ checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
 dependencies = [
  "litrs",
 ]
-
-[[package]]
-name = "doom-fish-utils"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "075caf2993a45abe1c2e60d8d1514ce43f947fcbcd31de19db0075e80e20c6a7"
 
 [[package]]
 name = "doom-fish-utils"
@@ -2706,8 +2691,8 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "196bba1a89b591c8fa959ccce77b5ed3996bde09bfbf612529060eff9aeacc5e"
 dependencies = [
- "apple-cf 0.11.7",
- "doom-fish-utils 0.4.3",
+ "apple-cf",
+ "doom-fish-utils",
  "libc",
 ]
 
@@ -5105,7 +5090,7 @@ name = "sonora-tui"
 version = "0.9.1"
 dependencies = [
  "anyhow",
- "apple-cf 0.7.1",
+ "apple-cf",
  "async-trait",
  "base64 0.23.1",
  "crossterm",

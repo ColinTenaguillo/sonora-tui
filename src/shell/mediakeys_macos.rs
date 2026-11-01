@@ -50,7 +50,7 @@ where
         // A bounded run rather than a blocking one: the flag above is what
         // ends this, and an unbounded loop would need the stop to land
         // exactly right to be seen.
-        let _ = CFRunLoop::current().run_in_default_mode(Duration::from_secs(1), false);
+        let _ = CFRunLoop::run_in_default_mode(Duration::from_secs(1), false);
     }
 }
 
@@ -75,17 +75,24 @@ fn command(
 /// `CommandToken` unregisters its handler.
 pub fn spawn(actions: tokio::sync::mpsc::UnboundedSender<Action>, state: StateReceiver) {
     let center = RemoteCommandCenter::shared();
-    let tokens: Vec<CommandToken> = vec![
+    let tokens: Result<Vec<CommandToken>, _> = [
         center.on_toggle_play_pause(command(actions.clone(), Action::TogglePause)),
         center.on_play(command(actions.clone(), Action::TogglePause)),
         center.on_pause(command(actions.clone(), Action::TogglePause)),
         center.on_next_track(command(actions.clone(), Action::QueueNext)),
         center.on_previous_track(command(actions, Action::QueuePrevious)),
-    ];
-    // Never dropped: a token that goes out of scope takes its handler with
-    // it, and the keys would stop working the moment this returned.
-    std::mem::forget(tokens);
-    tracing::info!("registered for the macOS media keys");
+    ]
+    .into_iter()
+    .collect();
+    match tokens {
+        // Never dropped: a token that goes out of scope takes its handler
+        // with it, and the keys would stop working the moment this returned.
+        Ok(tokens) => {
+            std::mem::forget(tokens);
+            tracing::info!("registered for the macOS media keys");
+        }
+        Err(e) => tracing::warn!("could not register for the macOS media keys: {e}"),
+    }
 
     tokio::spawn(async move {
         let mut watch = state;
@@ -121,7 +128,9 @@ fn announce(state: &State) {
         playback_rate: Some(if state.playing { 1.0 } else { 0.0 }),
         ..Default::default()
     };
-    center.set_now_playing_info(&info);
+    if let Err(e) = center.set_now_playing_info(&info) {
+        tracing::warn!("could not update the Control Center: {e}");
+    }
     center.set_playback_state(if state.playing {
         PlaybackState::Playing
     } else {
