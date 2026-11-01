@@ -250,6 +250,7 @@ Press `?` in the app for the full list.
 | `r` | Repeat: off, all, one |
 | `S` | Sleep timer: 15, 30, 45, 60 minutes, end of track, off |
 | `L` | The lyrics, synced where they are — `j`/`k` to scroll, `Esc` to close |
+| `Z` | Zen: the playing track's cover alone over the bar — `Z` or `Esc` to leave |
 | `?` | The key list; `j`/`k` scroll it on a short terminal |
 | `q` | Quit |
 

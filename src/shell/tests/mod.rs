@@ -9,6 +9,7 @@ mod navigation;
 mod playback;
 mod search;
 mod session;
+mod zen;
 
 use crossterm::event::KeyModifiers;
 

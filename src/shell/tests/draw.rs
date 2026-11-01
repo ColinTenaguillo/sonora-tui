@@ -66,13 +66,11 @@ fn the_event_loop_clears_before_the_frame_that_needs_it() {
         .split("while !app.should_quit {")
         .nth(1)
         .expect("the event loop");
-    let take = loop_body.find("take_repaint()").expect("the flag is read");
-    let clear = loop_body
-        .find(".clear_region(ratatui::backend::ClearType::All)")
-        .expect("and acted on");
+    let take = loop_body
+        .find("repaint(terminal, app.take_repaint())")
+        .expect("the flag is read and acted on");
     let draw = loop_body.find("terminal.draw(").expect("before the draw");
-    assert!(take < clear, "the clear follows from the flag");
-    assert!(clear < draw, "and happens before the frame it is for");
+    assert!(take < draw, "before the frame it is for");
 }
 
 #[test]

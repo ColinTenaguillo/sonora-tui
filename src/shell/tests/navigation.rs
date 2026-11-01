@@ -656,7 +656,7 @@ fn every_overlay_asks_for_a_repaint_when_it_closes() {
     let _ = app.take_repaint();
     app.on_key(KeyEvent::from(KeyCode::Char('z')));
     assert!(
-        app.take_repaint(),
+        app.take_repaint() == Repaint::Wipe,
         "closing the help leaves it on the artwork without one"
     );
 
@@ -668,7 +668,7 @@ fn every_overlay_asks_for_a_repaint_when_it_closes() {
     app.update(back);
     assert!(app.list != Some(List::Queue), "escape leaves the queue");
     assert!(
-        app.take_repaint(),
+        app.take_repaint() == Repaint::Wipe,
         "leaving the queue leaves it on the artwork without one"
     );
 }

@@ -233,13 +233,52 @@ pub fn render_with_cover<F>(
     palette: &Palette,
     state: &NowPlaying,
     modes: Modes,
-    mut draw_cover: F,
+    draw_cover: F,
+) where
+    F: FnMut(&mut Frame, Rect, &str, super::artwork::Shape) -> bool,
+{
+    render_bar(frame, area, palette, state, modes, Some(draw_cover));
+}
+
+/// Only the transport and the progress: no rule above, no track block, no
+/// quality badge or spectrum. For a view that already shows the track above
+/// the bar and wants nothing else on screen.
+pub fn render_transport_only(
+    frame: &mut Frame,
+    area: Rect,
+    palette: &Palette,
+    state: &NowPlaying,
+    modes: Modes,
+) {
+    render_bar(
+        frame,
+        area,
+        palette,
+        state,
+        modes,
+        None::<fn(&mut Frame, Rect, &str, super::artwork::Shape) -> bool>,
+    );
+}
+
+/// The bar. Without a cover drawer it is the transport alone: the rule,
+/// the track block and the badges all go with it.
+fn render_bar<F>(
+    frame: &mut Frame,
+    area: Rect,
+    palette: &Palette,
+    state: &NowPlaying,
+    modes: Modes,
+    draw_cover: Option<F>,
 ) where
     F: FnMut(&mut Frame, Rect, &str, super::artwork::Shape) -> bool,
 {
     let block = Block::default().borders(Borders::TOP);
+    // The same rows with or without the rule, so the transport sits where
+    // it always does.
     let inner = block.inner(area);
-    frame.render_widget(block, area);
+    if draw_cover.is_some() {
+        frame.render_widget(block, area);
+    }
 
     if inner.height == 0 || inner.width == 0 {
         return;
@@ -281,8 +320,10 @@ pub fn render_with_cover<F>(
         ..inner
     };
 
-    render_track(frame, left, palette, track, &mut draw_cover);
-    render_badges(frame, right, palette, state, &modes.spectrum);
+    if let Some(mut draw_cover) = draw_cover {
+        render_track(frame, left, palette, track, &mut draw_cover);
+        render_badges(frame, right, palette, state, &modes.spectrum);
+    }
     render_transport(frame, centre, inner, palette, state, modes, track);
 }
 
