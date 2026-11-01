@@ -899,47 +899,47 @@ pub fn parse_home(body: &str) -> Home {
             continue;
         }
 
-        // TRACK_LIST is the web client's grid of track rows and the
-        // shortcut grid its wide one; everything else with items is a
-        // strip of covers.
-        {
-            {
-                let kind = match module.module_type.as_str() {
-                    "TRACK_LIST" => RowKind::Compact,
-                    "HIGHLIGHT_MODULE" | "SHORTCUT_LIST" => RowKind::Shortcuts,
-                    // Explore's genres, moods and decades: page links with
-                    // no artwork behind them.
-                    "PAGE_LINKS_CLOUD" | "PAGE_LINKS" => RowKind::Links,
-                    // MIXED_TYPES_LIST is what Recently played comes back
-                    // as, and what is in it decides how it is drawn rather
-                    // than what the module is called: a real response holds
-                    // ten albums, mixes and playlists and not one track.
-                    // Drawn as a track grid, a card there opened its album
-                    // where every other row of the same shape plays a
-                    // track -- the row looked like one thing and behaved
-                    // like another.
-                    "MIXED_TYPES_LIST" if holds_tracks(&cards) => RowKind::Compact,
-                    _ => RowKind::Carousel,
-                };
-                let heading = match module.module_type.as_str() {
-                    "HIGHLIGHT_MODULE" | "SHORTCUT_LIST" if module.title.is_empty() => {
-                        "Shortcuts".to_string()
-                    }
-                    _ => module.title,
-                };
-                out.rows.push(HomeRow {
-                    heading,
-                    kind,
-                    cards,
-                    // Every module carries one, and every row has more
-                    // behind it than it shows — New Albums has 166 in the
-                    // ten it draws.
-                    more: module.paged_list.data_api_path,
-                });
+        let kind = row_kind(&module.module_type, &cards);
+        let heading = match module.module_type.as_str() {
+            "HIGHLIGHT_MODULE" | "SHORTCUT_LIST" if module.title.is_empty() => {
+                "Shortcuts".to_string()
             }
-        }
+            _ => module.title,
+        };
+        out.rows.push(HomeRow {
+            heading,
+            kind,
+            cards,
+            // Every module carries one, and every row has more
+            // behind it than it shows — New Albums has 166 in the
+            // ten it draws.
+            more: module.paged_list.data_api_path,
+        });
     }
     out
+}
+
+/// TRACK_LIST is the web client's grid of track rows and the
+/// shortcut grid its wide one; everything else with items is a
+/// strip of covers.
+fn row_kind(module_type: &str, cards: &[Card]) -> RowKind {
+    match module_type {
+        "TRACK_LIST" => RowKind::Compact,
+        "HIGHLIGHT_MODULE" | "SHORTCUT_LIST" => RowKind::Shortcuts,
+        // Explore's genres, moods and decades: page links with
+        // no artwork behind them.
+        "PAGE_LINKS_CLOUD" | "PAGE_LINKS" => RowKind::Links,
+        // MIXED_TYPES_LIST is what Recently played comes back
+        // as, and what is in it decides how it is drawn rather
+        // than what the module is called: a real response holds
+        // ten albums, mixes and playlists and not one track.
+        // Drawn as a track grid, a card there opened its album
+        // where every other row of the same shape plays a
+        // track -- the row looked like one thing and behaved
+        // like another.
+        "MIXED_TYPES_LIST" if holds_tracks(cards) => RowKind::Compact,
+        _ => RowKind::Carousel,
+    }
 }
 
 #[derive(serde::Deserialize, Default)]

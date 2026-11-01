@@ -253,83 +253,88 @@ fn forward_commands(
                 factory,
                 meta,
                 options,
-            } => {
-                *lock(&segue) = Segue::default();
-                let (fresh, stream) = factory.start(config(&options));
-                fresh.set_gain(volume);
-                if let Some(spectrum) = fresh.spectrum() {
-                    let _ = events.send(PlaybackEvent::Spectrum(Bands(spectrum)));
-                }
-                let (out, joins) = (events.clone(), segue.clone());
-                if let Err(error) = std::thread::Builder::new()
-                    .name("sonora-tui-events".into())
-                    .spawn(move || forward_events(stream, out, meta, joins))
-                {
-                    let _ = events.send(PlaybackEvent::Error(format!(
-                        "could not start the playback event thread: {error}"
-                    )));
-                }
-                player = Some(fresh);
-            }
-            Cmd::Play(id) => match &player {
-                Some(player) => {
-                    let seamless = lock(&segue).seamless(&id);
-                    if let Err(error) = player.load(id.as_str(), Duration::ZERO, seamless) {
-                        tracing::error!("could not ask for track {id}: {error}");
-                    }
-                }
-                None => {
-                    let _ = events.send(PlaybackEvent::Failed {
-                        id,
-                        message: "no playback engine: sign in first".into(),
-                    });
-                }
-            },
-            Cmd::PlayAt(id, at) => {
-                *lock(&segue) = Segue::default();
-                if let Some(player) = &player {
-                    if let Err(error) = player.load(id.as_str(), at, false) {
-                        tracing::error!("could not ask for track {id}: {error}");
-                    }
-                }
-            }
-            Cmd::Preload(id) => {
-                if let Some(player) = &player {
-                    match player.preload(id.as_str(), true) {
-                        Ok(()) => lock(&segue).lined_up = Some(id),
-                        Err(error) => tracing::warn!("could not preload track {id}: {error}"),
-                    }
-                }
-            }
-            Cmd::Pause => {
-                if let Some(player) = &player {
-                    player.pause();
-                }
-            }
-            Cmd::Resume => {
-                if let Some(player) = &player {
-                    player.play();
-                }
-            }
-            Cmd::Seek(to) => {
-                if let Some(player) = &player {
-                    player.seek(to);
-                }
-            }
-            Cmd::Volume(v) => {
-                volume = v.clamp(0.0, 1.0);
-                if let Some(player) = &player {
-                    player.set_gain(volume);
-                }
-            }
-            // ponytail: the engine has no stop. Paused, the track holds
-            // silent until the next load replaces it.
-            Cmd::Stop => {
-                if let Some(player) = &player {
-                    player.pause();
-                }
+            } => player = Some(attach(&*factory, meta, &options, volume, &segue, &events)),
+            cmd => command(player.as_deref(), cmd, &mut volume, &segue, &events),
+        }
+    }
+}
+
+/// A fresh engine at the kept level, its events on a thread of their own.
+fn attach(
+    factory: &dyn music::PlaybackFactory,
+    meta: Arc<dyn StreamMeta>,
+    options: &Options,
+    volume: f32,
+    segue: &SharedSegue,
+    events: &tokio::sync::mpsc::UnboundedSender<PlaybackEvent>,
+) -> Box<dyn music::Player> {
+    *lock(segue) = Segue::default();
+    let (fresh, stream) = factory.start(config(options));
+    fresh.set_gain(volume);
+    if let Some(spectrum) = fresh.spectrum() {
+        let _ = events.send(PlaybackEvent::Spectrum(Bands(spectrum)));
+    }
+    let (out, joins) = (events.clone(), segue.clone());
+    if let Err(error) = std::thread::Builder::new()
+        .name("sonora-tui-events".into())
+        .spawn(move || forward_events(stream, out, meta, joins))
+    {
+        let _ = events.send(PlaybackEvent::Error(format!(
+            "could not start the playback event thread: {error}"
+        )));
+    }
+    fresh
+}
+
+/// Every command but `Attach`, on whichever engine is running. The level
+/// and the end of a join are kept whether or not there is one; a `Play`
+/// with none fails, so the shell takes back the bar it filled.
+fn command(
+    player: Option<&dyn music::Player>,
+    cmd: Cmd,
+    volume: &mut f32,
+    segue: &SharedSegue,
+    events: &tokio::sync::mpsc::UnboundedSender<PlaybackEvent>,
+) {
+    match &cmd {
+        Cmd::Volume(v) => *volume = v.clamp(0.0, 1.0),
+        Cmd::PlayAt(..) => *lock(segue) = Segue::default(),
+        _ => {}
+    }
+    let Some(player) = player else {
+        if let Cmd::Play(id) = cmd {
+            let _ = events.send(PlaybackEvent::Failed {
+                id,
+                message: "no playback engine: sign in first".into(),
+            });
+        }
+        return;
+    };
+    match cmd {
+        // Taken by the loop before it gets here.
+        Cmd::Attach { .. } => {}
+        Cmd::Play(id) => {
+            let seamless = lock(segue).seamless(&id);
+            if let Err(error) = player.load(id.as_str(), Duration::ZERO, seamless) {
+                tracing::error!("could not ask for track {id}: {error}");
             }
         }
+        Cmd::PlayAt(id, at) => {
+            if let Err(error) = player.load(id.as_str(), at, false) {
+                tracing::error!("could not ask for track {id}: {error}");
+            }
+        }
+        Cmd::Preload(id) => match player.preload(id.as_str(), true) {
+            Ok(()) => lock(segue).lined_up = Some(id),
+            Err(error) => tracing::warn!("could not preload track {id}: {error}"),
+        },
+        Cmd::Pause => player.pause(),
+        Cmd::Resume => player.play(),
+        Cmd::Seek(to) => player.seek(to),
+        Cmd::Volume(_) => player.set_gain(*volume),
+        // ponytail: the engine has no stop. Paused, the track holds
+        // silent until the next load replaces it.
+        Cmd::Stop => player.pause(),
     }
 }
 
@@ -695,5 +700,140 @@ mod tests {
         ];
         assert_eq!(segment_start(&durs, 0), Duration::ZERO);
         assert_eq!(segment_start(&durs, 2), Duration::from_secs(8));
+    }
+
+    /// An engine that writes down what it was asked, and a stream that
+    /// ends at once, so the command thread can be driven to the end.
+    #[derive(Clone, Default)]
+    struct Recorder(Arc<Mutex<Vec<String>>>);
+
+    impl Recorder {
+        fn note(&self, call: String) {
+            self.0.lock().unwrap().push(call);
+        }
+    }
+
+    impl music::Player for Recorder {
+        fn load(&self, id: &str, at: Duration, seamless: bool) -> anyhow::Result<()> {
+            self.note(format!("load {id} {}s seamless={seamless}", at.as_secs()));
+            Ok(())
+        }
+        fn load_paused_at(&self, id: &str, _at: Duration) -> anyhow::Result<()> {
+            self.note(format!("load_paused_at {id}"));
+            Ok(())
+        }
+        fn preload(&self, id: &str, segue: bool) -> anyhow::Result<()> {
+            self.note(format!("preload {id} segue={segue}"));
+            Ok(())
+        }
+        fn play(&self) {
+            self.note("play".into());
+        }
+        fn pause(&self) {
+            self.note("pause".into());
+        }
+        fn seek(&self, to: Duration) {
+            self.note(format!("seek {}s", to.as_secs()));
+        }
+        fn set_gain(&self, gain: f32) {
+            self.note(format!("gain {gain}"));
+        }
+    }
+
+    struct Silent;
+
+    #[async_trait::async_trait]
+    impl music::PlaybackEvents for Silent {
+        async fn next(&mut self) -> Option<music::PlaybackEvent> {
+            None
+        }
+    }
+
+    impl music::PlaybackFactory for Recorder {
+        fn start(
+            &self,
+            _config: music::PlaybackConfig,
+        ) -> (Box<dyn music::Player>, Box<dyn music::PlaybackEvents>) {
+            (Box::new(self.clone()), Box::new(Silent))
+        }
+    }
+
+    #[test]
+    fn a_play_at_an_offset_forgets_the_track_lined_up() {
+        // Joined by the engine, then started over at an offset: a later
+        // play of the same track is a fresh load, not a seamless join.
+        let b = TrackId::from("b");
+        let segue: SharedSegue = Arc::new(Mutex::new(Segue {
+            lined_up: Some(b.clone()),
+            joined: Some(b.clone()),
+        }));
+        let (out, _events) = tokio::sync::mpsc::unbounded_channel();
+        let mut volume = 1.0;
+        command(
+            None,
+            Cmd::PlayAt(b, Duration::from_secs(5)),
+            &mut volume,
+            &segue,
+            &out,
+        );
+        let after = lock(&segue);
+        assert_eq!(
+            (after.lined_up.as_ref(), after.joined.as_ref()),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn each_command_reaches_the_engine_as_one_call_and_a_play_before_sign_in_fails() {
+        let engine = Recorder::default();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (out, mut events) = tokio::sync::mpsc::unbounded_channel();
+        let id = |s: &str| TrackId::from(s);
+        for cmd in [
+            Cmd::Play(id("early")),
+            // Kept for the engine that starts later, clamped.
+            Cmd::Volume(0.25),
+            Cmd::Pause,
+            Cmd::Attach {
+                factory: Arc::new(engine.clone()),
+                meta: Arc::new(NoMeta),
+                options: Options::default(),
+            },
+            Cmd::Play(id("a")),
+            Cmd::Preload(id("b")),
+            // Lined up but not joined: a skip to it is a fresh load.
+            Cmd::Play(id("b")),
+            Cmd::PlayAt(id("c"), Duration::from_secs(30)),
+            Cmd::Pause,
+            Cmd::Resume,
+            Cmd::Seek(Duration::from_secs(12)),
+            Cmd::Volume(4.0),
+            Cmd::Stop,
+        ] {
+            tx.send(cmd).unwrap();
+        }
+        drop(tx);
+        forward_commands(rx, out);
+
+        assert_eq!(
+            *engine.0.lock().unwrap(),
+            [
+                "gain 0.25",
+                "load a 0s seamless=false",
+                "preload b segue=true",
+                "load b 0s seamless=false",
+                "load c 30s seamless=false",
+                "pause",
+                "play",
+                "seek 12s",
+                "gain 1",
+                "pause",
+            ]
+        );
+        assert!(matches!(
+            events.try_recv(),
+            Ok(PlaybackEvent::Failed { id, message })
+                if id.as_str() == "early" && message.contains("sign in")
+        ));
     }
 }

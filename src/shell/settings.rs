@@ -630,6 +630,33 @@ fn label_width() -> usize {
         + GAP
 }
 
+/// The first row drawn on a pane `fits` lines tall, with `selected`
+/// picked and `first` drawn first last time.
+fn first_shown(selected: usize, first: usize, fits: usize) -> usize {
+    // Three lines a row and one more wherever a heading comes.
+    let height_of = |rows: &[Setting]| -> usize {
+        let headings = rows
+            .windows(2)
+            .filter(|w| w[0].group() != w[1].group())
+            .count()
+            + 1;
+        rows.len() * 3 + headings
+    };
+    // The window moves only when the selection leaves it: up to the
+    // selection, or down just far enough that the selected row is whole.
+    // And back up when the pane has grown, rather than leave the bottom of
+    // the list hanging over blank lines.
+    let selected = selected.min(Setting::ALL.len() - 1);
+    let mut first = first.min(selected);
+    while first < selected && height_of(&Setting::ALL[first..=selected]) > fits {
+        first += 1;
+    }
+    while first > 0 && height_of(&Setting::ALL[first - 1..]) <= fits {
+        first -= 1;
+    }
+    first
+}
+
 pub fn render(
     frame: &mut Frame,
     area: Rect,
@@ -657,28 +684,8 @@ pub fn render(
     // scrolled just far enough that the selected row is drawn: a setting
     // the keys can reach but the screen cannot show is a setting nobody
     // can read while changing it.
-    // Three lines a row and one more wherever a heading comes.
     let fits = area.height.saturating_sub(2) as usize;
-    let height_of = |rows: &[Setting]| -> usize {
-        let headings = rows
-            .windows(2)
-            .filter(|w| w[0].group() != w[1].group())
-            .count()
-            + 1;
-        rows.len() * 3 + headings
-    };
-    // The window moves only when the selection leaves it: up to the
-    // selection, or down just far enough that the selected row is whole.
-    // And back up when the pane has grown, rather than leave the bottom of
-    // the list hanging over blank lines.
-    let selected = state.selected.min(Setting::ALL.len() - 1);
-    let mut first = state.first.get().min(selected);
-    while first < selected && height_of(&Setting::ALL[first..=selected]) > fits {
-        first += 1;
-    }
-    while first > 0 && height_of(&Setting::ALL[first - 1..]) <= fits {
-        first -= 1;
-    }
+    let first = first_shown(state.selected, state.first.get(), fits);
     state.first.set(first);
     let mut group: Option<&str> = None;
     let mut shown = 0;
@@ -794,6 +801,56 @@ pub fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_settings_window_follows_the_selection_and_shows_all_it_can() {
+        let n = Setting::ALL.len();
+        // Twelve lines hold three rows of three lines and their heading.
+        let down: Vec<usize> = (0..n)
+            .scan(0, |first, selected| {
+                *first = first_shown(selected, *first, 12);
+                Some(*first)
+            })
+            .collect();
+        let expected: Vec<usize> = (0..n).map(|s| s.saturating_sub(2)).collect();
+        assert_eq!(
+            down, expected,
+            "moving down scrolls only once the row would be cut"
+        );
+        let up: Vec<usize> = (0..n)
+            .rev()
+            .scan(n, |first, selected| {
+                *first = first_shown(selected, *first, 12);
+                Some(*first)
+            })
+            .collect();
+        let expected: Vec<usize> = (0..n).rev().map(|s| s.min(n - 3)).collect();
+        assert_eq!(up, expected, "moving up scrolls with the selection");
+
+        // Three lines a row, one per heading: the whole list, and one line
+        // less leaves the first row off.
+        let groups = 1 + Setting::ALL
+            .windows(2)
+            .filter(|w| w[0].group() != w[1].group())
+            .count();
+        let whole = n * 3 + groups;
+        assert_eq!(
+            first_shown(n - 1, n - 1, whole),
+            0,
+            "a pane that grew shows it all"
+        );
+        assert_eq!(first_shown(n - 1, n - 1, whole - 1), 1);
+        assert_eq!(
+            first_shown(n - 1, n - 1, 1),
+            n - 1,
+            "the selection is never left"
+        );
+        assert_eq!(
+            first_shown(n + 5, 0, whole),
+            0,
+            "past the end is the last row"
+        );
+    }
 
     #[test]
     fn a_typed_pair_is_one_service_and_an_emptied_pair_is_none() {

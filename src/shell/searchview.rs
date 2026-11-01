@@ -337,6 +337,54 @@ pub fn tracks_height(results: &Results, scroll: usize, body: u16) -> u16 {
 
 /// Top results: a section of each kind, stacked.
 ///
+/// The tracks at the foot of the top results: a heading over the list,
+/// which takes the rest of `area`.
+fn render_top_tracks<F>(
+    frame: &mut Frame,
+    area: Rect,
+    palette: &Palette,
+    view: &View<'_>,
+    focused: bool,
+    draw_cover: &mut F,
+) where
+    F: FnMut(&mut Frame, Rect, &str, super::artwork::Shape) -> bool,
+{
+    // The same heading a home row draws, so a section reads the
+    // same wherever it is.
+    carousel::render_heading(
+        frame,
+        Rect { height: 1, ..area },
+        palette,
+        "Tracks",
+        focused,
+        false,
+        false,
+    );
+    let tracks = track_rows(view.results, Tab::Top);
+    let refs = tracklist::visible(&tracks, view.tracks);
+    tracklist::render(
+        frame,
+        Rect {
+            y: area.y + 1,
+            height: area.height - 1,
+            ..area
+        },
+        palette,
+        tracklist::TrackList {
+            filtering: false,
+            favourites: view.favourites,
+            tracks: &refs,
+            state: view.tracks,
+            focused,
+            playing: view.playing.clone(),
+            tier: view.tier,
+            banner: None,
+            chrome: tracklist::Chrome::Bare,
+        },
+        &mut *draw_cover,
+    );
+}
+
 /// The web client leads with the best artist, then a row of albums, then the
 /// tracks. Drawn as the artist page draws its sections: each a carousel or
 /// the track list, the one at the foot cut by the pane's edge, and the page
@@ -366,9 +414,9 @@ fn render_top<F>(
             break;
         }
         let focused = view.top == section;
-        let (label, cards) = match section {
-            TopSection::Artists => ("Artists", cards(results, Tab::Artists)),
-            TopSection::Albums => ("Albums", cards(results, Tab::Albums)),
+        let (label, cards, state) = match section {
+            TopSection::Artists => ("Artists", cards(results, Tab::Artists), view.artists),
+            TopSection::Albums => ("Albums", cards(results, Tab::Albums), view.albums),
             TopSection::Tracks => {
                 // A TRACKS heading with nothing under it is worse than no
                 // section: it reads as a list that failed to load.
@@ -381,46 +429,13 @@ fn render_top<F>(
                 if tracklist::visible_rows_of(height, None, tracklist::Chrome::Bare) == 0 {
                     break;
                 }
-                // The same heading a home row draws, so a section reads the
-                // same wherever it is.
-                carousel::render_heading(
-                    frame,
-                    Rect {
-                        x: area.x,
-                        y,
-                        width: area.width,
-                        height: 1,
-                    },
-                    palette,
-                    "Tracks",
-                    focused,
-                    false,
-                    false,
-                );
-                let tracks = track_rows(results, Tab::Top);
-                let refs = tracklist::visible(&tracks, view.tracks);
-                tracklist::render(
-                    frame,
-                    Rect {
-                        x: area.x,
-                        y: y + 1,
-                        width: area.width,
-                        height,
-                    },
-                    palette,
-                    tracklist::TrackList {
-                        filtering: false,
-                        favourites: view.favourites,
-                        tracks: &refs,
-                        state: view.tracks,
-                        focused,
-                        playing: view.playing.clone(),
-                        tier: view.tier,
-                        banner: None,
-                        chrome: tracklist::Chrome::Bare,
-                    },
-                    &mut *draw_cover,
-                );
+                let rest = Rect {
+                    x: area.x,
+                    y,
+                    width: area.width,
+                    height: height + 1,
+                };
+                render_top_tracks(frame, rest, palette, view, focused, draw_cover);
                 y = bottom;
                 break;
             }
@@ -433,10 +448,6 @@ fn render_top<F>(
         if drawn < artistview::HEADER_ROWS + 1 {
             break;
         }
-        let state = match section {
-            TopSection::Artists => view.artists,
-            _ => view.albums,
-        };
         carousel::render(
             frame,
             Rect {

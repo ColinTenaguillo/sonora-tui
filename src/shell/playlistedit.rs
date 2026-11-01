@@ -112,49 +112,7 @@ pub fn on_key(prompt: &mut Prompt, key: KeyCode, owned: &[Playlist]) -> Outcome 
             filter,
             typing,
             ..
-        } => {
-            let listed = shown(owned, filter).len();
-            match key {
-                // The list moves from the box too: a search that leaves
-                // three rows should not need a second mode to pick one.
-                KeyCode::Down => *selected = (*selected + 1).min(listed),
-                KeyCode::Up => *selected = selected.saturating_sub(1),
-                KeyCode::Char('j') if !*typing => *selected = (*selected + 1).min(listed),
-                KeyCode::Char('k') if !*typing => *selected = selected.saturating_sub(1),
-                KeyCode::Char('/') if !*typing => *typing = true,
-                KeyCode::Char(c) if *typing => {
-                    filter.push(c);
-                    *selected = 0;
-                }
-                KeyCode::Backspace if *typing => {
-                    filter.pop();
-                    *selected = 0;
-                }
-                KeyCode::Enter => match *selected {
-                    0 => *naming = Some(String::new()),
-                    n => {
-                        return match shown(owned, filter).get(n - 1) {
-                            Some(p) => Outcome::Done(Edit::AddTo {
-                                uuid: p.uuid.clone(),
-                                title: p.title.clone(),
-                                track: track.clone(),
-                            }),
-                            None => Outcome::Closed,
-                        };
-                    }
-                },
-                // Esc backs out one step: the box, then the search, then
-                // the prompt.
-                KeyCode::Esc if *typing => *typing = false,
-                KeyCode::Esc if !filter.is_empty() => {
-                    filter.clear();
-                    *selected = 0;
-                }
-                KeyCode::Esc => return Outcome::Closed,
-                _ => {}
-            }
-            Outcome::Kept
-        }
+        } => on_list_key(key, owned, track, selected, naming, filter, typing),
         Prompt::AddTo {
             track,
             naming: naming @ Some(_),
@@ -198,6 +156,57 @@ pub fn on_key(prompt: &mut Prompt, key: KeyCode, owned: &[Playlist]) -> Outcome 
             _ => Outcome::Closed,
         },
     }
+}
+
+/// A key into the pick list, before a name is asked for.
+fn on_list_key(
+    key: KeyCode,
+    owned: &[Playlist],
+    track: &TrackId,
+    selected: &mut usize,
+    naming: &mut Option<String>,
+    filter: &mut String,
+    typing: &mut bool,
+) -> Outcome {
+    let listed = shown(owned, filter).len();
+    match key {
+        // The list moves from the box too: a search that leaves
+        // three rows should not need a second mode to pick one.
+        KeyCode::Down => *selected = (*selected + 1).min(listed),
+        KeyCode::Up => *selected = selected.saturating_sub(1),
+        KeyCode::Char('j') if !*typing => *selected = (*selected + 1).min(listed),
+        KeyCode::Char('k') if !*typing => *selected = selected.saturating_sub(1),
+        KeyCode::Char('/') if !*typing => *typing = true,
+        KeyCode::Char(c) if *typing => {
+            filter.push(c);
+            *selected = 0;
+        }
+        KeyCode::Backspace if *typing => {
+            filter.pop();
+            *selected = 0;
+        }
+        KeyCode::Enter if *selected == 0 => *naming = Some(String::new()),
+        KeyCode::Enter => {
+            return match shown(owned, filter).get(*selected - 1) {
+                Some(p) => Outcome::Done(Edit::AddTo {
+                    uuid: p.uuid.clone(),
+                    title: p.title.clone(),
+                    track: track.clone(),
+                }),
+                None => Outcome::Closed,
+            };
+        }
+        // Esc backs out one step: the box, then the search, then
+        // the prompt.
+        KeyCode::Esc if *typing => *typing = false,
+        KeyCode::Esc if !filter.is_empty() => {
+            filter.clear();
+            *selected = 0;
+        }
+        KeyCode::Esc => return Outcome::Closed,
+        _ => {}
+    }
+    Outcome::Kept
 }
 
 enum Typed {
@@ -473,6 +482,29 @@ mod tests {
     }
 
     #[test]
+    fn in_the_search_box_the_list_keys_are_letters() {
+        let lists = owned();
+        let mut p = adding();
+        on_key(&mut p, KeyCode::Char('/'), &lists);
+        for c in "jk/".chars() {
+            on_key(&mut p, KeyCode::Char(c), &lists);
+        }
+        match &p {
+            Prompt::AddTo {
+                filter,
+                selected,
+                typing,
+                ..
+            } => {
+                assert_eq!(filter, "jk/");
+                assert_eq!(*selected, 0, "the selection did not move");
+                assert!(*typing);
+            }
+            _ => panic!("still adding"),
+        }
+    }
+
+    #[test]
     fn picking_a_playlist_adds_to_it_and_the_first_row_makes_a_new_one() {
         let lists = owned();
         let mut p = adding();
@@ -557,6 +589,39 @@ mod tests {
             on_key(&mut p, KeyCode::Esc, &lists),
             Outcome::Closed
         ));
+    }
+
+    #[test]
+    fn k_and_up_move_back_and_a_letter_in_the_list_is_not_typed() {
+        let lists = owned();
+        let mut p = adding();
+        on_key(&mut p, KeyCode::Char('j'), &lists);
+        on_key(&mut p, KeyCode::Down, &lists);
+        on_key(&mut p, KeyCode::Char('k'), &lists);
+        assert!(matches!(p, Prompt::AddTo { selected: 1, .. }));
+        on_key(&mut p, KeyCode::Up, &lists);
+        on_key(&mut p, KeyCode::Up, &lists);
+        assert!(
+            matches!(p, Prompt::AddTo { selected: 0, .. }),
+            "stops at create"
+        );
+        on_key(&mut p, KeyCode::Char('x'), &lists);
+        assert!(matches!(&p, Prompt::AddTo { filter, .. } if filter.is_empty()));
+
+        // In the box, j is a letter and Backspace takes one off and starts
+        // the list over.
+        on_key(&mut p, KeyCode::Char('/'), &lists);
+        on_key(&mut p, KeyCode::Char('m'), &lists);
+        on_key(&mut p, KeyCode::Char('j'), &lists);
+        assert!(matches!(&p, Prompt::AddTo { filter, .. } if filter == "mj"));
+        on_key(&mut p, KeyCode::Backspace, &lists);
+        on_key(&mut p, KeyCode::Down, &lists);
+        assert!(matches!(p, Prompt::AddTo { selected: 1, .. }));
+        on_key(&mut p, KeyCode::Backspace, &lists);
+        assert!(
+            matches!(&p, Prompt::AddTo { filter, selected: 0, .. } if filter.is_empty()),
+            "{p:?}"
+        );
     }
 
     #[test]
