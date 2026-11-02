@@ -267,13 +267,10 @@ fn card(item: GenreItem) -> Card {
             ..Card::default()
         },
         GenreItem::Album(a) => Card {
+            // Before the fields that move out of `a`.
+            detail: released(&a),
             title: a.name,
             subtitle: a.artists,
-            // No year on the card, as on YouTube's home: the kind of release, as sonora shows.
-            detail: match a.year {
-                0 => a.release_type.label().to_owned(),
-                year => year.to_string(),
-            },
             cover_url: a.cover,
             target: Some(Target::Album(a.id)),
             ..Card::default()
@@ -288,10 +285,7 @@ fn card(item: GenreItem) -> Card {
         GenreItem::Playlist(p) => Card {
             title: p.name,
             subtitle: p.owner,
-            detail: match p.track_count {
-                0 => String::new(),
-                n => format!("{n} tracks"),
-            },
+            detail: tracks_held(p.track_count),
             cover_url: p.cover,
             target: Some(Target::Playlist(p.id)),
             ..Card::default()
@@ -302,6 +296,24 @@ fn card(item: GenreItem) -> Card {
             target: Some(Target::Page(g.id)),
             ..Card::default()
         },
+    }
+}
+
+/// The line under an album card: its year, or with none, as on YouTube's
+/// home, the kind of release, as sonora shows.
+fn released(album: &music::Album) -> String {
+    match album.year {
+        0 => album.release_type.label().to_owned(),
+        year => year.to_string(),
+    }
+}
+
+/// The line under a playlist card. Zero is also a count the provider does
+/// not report, as for a mix, so it says nothing rather than "0 tracks".
+fn tracks_held(count: u32) -> String {
+    match count {
+        0 => String::new(),
+        n => format!("{n} tracks"),
     }
 }
 
@@ -752,6 +764,39 @@ mod tests {
             cover: None,
         }));
         assert_eq!(g.target, Some(Target::Page("rock".into())));
+    }
+
+    #[test]
+    fn an_artist_card_is_round_and_a_playlist_card_counts_its_tracks() {
+        let a = card(GenreItem::Artist(music::SavedArtist {
+            id: "ar-1".into(),
+            name: "Daft Punk".into(),
+            cover: None,
+            added_at: None,
+        }));
+        assert!(a.round, "an artist is a portrait");
+        assert_eq!(a.target, Some(Target::Artist("ar-1".into())));
+
+        let playlist = |track_count| {
+            card(GenreItem::Playlist(music::Playlist {
+                id: "pl-1".into(),
+                name: "Mix".into(),
+                owner: "TIDAL".into(),
+                owner_id: String::new(),
+                owned: false,
+                collaborative: false,
+                blend: false,
+                public: true,
+                cover: None,
+                track_count,
+                modified_at: None,
+            }))
+        };
+        let p = playlist(12);
+        assert_eq!(p.detail, "12 tracks");
+        assert_eq!(p.subtitle, "TIDAL");
+        assert_eq!(p.target, Some(Target::Playlist("pl-1".into())));
+        assert_eq!(playlist(0).detail, "", "no count is no line, as a mix has");
     }
 
     #[test]
