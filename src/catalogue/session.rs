@@ -825,6 +825,7 @@ mod tests {
             music::Artist {
                 name: "Miles".into(),
                 cover_large: None,
+                banner: None,
                 biography: None,
                 monthly_listeners: Some(7),
                 top_tracks: (0..30).map(|i| a_track(&format!("t{i}"))).collect(),
