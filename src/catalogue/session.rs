@@ -269,8 +269,9 @@ fn card(item: GenreItem) -> Card {
         GenreItem::Album(a) => Card {
             title: a.name,
             subtitle: a.artists,
+            // No year on the card, as on YouTube's home: the kind of release, as sonora shows.
             detail: match a.year {
-                0 => String::new(),
+                0 => a.release_type.label().to_owned(),
                 year => year.to_string(),
             },
             cover_url: a.cover,
@@ -751,6 +752,35 @@ mod tests {
             cover: None,
         }));
         assert_eq!(g.target, Some(Target::Page("rock".into())));
+    }
+
+    #[test]
+    fn an_album_card_without_a_year_says_what_kind_of_release_it_is() {
+        // YouTube's home shelves carry "Single • Artist", never a year.
+        let album = |year, release_type| {
+            card(GenreItem::Album(music::Album {
+                id: "al-1".into(),
+                name: "Le Plus Beau".into(),
+                artists: "TeddyBear".into(),
+                artist_refs: Vec::new(),
+                cover: None,
+                cover_large: None,
+                release_type,
+                year,
+                track_count: 0,
+                release_date: String::new(),
+                label: String::new(),
+                copyrights: Vec::new(),
+                added_at: None,
+            }))
+        };
+        assert_eq!(album(0, ReleaseType::Single).detail, "Single");
+        assert_eq!(album(0, ReleaseType::Ep).detail, "EP");
+        assert_eq!(
+            album(2013, ReleaseType::Single).detail,
+            "2013",
+            "a year wins"
+        );
     }
 
     #[test]
