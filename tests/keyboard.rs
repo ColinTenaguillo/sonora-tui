@@ -450,14 +450,14 @@ fn the_last_section_of_an_artists_page_is_cut_not_dropped() {
 
     // A height that lands part-way through the second section: it must
     // still name itself rather than leaving the pane empty below the first.
-    let whole = screen_sized(&mut app, 199, 50);
+    let whole = screen_sized(&mut app, 199, 55);
     let sections = ["Albums", "EP & Singles"];
     let all_fit = sections.iter().all(|s| whole.contains(*s));
-    assert!(all_fit, "both fit at 50 rows:\n{whole}");
+    assert!(all_fit, "both fit at 55 rows:\n{whole}");
 
     // Three rows shorter the second no longer fits whole, and used to be
     // dropped outright — the page ended in blank pane.
-    let cut = screen_sized(&mut app, 199, 47);
+    let cut = screen_sized(&mut app, 199, 52);
     assert!(
         cut.contains("EP & Singles"),
         "the section across the edge still names itself:\n{cut}"

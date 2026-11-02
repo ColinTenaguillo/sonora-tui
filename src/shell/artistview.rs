@@ -395,9 +395,7 @@ pub struct View<'a> {
     pub page: &'a ArtistPage,
     pub section: Section,
     pub tracks: &'a tracklist::TrackListState,
-    /// Whether the filter box has the keyboard. The page draws no box of
-    /// its own: what is typed shows in the Tracks heading, with a caret
-    /// while it is being typed.
+    /// Whether the filter box under the Tracks heading has the keyboard.
     pub filtering: bool,
     /// One per card section, indexed by `Section::index`.
     ///
@@ -473,13 +471,6 @@ pub fn render<F>(
         // cut by the pane's edge, the way a row of the home page is.
         let height = wants.min(bottom - y);
         if section == Section::Tracks {
-            let heading = Section::Tracks.heading(view.page.kind);
-            let heading = if view.filtering || !view.tracks.filter.is_empty() {
-                let caret = if view.filtering { "█" } else { "" };
-                format!("{heading}  /{}{caret}", view.tracks.filter)
-            } else {
-                heading.to_string()
-            };
             carousel::render_heading(
                 frame,
                 Rect {
@@ -488,21 +479,35 @@ pub fn render<F>(
                     ..area
                 },
                 palette,
-                &heading,
+                Section::Tracks.heading(view.page.kind),
                 view.section == Section::Tracks,
                 // The web offers it here too: these are an artist's top few,
                 // and there are always more behind them.
                 true,
                 false,
             );
-            if height <= 1 {
+            // The box the Tracks view filters with, a blank under the
+            // heading, so typing to filter reads the same on every page.
+            super::inputbox::render(
+                frame,
+                Rect {
+                    y: y + 2,
+                    height: super::inputbox::HEIGHT.min(height.saturating_sub(2)),
+                    ..area
+                },
+                palette,
+                "Filter tracks",
+                &view.tracks.filter,
+                view.filtering,
+            );
+            if height <= LIST_TOP {
                 continue;
             }
             tracklist::render(
                 frame,
                 Rect {
-                    y: y + 1,
-                    height: height - 1,
+                    y: y + LIST_TOP,
+                    height: height - LIST_TOP,
                     ..area
                 },
                 palette,
@@ -556,6 +561,10 @@ pub fn render<F>(
     );
 }
 
+/// The rows over the track list: its heading, a blank, the filter box and
+/// a blank, as the Tracks view stacks them.
+const LIST_TOP: u16 = super::inputbox::headed_rows(false);
+
 /// Rows a section wants: a card section's heading, the blank under it and
 /// its cards; the track list's heading, column headers and every row.
 /// `shown` is the rows the list draws, which is fewer than the page's
@@ -563,7 +572,8 @@ pub fn render<F>(
 fn section_rows(section: Section, shown: usize) -> u16 {
     match section {
         Section::Tracks => {
-            1 + tracklist::header_rows_of(None, tracklist::Chrome::Bare)
+            LIST_TOP
+                + tracklist::header_rows_of(None, tracklist::Chrome::Bare)
                 + shown as u16 * tracklist::ROW_HEIGHT
         }
         s => HEADER_ROWS + carousel::card_height(card_lines(s)),
@@ -610,7 +620,7 @@ pub fn layout(
     out
 }
 
-/// The rows the track list is drawn in, under its own heading, or zero
+/// The rows the track list is drawn in, under its heading and box, or zero
 /// when it is scrolled off the page. What the keys scroll the list against.
 pub fn tracks_height(
     page: &ArtistPage,
@@ -624,7 +634,7 @@ pub fn tracks_height(
         .into_iter()
         .find(|(s, _, _)| *s == Section::Tracks)
         .map_or(0, |(_, y, wants)| {
-            (wants - 1).min(height.saturating_sub(y + 1))
+            (wants - LIST_TOP).min(height.saturating_sub(y + LIST_TOP))
         })
 }
 
@@ -1459,7 +1469,7 @@ mod tests {
 
     #[test]
     fn it_stacks_tracks_then_albums_then_similar_artists() {
-        let buf = draw(50);
+        let buf = draw(56);
         let text = geometry::text(&buf);
         let tracks = geometry::find(&buf, "Track 0").expect("the tracks");
         let albums = geometry::find(&buf, "Album 0").expect("the albums");
@@ -1516,10 +1526,11 @@ mod tests {
     }
 
     #[test]
-    fn the_tracks_heading_carries_the_filter_and_the_list_shrinks_to_it() {
-        // The page has no filter box of its own: what is typed shows in
-        // the Tracks heading, and the sections under the list move up with
-        // it rather than leaving the filtered-out rows blank.
+    fn the_tracks_carry_the_same_filter_box_as_the_tracks_view_and_the_list_shrinks_to_it() {
+        // The filter is the box the Tracks view has, under the heading,
+        // not text tacked onto the heading; and the sections under the
+        // list move up with it rather than leaving the filtered-out rows
+        // blank.
         let p = full_page();
         let g: [carousel::CarouselState; Section::ALL.len()] = Default::default();
         let favourites = std::collections::HashSet::new();
@@ -1548,6 +1559,15 @@ mod tests {
             })
         };
         let plain = draw(&tracklist::TrackListState::default(), false);
+        let hint = geometry::find(&plain, "Filter tracks").expect("the box's hint while idle");
+        let heading = geometry::find(&plain, "Top Tracks").expect("the tracks heading");
+        let corner = geometry::find(&plain, "╭").expect("a rounded box");
+        assert_eq!(hint.row, corner.row + 1, "the hint sits inside the box");
+        assert_eq!(
+            corner.row,
+            heading.row + 2,
+            "a blank between the heading and the box"
+        );
         let albums_at = geometry::find(&plain, "Albums")
             .expect("the albums heading")
             .row;
@@ -1558,9 +1578,11 @@ mod tests {
         };
         let filtered = draw(&state, true);
         let text = geometry::text(&filtered);
+        let typed = geometry::find(&filtered, "track 1█").expect("what is typed, in the box");
+        assert_eq!(typed.row, hint.row, "on the box's line, not the heading's");
         assert!(
-            text.contains("/track 1█"),
-            "the heading shows what is typed:\n{text}"
+            !text.contains("/track 1"),
+            "the heading carries nothing:\n{text}"
         );
         assert!(text.contains("Track 1"), "{text}");
         assert!(!text.contains("Track 2"), "{text}");
