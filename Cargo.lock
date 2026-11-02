@@ -213,6 +213,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "atomic_float"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "628d228f918ac3b82fe590352cc719d30664a0c13ca3a60266fe02c7132d480a"
+
+[[package]]
 name = "audio-core"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2792,8 +2798,8 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "music"
-version = "0.45.0"
-source = "git+https://github.com/sonorahq/sonora?rev=b525b2a702ed81035a2439c29da1ca8158a8ee21#b525b2a702ed81035a2439c29da1ca8158a8ee21"
+version = "0.47.0"
+source = "git+https://github.com/sonorahq/sonora?rev=11fa44bc0d556c11b365282a21a0b84cd6f2e366#11fa44bc0d556c11b365282a21a0b84cd6f2e366"
 dependencies = [
  "alsa",
  "anyhow",
@@ -2811,6 +2817,7 @@ dependencies = [
  "futures",
  "gethostname",
  "http",
+ "image",
  "jiff",
  "kakasi",
  "librespot-core",
@@ -4449,6 +4456,7 @@ name = "rodio"
 version = "0.22.2"
 source = "git+https://github.com/RustAudio/rodio?rev=880aaba54b00aead53651ed1ccbdb672d1375a95#880aaba54b00aead53651ed1ccbdb672d1375a95"
 dependencies = [
+ "atomic_float",
  "cpal",
  "dasp_sample",
  "rtrb",
@@ -5172,8 +5180,8 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "storage"
-version = "0.45.0"
-source = "git+https://github.com/sonorahq/sonora?rev=b525b2a702ed81035a2439c29da1ca8158a8ee21#b525b2a702ed81035a2439c29da1ca8158a8ee21"
+version = "0.47.0"
+source = "git+https://github.com/sonorahq/sonora?rev=11fa44bc0d556c11b365282a21a0b84cd6f2e366#11fa44bc0d556c11b365282a21a0b84cd6f2e366"
 dependencies = [
  "anyhow",
  "dirs",
@@ -6496,8 +6504,8 @@ dependencies = [
 
 [[package]]
 name = "widevine"
-version = "0.45.0"
-source = "git+https://github.com/sonorahq/sonora?rev=b525b2a702ed81035a2439c29da1ca8158a8ee21#b525b2a702ed81035a2439c29da1ca8158a8ee21"
+version = "0.47.0"
+source = "git+https://github.com/sonorahq/sonora?rev=11fa44bc0d556c11b365282a21a0b84cd6f2e366#11fa44bc0d556c11b365282a21a0b84cd6f2e366"
 dependencies = [
  "anyhow",
  "cc",
@@ -6980,7 +6988,7 @@ dependencies = [
 [[package]]
 name = "ytmusic"
 version = "0.1.0"
-source = "git+https://github.com/sonorahq/ytmusic-rs?rev=a8fb6f5#a8fb6f570abc828b3e899a112f9c8dfbb2e17439"
+source = "git+https://github.com/sonorahq/ytmusic-rs?rev=d47b3ae#d47b3ae3212084e6f3f3027d06b0a9d29dcdcfb9"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -171,6 +171,7 @@ impl Inner {
                 transcode: false,
                 keeps: false,
                 downloads: false,
+                playlist_covers: false,
                 qualities: &[],
                 download_gap: Duration::ZERO,
             },
@@ -411,6 +412,7 @@ impl MusicApi for TidalApi {
         Ok(Artist {
             name: page.name,
             cover_large: page.picture,
+            banner: None,
             biography: page.bio,
             monthly_listeners: page.fans,
             top_tracks: page.top_tracks.into_iter().map(map::track).collect(),
