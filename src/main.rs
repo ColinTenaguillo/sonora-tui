@@ -4,6 +4,7 @@
 /// main thread as usual.
 #[cfg(target_os = "macos")]
 fn main() {
+    probe_webview();
     if host_cdm() {
         return;
     }
@@ -20,10 +21,20 @@ fn main() {
 
 #[cfg(not(target_os = "macos"))]
 fn main() -> anyhow::Result<()> {
+    probe_webview();
     if host_cdm() {
         return Ok(());
     }
     app()
+}
+
+/// The webkit2gtk check: this executable started again by `webview` on
+/// Linux, to learn whether the library loads without risking the app.
+/// Exits with its answer; returns at once on any other launch.
+fn probe_webview() {
+    if let Some(code) = webview::probed() {
+        std::process::exit(code);
+    }
 }
 
 /// The Widevine host: this executable started again by the app, with the

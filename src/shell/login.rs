@@ -213,13 +213,8 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
             ]),
             Line::from(""),
             Line::from("Enter to send, Esc to cancel."),
-        ]
-        .into_iter()
-        .chain(
-            cfg!(target_os = "macos")
-                .then(|| Line::from("Enter with nothing pasted opens the sign-in window again.")),
-        )
-        .collect(),
+            Line::from("Enter with nothing pasted opens the sign-in window again."),
+        ],
         LoginState::Accounts { choices, selected } => {
             let mut lines = vec![Line::from("Which account?"), Line::from("")];
             for (i, choice) in choices.iter().enumerate() {
@@ -421,15 +416,11 @@ mod tests {
     }
 
     #[test]
-    fn the_cookie_prompt_offers_the_sign_in_window_where_there_is_one() {
+    fn the_cookie_prompt_offers_the_sign_in_window_again() {
         let text = rendered(&LoginState::Secret {
             typed: Secret::default(),
         });
-        assert_eq!(
-            text.contains("Enter with nothing pasted"),
-            cfg!(target_os = "macos"),
-            "{text}"
-        );
+        assert!(text.contains("Enter with nothing pasted"), "{text}");
     }
 
     #[test]
