@@ -1,8 +1,11 @@
-# Advisories cargo audit (CI's audit.yml) skips. Every one is in librespot,
-# which sonora's `music` pulls in as a git dependency: its hyper-proxy2 and
-# hyper-rustls hold rustls 0.22 and rustls-webpki 0.102, and librespot-core
-# itself holds quick-xml 0.38 and rsa 0.9. Nothing here can move them; the
-# fix is upstream, then a new `music` pin. Drop an entry when its crate goes.
+# Advisories cargo audit (CI's audit.yml) skips. All but the last (paste) are in
+# librespot, which sonora's `music` pulls in as a git dependency: its
+# hyper-proxy2 and hyper-rustls hold rustls 0.22 and rustls-webpki 0.102 (and,
+# through rustls-native-certs 0.7, rustls-pemfile), and librespot-core itself
+# holds quick-xml 0.38 and rsa 0.9. The last, paste, is a proc-macro under
+# lofty (`music`) and image's pulp and rav1e, all at their latest release.
+# Nothing here can move them; the fix is upstream, then a new `music` pin.
+# Drop an entry when its crate goes.
 [advisories]
 ignore = [
   "RUSTSEC-2026-0346", # rustls 0.22: Debug impls expose TLS secrets
@@ -15,4 +18,6 @@ ignore = [
   "RUSTSEC-2026-0194", # quick-xml 0.38: quadratic duplicate-attribute check
   "RUSTSEC-2026-0195", # quick-xml 0.38: unbounded namespace allocation
   "RUSTSEC-2023-0071", # rsa 0.9: Marvin timing attack, no fixed release
+  "RUSTSEC-2025-0134", # rustls-pemfile 2: unmaintained, via hyper-proxy2
+  "RUSTSEC-2024-0436", # paste 1: unmaintained, compile-time only
 ]
