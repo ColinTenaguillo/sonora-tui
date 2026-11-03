@@ -71,8 +71,13 @@ impl Default for Options {
 /// The engine's running spectrum, for the bar to draw: thirty-two bands,
 /// each 0 to 1, read whenever a frame wants them. A handle to the
 /// analyser's own figures rather than a copy, so nothing is sent per frame.
+/// It listens for as long as it is kept: sonora's taps feed nothing
+/// unless someone holds a `Listening`.
 #[derive(Clone)]
-pub struct Bands(music::Spectrum);
+pub struct Bands {
+    spectrum: music::Spectrum,
+    _listening: Arc<music::Listening>,
+}
 
 impl std::fmt::Debug for Bands {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -81,8 +86,15 @@ impl std::fmt::Debug for Bands {
 }
 
 impl Bands {
+    fn new(spectrum: music::Spectrum) -> Self {
+        Self {
+            _listening: Arc::new(spectrum.listen()),
+            spectrum,
+        }
+    }
+
     pub fn levels(&self) -> Vec<f32> {
-        self.0.bands()
+        self.spectrum.bands()
     }
 }
 
@@ -275,7 +287,7 @@ fn attach(
     let (fresh, stream) = factory.start(config(options));
     fresh.set_gain(volume);
     if let Some(spectrum) = fresh.spectrum() {
-        let _ = events.send(PlaybackEvent::Spectrum(Bands(spectrum)));
+        let _ = events.send(PlaybackEvent::Spectrum(Bands::new(spectrum)));
     }
     let (out, joins) = (events.clone(), segue.clone());
     if let Err(error) = std::thread::Builder::new()
@@ -464,6 +476,26 @@ mod tests {
             &NoMeta,
         );
         assert!(matches!(got, Some(PlaybackEvent::Length(d)) if d == Duration::from_secs(90)));
+    }
+
+    #[test]
+    fn the_bands_move_while_music_reaches_the_spectrum() {
+        let spectrum = music::Spectrum::new();
+        let bands = Bands::new(spectrum.clone());
+        let mut tap = spectrum.attach();
+        tap.format(44_100, 1);
+        // A second of a 1 kHz tone, more than the analyser's window.
+        for i in 0..44_100 {
+            tap.push(0, (std::f32::consts::TAU * 1_000.0 * i as f32 / 44_100.0).sin());
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while bands.levels().iter().all(|&level| level == 0.0) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the spectrum never moved: nothing listens to its taps"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     #[test]
