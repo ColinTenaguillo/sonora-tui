@@ -225,6 +225,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f93ebbf82d06013f4c41fe71303feb980cddd78496d904d06be627972de51a24"
 
 [[package]]
+name = "audio_thread_priority"
+version = "0.35.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b1b4a0adbf971420cca66a75361a1190f34a6762d66361e5cde03dda35d1ed3"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "log",
+ "mach2 0.4.3",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "audioadapter"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -752,6 +765,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f02e8d0327b42d3e2e4ab2119af397344eb9fc54a34bf0ddeaa1277af8681f1"
 dependencies = [
  "alsa",
+ "alsa-sys",
+ "audio_thread_priority",
  "block2",
  "coreaudio-rs",
  "dasp_sample",
@@ -759,7 +774,7 @@ dependencies = [
  "jni",
  "js-sys",
  "libc",
- "mach2",
+ "mach2 0.6.0",
  "ndk",
  "ndk-context",
  "num-derive",
@@ -2658,6 +2673,15 @@ dependencies = [
 
 [[package]]
 name = "mach2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d640282b302c0bb0a2a8e0233ead9035e3bed871f0b7e81fe4a1ec829765db44"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "mach2"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
@@ -2799,7 +2823,7 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 [[package]]
 name = "music"
 version = "0.47.0"
-source = "git+https://github.com/sonorahq/sonora?rev=11fa44bc0d556c11b365282a21a0b84cd6f2e366#11fa44bc0d556c11b365282a21a0b84cd6f2e366"
+source = "git+https://github.com/sonorahq/sonora?rev=8ac14902c08eb3575973f48e2d3fc0f9ff1287c2#8ac14902c08eb3575973f48e2d3fc0f9ff1287c2"
 dependencies = [
  "alsa",
  "anyhow",
@@ -2827,6 +2851,8 @@ dependencies = [
  "log",
  "md-5",
  "oauth2",
+ "objc2-core-audio",
+ "objc2-core-foundation",
  "open",
  "opensubsonic",
  "percent-encoding",
@@ -3167,7 +3193,9 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1eebcea8b0dbff5f7c8504f3107c68fc061a3eb44932051c8cf8a68d969c3b2"
 dependencies = [
+ "block2",
  "dispatch2",
+ "libc",
  "objc2",
  "objc2-core-audio-types",
  "objc2-core-foundation",
@@ -5211,7 +5239,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "storage"
 version = "0.47.0"
-source = "git+https://github.com/sonorahq/sonora?rev=11fa44bc0d556c11b365282a21a0b84cd6f2e366#11fa44bc0d556c11b365282a21a0b84cd6f2e366"
+source = "git+https://github.com/sonorahq/sonora?rev=8ac14902c08eb3575973f48e2d3fc0f9ff1287c2#8ac14902c08eb3575973f48e2d3fc0f9ff1287c2"
 dependencies = [
  "anyhow",
  "dirs",
@@ -6435,7 +6463,7 @@ dependencies = [
 [[package]]
 name = "webview"
 version = "0.47.0"
-source = "git+https://github.com/sonorahq/sonora?rev=11fa44bc0d556c11b365282a21a0b84cd6f2e366#11fa44bc0d556c11b365282a21a0b84cd6f2e366"
+source = "git+https://github.com/sonorahq/sonora?rev=8ac14902c08eb3575973f48e2d3fc0f9ff1287c2#8ac14902c08eb3575973f48e2d3fc0f9ff1287c2"
 dependencies = [
  "anyhow",
  "block2",
@@ -6587,7 +6615,7 @@ dependencies = [
 [[package]]
 name = "widevine"
 version = "0.47.0"
-source = "git+https://github.com/sonorahq/sonora?rev=11fa44bc0d556c11b365282a21a0b84cd6f2e366#11fa44bc0d556c11b365282a21a0b84cd6f2e366"
+source = "git+https://github.com/sonorahq/sonora?rev=8ac14902c08eb3575973f48e2d3fc0f9ff1287c2#8ac14902c08eb3575973f48e2d3fc0f9ff1287c2"
 dependencies = [
  "anyhow",
  "cc",

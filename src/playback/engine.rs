@@ -439,7 +439,7 @@ fn translate(
             "Spotify is not granting this account playback keys: free, or a newer account librespot cannot stream for yet (librespot#1649)".into(),
         )),
         Engine::Length { duration, .. } => Some(PlaybackEvent::Length(duration)),
-        Engine::OutputChanged => Some(PlaybackEvent::OutputChanged),
+        Engine::OutputChanged { .. } => Some(PlaybackEvent::OutputChanged),
         // A resume, a seek and a pause are things the shell already knows.
         Engine::Playing { .. }
         | Engine::Loading { .. }
@@ -502,7 +502,11 @@ mod tests {
     fn a_lost_output_reaches_the_shell() {
         // The engine ends after it: dropped here, every later play
         // fails with "cannot reach the playback engine".
-        let got = translate(music::PlaybackEvent::OutputChanged, &mut None, &NoMeta);
+        let got = translate(
+            music::PlaybackEvent::OutputChanged { heard: None },
+            &mut None,
+            &NoMeta,
+        );
         assert!(matches!(got, Some(PlaybackEvent::OutputChanged)));
     }
 
