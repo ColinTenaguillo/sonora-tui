@@ -91,6 +91,11 @@ music = { git = "https://github.com/sonorahq/sonora", rev = "8ac14902c08eb357597
 # The SQLite files the local-files provider keeps its index in. The same
 # workspace, so the same commit.
 storage = { git = "https://github.com/sonorahq/sonora", rev = "8ac14902c08eb3575973f48e2d3fc0f9ff1287c2", features = ["bundled-sqlite"] }
+# The service's own sign-in page in a window, for the cookie sign-ins
+# (Apple Music, Deezer, YouTube Music), over a throwaway data store:
+# WKWebView on macOS, WebKitGTK on Linux, opened at runtime so a system
+# without it still starts. The same workspace, so the same commit.
+webview = { git = "https://github.com/sonorahq/sonora", rev = "8ac14902c08eb3575973f48e2d3fc0f9ff1287c2" }
 
 # The OS media keys. MPRIS is a D-Bus interface, so it is Linux-only by
 # definition; macOS has its own below.
@@ -108,10 +113,6 @@ zbus = "6"
 mediaplayer = "0.5.1"
 # The Core Foundation run loop. Kept on the version mediaplayer uses.
 apple-cf = "0.11"
-# The service's own sign-in page in a window, for the cookie sign-ins
-# (Apple Music, Deezer, YouTube Music): sonora's WKWebView over a
-# throwaway data store. The same workspace as `music`, so the same commit.
-webview = { git = "https://github.com/sonorahq/sonora", rev = "8ac14902c08eb3575973f48e2d3fc0f9ff1287c2" }
 # AppKit's event queue, pumped on the main thread while that window is up:
 # a terminal app has no NSApplication of its own to deliver its clicks
 # and keys.

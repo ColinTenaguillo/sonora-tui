@@ -10,8 +10,9 @@
 //! run loop for the media keys while the app runs on another (see
 //! `mediakeys_macos`). So the app asks for a window with [`open`], and the
 //! main thread's [`Host`] opens it, pumps its events and polls it.
-//! Everywhere else there is no window: [`open`] answers `None` and the
-//! pasted header stays the way in.
+//! On Linux `webview` runs GTK on a thread of its own, so a plain thread
+//! opens the window and polls it; without webkit2gtk it fails to open, and
+//! the pasted header stays the way in.
 
 /// How a sign-in window ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,14 +25,9 @@ pub enum Outcome {
     Failed(String),
 }
 
-/// Ask the main thread for a window on `sign_in`. `None` where there is no
-/// main-thread host to open one: off macOS, or in a test.
-#[cfg(target_os = "macos")]
-pub fn open(
-    sign_in: &music::WebSignIn,
-    service: &str,
-) -> Option<tokio::sync::oneshot::Receiver<Outcome>> {
-    let target = webview::Target {
+/// What `webview` is asked to open for `sign_in`.
+fn target(sign_in: &music::WebSignIn, service: &str) -> webview::Target {
+    webview::Target {
         url: sign_in.url.to_owned(),
         landing: sign_in.landing.to_owned(),
         domain: sign_in.domain.to_owned(),
@@ -39,7 +35,26 @@ pub fn open(
         title: format!("Sign in to {service}"),
         agent: sign_in.agent.map(str::to_owned),
         script: None,
-    };
+    }
+}
+
+/// How a poll leaves the window: still signing in, closed, or done.
+fn settled(poll: webview::Poll) -> Option<Outcome> {
+    match poll {
+        webview::Poll::Pending => None,
+        webview::Poll::Closed => Some(Outcome::Closed),
+        webview::Poll::Cookies(header) => Some(Outcome::Cookies(header)),
+    }
+}
+
+/// Ask the main thread for a window on `sign_in`. `None` where there is no
+/// main-thread host to open one, as in a test.
+#[cfg(target_os = "macos")]
+pub fn open(
+    sign_in: &music::WebSignIn,
+    service: &str,
+) -> Option<tokio::sync::oneshot::Receiver<Outcome>> {
+    let target = target(sign_in, service);
     let (reply, outcome) = tokio::sync::oneshot::channel();
     mac::REQUESTS
         .get()?
@@ -50,12 +65,39 @@ pub fn open(
     Some(outcome)
 }
 
+/// Open a window on `sign_in`, driven by a thread of its own.
 #[cfg(not(target_os = "macos"))]
 pub fn open(
-    _sign_in: &music::WebSignIn,
-    _service: &str,
+    sign_in: &music::WebSignIn,
+    service: &str,
 ) -> Option<tokio::sync::oneshot::Receiver<Outcome>> {
-    None
+    let target = target(sign_in, service);
+    let (reply, outcome) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name("sign-in window".into())
+        .spawn(move || drive(target, reply))
+        .ok()?;
+    Some(outcome)
+}
+
+/// Opens the window and polls it until it settles, or until the sign-in is
+/// cancelled in the app: dropping the page closes it.
+#[cfg(not(target_os = "macos"))]
+fn drive(target: webview::Target, reply: tokio::sync::oneshot::Sender<Outcome>) {
+    let mut page = match webview::Page::open(target) {
+        Ok(page) => page,
+        Err(error) => {
+            let _ = reply.send(Outcome::Failed(format!("{error:#}")));
+            return;
+        }
+    };
+    while !reply.is_closed() {
+        if let Some(outcome) = settled(page.poll()) {
+            let _ = reply.send(outcome);
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -78,7 +120,7 @@ mod mac {
     };
     use objc2_foundation::{NSDate, NSDefaultRunLoopMode, NSString};
 
-    use super::Outcome;
+    use super::{settled, Outcome};
 
     pub(super) struct Request {
         pub target: webview::Target,
@@ -246,24 +288,34 @@ mod mac {
         bar
     }
 
-    /// How a poll leaves the window: still signing in, closed, or done.
-    pub(super) fn settled(poll: webview::Poll) -> Option<Outcome> {
-        match poll {
-            webview::Poll::Pending => None,
-            webview::Poll::Closed => Some(Outcome::Closed),
-            webview::Poll::Cookies(header) => Some(Outcome::Cookies(header)),
-        }
-    }
-
     fn app(mtm: MainThreadMarker) -> Retained<NSApplication> {
         NSApplication::sharedApplication(mtm)
     }
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(test)]
 mod tests {
-    use super::mac::settled;
-    use super::Outcome;
+    use super::{settled, target, Outcome};
+
+    #[test]
+    fn the_window_opens_on_the_services_page_and_waits_for_its_proof() {
+        let sign_in = music::WebSignIn {
+            url: "https://www.deezer.com/login",
+            landing: "www.deezer.com",
+            domain: "deezer.com",
+            proof: &["arl"],
+            agent: None,
+        };
+        let target = target(&sign_in, "Deezer");
+        assert_eq!(target.url, "https://www.deezer.com/login");
+        assert_eq!(target.domain, "deezer.com");
+        assert_eq!(target.proof, ["arl"]);
+        assert_eq!(target.title, "Sign in to Deezer");
+        assert_eq!(
+            target.script, None,
+            "a sign-in window is shown, never scripted"
+        );
+    }
 
     #[test]
     fn a_window_settles_on_its_cookies_or_on_being_closed() {
