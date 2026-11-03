@@ -286,21 +286,26 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
         ],
     };
 
-    let box_area = centred(area, 60, lines.len() as u16 + 2);
+    let paragraph = Paragraph::new(lines)
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: true })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(" sonora-tui "),
+        );
+    // As tall as the text once wrapped, borders included: counting the
+    // lines cut the last one off whenever a long one wrapped.
+    let width = BOX_WIDTH.min(area.width);
+    let height = u16::try_from(paragraph.line_count(width)).unwrap_or(u16::MAX);
+    let box_area = centred(area, width, height);
     frame.render_widget(Clear, box_area);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .alignment(Alignment::Center)
-            .wrap(Wrap { trim: true })
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .title(" sonora-tui "),
-            ),
-        box_area,
-    );
+    frame.render_widget(paragraph, box_area);
 }
+
+/// How wide the sign-in box is drawn, at most.
+const BOX_WIDTH: u16 = 60;
 
 #[cfg(test)]
 mod tests {
