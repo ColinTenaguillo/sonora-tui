@@ -519,12 +519,34 @@ fn a_player_error_is_said_and_stops_the_bar() {
 }
 
 #[test]
-fn a_lost_audio_output_starts_the_engine_again() {
+fn a_lost_audio_output_starts_the_engine_again_where_the_track_was_heard() {
+    // The clock kept running while the device switched; what the output
+    // had played is where the restart picks up, for the track playing.
+    let lost = |heard: Option<(&str, u64)>| crate::playback::PlaybackEvent::OutputChanged {
+        heard: heard.map(|(id, s)| (crate::domain::TrackId::from(id), Duration::from_secs(s))),
+    };
     let mut app = signed_in(sidebar::Section::Music);
-    let next = app.update(Action::Playback(
-        crate::playback::PlaybackEvent::OutputChanged,
-    ));
+    app.now_playing.track = Some(crate::domain::Track {
+        id: crate::domain::TrackId::from("t"),
+        ..crate::domain::Track::sample("t", "a", Duration::from_secs(200))
+    });
+    app.now_playing.position = Duration::from_secs(40);
+
+    let next = app.update(Action::Playback(lost(Some(("t", 31)))));
     assert!(matches!(next, Some(Action::RestartEngine)));
+    assert_eq!(app.now_playing.position, Duration::from_secs(31));
+
+    let next = app.update(Action::Playback(lost(Some(("other", 5)))));
+    assert!(matches!(next, Some(Action::RestartEngine)));
+    assert_eq!(
+        app.now_playing.position,
+        Duration::from_secs(31),
+        "another track's position is not this one's"
+    );
+
+    let next = app.update(Action::Playback(lost(None)));
+    assert!(matches!(next, Some(Action::RestartEngine)));
+    assert_eq!(app.now_playing.position, Duration::from_secs(31));
 }
 
 #[test]

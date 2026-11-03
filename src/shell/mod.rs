@@ -3717,7 +3717,16 @@ impl App {
                 Some(Action::PlaybackFailed { id, message })
             }
             PlaybackEvent::SessionExpired => Some(Action::SessionExpired),
-            PlaybackEvent::OutputChanged => Some(Action::RestartEngine),
+            PlaybackEvent::OutputChanged { heard } => {
+                // What the output had played beats the clock, which kept
+                // running while the device switched: the restart picks up
+                // there, for the track still playing.
+                let playing = self.now_playing.track.as_ref().map(|t| &t.id);
+                if let Some((_, at)) = heard.filter(|(id, _)| Some(id) == playing) {
+                    self.now_playing.position = at;
+                }
+                Some(Action::RestartEngine)
+            }
         }
     }
 
