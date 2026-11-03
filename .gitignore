@@ -2,3 +2,4 @@ target/
 .claude/
 .superpowers/
 .DS_Store
+.metrics/
