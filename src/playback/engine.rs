@@ -174,6 +174,9 @@ pub enum PlaybackEvent {
     },
     /// TIDAL rejected the session: the stored token is no good any more.
     SessionExpired,
+    /// The audio device went away (a suspend, a headset unplugged) and
+    /// the engine ended with it: only a fresh one plays again.
+    OutputChanged,
     Error(String),
 }
 
@@ -424,8 +427,8 @@ fn translate(
             "Spotify is not granting this account playback keys: free, or a newer account librespot cannot stream for yet (librespot#1649)".into(),
         )),
         Engine::Length { duration, .. } => Some(PlaybackEvent::Length(duration)),
-        // The engine reopens the output itself; a resume, a seek and a
-        // pause are things the shell already knows.
+        Engine::OutputChanged => Some(PlaybackEvent::OutputChanged),
+        // A resume, a seek and a pause are things the shell already knows.
         Engine::Playing { .. }
         | Engine::Loading { .. }
         | Engine::Paused { .. }
@@ -433,7 +436,6 @@ fn translate(
         | Engine::Downloaded { id: None }
         | Engine::Unavailable { id: None }
         | Engine::Throttled { id: None }
-        | Engine::OutputChanged
         | Engine::Signal { .. } => None,
     }
 }
@@ -462,6 +464,14 @@ mod tests {
             &NoMeta,
         );
         assert!(matches!(got, Some(PlaybackEvent::Length(d)) if d == Duration::from_secs(90)));
+    }
+
+    #[test]
+    fn a_lost_output_reaches_the_shell() {
+        // The engine ends after it: dropped here, every later play
+        // fails with "cannot reach the playback engine".
+        let got = translate(music::PlaybackEvent::OutputChanged, &mut None, &NoMeta);
+        assert!(matches!(got, Some(PlaybackEvent::OutputChanged)));
     }
 
     fn fetch() -> TidalFetch {
@@ -621,7 +631,6 @@ mod tests {
                 id: Some("1".into()),
                 at: Duration::from_secs(3),
             },
-            music::PlaybackEvent::OutputChanged,
         ] {
             assert!(
                 translate(event.clone(), &mut announced, &fetch).is_none(),

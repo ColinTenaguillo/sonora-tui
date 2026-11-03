@@ -284,8 +284,8 @@ pub enum Action {
     SetVolume(f32),
     /// Fetch the track that plays next, ahead of time.
     Preload(crate::domain::TrackId),
-    /// A setting the engine reads once at its start changed: start it
-    /// again, on the same track and position.
+    /// A setting the engine reads once at its start changed, or its audio
+    /// output went away: start it again, on the same track and position.
     RestartEngine,
     /// The sleep timer's next step: 15, 30, 45, 60 minutes, the end of the
     /// track, off.
@@ -3697,6 +3697,7 @@ impl App {
                 Some(Action::PlaybackFailed { id, message })
             }
             PlaybackEvent::SessionExpired => Some(Action::SessionExpired),
+            PlaybackEvent::OutputChanged => Some(Action::RestartEngine),
         }
     }
 

@@ -519,6 +519,15 @@ fn a_player_error_is_said_and_stops_the_bar() {
 }
 
 #[test]
+fn a_lost_audio_output_starts_the_engine_again() {
+    let mut app = signed_in(sidebar::Section::Music);
+    let next = app.update(Action::Playback(
+        crate::playback::PlaybackEvent::OutputChanged,
+    ));
+    assert!(matches!(next, Some(Action::RestartEngine)));
+}
+
+#[test]
 fn skipping_past_the_end_of_an_empty_queue_stops_the_bar() {
     let mut app = signed_in(sidebar::Section::Music);
     app.now_playing.playing = true;
