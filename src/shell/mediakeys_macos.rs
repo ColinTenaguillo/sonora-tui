@@ -46,11 +46,19 @@ where
         CFRunLoop::main().stop();
     });
 
-    while !finished.load(Ordering::Acquire) {
-        // A bounded run rather than a blocking one: the flag above is what
-        // ends this, and an unbounded loop would need the stop to land
-        // exactly right to be seen.
+    // The sign-in windows the app asks for open here, on the main thread.
+    let mut windows = super::signin_window::Host::install();
+    // A bounded run rather than a blocking one: the flag above is what ends
+    // this, and an unbounded loop would need the stop to land exactly right
+    // to be seen. A window asked for stops it too.
+    let idle = || {
         let _ = CFRunLoop::run_in_default_mode(Duration::from_secs(1), false);
+    };
+    while !finished.load(Ordering::Acquire) {
+        match windows.as_mut() {
+            Some(host) => host.turn(idle),
+            None => idle(),
+        }
     }
 }
 

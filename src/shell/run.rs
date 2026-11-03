@@ -558,6 +558,7 @@ fn side_effects(app: &mut App, action: &Action, out: &Outlets) {
             start_sign_in(app, music::SignIn::Anonymous, action_tx);
         }
         Action::Answer(text) => answer(app, text),
+        Action::OpenSignInWindow => open_sign_in_window(app, action_tx),
         Action::SessionReady => session_ready(app, out),
         // A card that opens something: a playlist, an album, an
         // artist, a mix, a genre page. Anything else falls through
@@ -653,6 +654,62 @@ fn begin_login(app: &mut App, action_tx: &tokio::sync::mpsc::UnboundedSender<Act
     };
     if let Some(method) = method {
         start_sign_in(app, method, action_tx);
+    }
+}
+
+/// The service's sign-in page in a window, whose cookies answer the prompt.
+/// With no window to open here, the paste box comes back.
+fn open_sign_in_window(app: &App, action_tx: &tokio::sync::mpsc::UnboundedSender<Action>) {
+    match sign_in_window(app) {
+        Some((outcome, input)) => {
+            tokio::spawn(await_window(outcome, input, action_tx.clone()));
+        }
+        None => {
+            tracing::info!("no sign-in window here; the cookies are pasted");
+            let _ = action_tx.send(after_window(super::signin_window::Outcome::Closed));
+        }
+    }
+}
+
+/// A window asked for on the sign-in under way, and where its answer goes.
+/// `None` without a provider that signs in on a page, a sign-in waiting on
+/// an answer, or a main thread to open the window on.
+fn sign_in_window(
+    app: &App,
+) -> Option<(
+    tokio::sync::oneshot::Receiver<super::signin_window::Outcome>,
+    tokio::sync::mpsc::UnboundedSender<String>,
+)> {
+    let provider = app.provider.as_ref()?;
+    let input = app.login_input.clone()?;
+    let outcome = super::signin_window::open(&provider.web_sign_in()?, provider.name())?;
+    Some((outcome, input))
+}
+
+/// Waits on the window, unless the sign-in is cancelled first: then
+/// `outcome` is dropped, which is what tells the window to close.
+async fn await_window(
+    outcome: tokio::sync::oneshot::Receiver<super::signin_window::Outcome>,
+    input: tokio::sync::mpsc::UnboundedSender<String>,
+    tx: tokio::sync::mpsc::UnboundedSender<Action>,
+) {
+    let outcome = tokio::select! {
+        outcome = outcome => outcome.unwrap_or(super::signin_window::Outcome::Closed),
+        () = input.closed() => return,
+    };
+    let _ = tx.send(after_window(outcome));
+}
+
+/// What a window's end does: its cookies answer the prompt; closed, or
+/// never opened, it brings the paste box back.
+fn after_window(outcome: super::signin_window::Outcome) -> Action {
+    match outcome {
+        super::signin_window::Outcome::Cookies(header) => Action::Answer(header),
+        super::signin_window::Outcome::Closed => Action::LoginPrompt(music::SignInPrompt::Secret),
+        super::signin_window::Outcome::Failed(why) => {
+            tracing::warn!("the sign-in window did not open: {why}");
+            Action::LoginPrompt(music::SignInPrompt::Secret)
+        }
     }
 }
 
@@ -1346,7 +1403,36 @@ fn unsettle(buf: &mut ratatui::buffer::Buffer) {
 
 #[cfg(test)]
 mod tests {
-    use super::{repaint, unsettle};
+    use super::{after_window, open_sign_in_window, repaint, unsettle};
+    use crate::shell::signin_window::Outcome;
+    use crate::shell::{Action, App};
+
+    #[test]
+    fn a_sign_in_window_answers_with_its_cookies_and_anything_else_brings_the_box_back() {
+        assert!(matches!(
+            after_window(Outcome::Cookies("arl=q".into())),
+            Action::Answer(header) if header == "arl=q"
+        ));
+        for outcome in [Outcome::Closed, Outcome::Failed("no webkit".into())] {
+            assert!(matches!(
+                after_window(outcome),
+                Action::LoginPrompt(music::SignInPrompt::Secret)
+            ));
+        }
+    }
+
+    #[test]
+    fn with_no_window_to_open_the_paste_box_comes_back() {
+        // No provider, no sign-in under way, no main-thread host: the
+        // screen must not be left waiting on a window that never comes.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        open_sign_in_window(&App::default(), &tx);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(Action::LoginPrompt(music::SignInPrompt::Secret))
+        ));
+    }
+
     use crate::shell::Repaint;
     use ratatui::backend::{Backend as _, TestBackend};
     use ratatui::buffer::Buffer;
