@@ -309,6 +309,16 @@ const SHIPPED: &[[&str; 4]] = &[[
     "Slo3Rm5rbDVLbTNyRWJVZEJFQw==",
 ]];
 
+/// TIDAL's Android app client, in the same form. A refresh token the device
+/// flow hands out can be renewed as it, and it is served FLAC where the
+/// device client gets AAC. Not overridable: it is not the sign-in's client.
+const APP: [&str; 4] = [
+    "NkJEU1JkcEs5",
+    "aHFFQlRnVQ==",
+    "eGV1UG1ZN25icFo5SUliTEFjUTkzc2",
+    "hrYTFWTmhlVUFxTjZJY3N6alRHOD0=",
+];
+
 fn decode(halves: &[&str]) -> String {
     use base64::Engine as _;
     let bytes = base64::engine::general_purpose::STANDARD
@@ -321,6 +331,15 @@ impl AuthConfig {
     fn shipped() -> (String, String) {
         let [a, b, c, d] = SHIPPED[0];
         (decode(&[a, b]), decode(&[c, d]))
+    }
+
+    /// TIDAL's Android app client, which sessions renew as for FLAC.
+    pub fn app() -> Self {
+        let [a, b, c, d] = APP;
+        Self {
+            client_id: decode(&[a, b]),
+            client_secret: decode(&[c, d]),
+        }
     }
 
     fn is_shipped(value: &String) -> bool {

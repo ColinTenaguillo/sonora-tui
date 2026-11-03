@@ -214,9 +214,15 @@ There is no legitimate way to replace them today:
   and public requests for third-party access have gone
   [unanswered](https://github.com/orgs/tidal-music/discussions/321).
 
+The sign-in goes through the device client, which since April 2026 is
+served AAC where it asks for CD-quality FLAC. So, like sonora and tidalapi,
+the session is then renewed as TIDAL's Android app client, which is served
+FLAC at every tier. If TIDAL refuses that, the session stays on the device
+client and plays what it is given.
+
 If TIDAL opens a path for third-party device clients this should change.
-The pair is base64 in the source and never written to your config, so it
-stays out of code search and secret scanners. If playback fails with
+The pairs are base64 in the source and never written to your config, so they
+stay out of code search and secret scanners. If playback fails with
 **"this client_id cannot stream"** or a `4005` status, the shipped pair has
 been rate-capped; until a release changes it, put working ones in the config,
 the same ones the other third-party clients carry:

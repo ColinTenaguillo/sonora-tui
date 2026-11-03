@@ -1,4 +1,4 @@
-use crate::auth::store::StoredToken;
+use crate::auth::store::{Lane, StoredToken};
 use crate::config::AuthConfig;
 
 const AUTH_BASE: &str = "https://auth.tidal.com/v1/oauth2";
@@ -157,6 +157,8 @@ pub(crate) fn parse_poll(body: &str, status: u16) -> Result<PollOutcome, AuthErr
                 dto.user.country_code
             },
             user_id: dto.user.user_id,
+            // What the device flow grants; `refresh` moves it.
+            lane: Lane::Device,
         })),
         "authorization_pending" => Ok(PollOutcome::Pending),
         "slow_down" => Ok(PollOutcome::SlowDown),
@@ -213,16 +215,86 @@ pub async fn poll_once(
     parse_poll(&body, status)
 }
 
+/// Renews the session, as TIDAL's Android app client unless TIDAL refused
+/// that: it is served FLAC where the device client is served AAC. The
+/// lane it ends on is kept with the token.
 pub async fn refresh(
     http: &reqwest::Client,
     cfg: &AuthConfig,
+    stale: &StoredToken,
+) -> Result<StoredToken, AuthError> {
+    let app = AuthConfig::app();
+    renew_by_lane(stale, |who| {
+        let client = match who {
+            Asked::App => &app,
+            Asked::Device => cfg,
+        };
+        renew(http, client, &stale.refresh_token)
+    })
+    .await
+}
+
+/// Which client a renewal is asked of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Asked {
+    App,
+    Device,
+}
+
+/// The app client first, unless the session was refused there. A refusal
+/// moves it to the device client for good, and anything else from the app
+/// client falls back to the device client this once, while the session
+/// has not moved yet. A session already on the app client is not moved
+/// back for a lost connection: the next renewal tries again. Refused by
+/// the client it ends on, the session is gone.
+pub(crate) async fn renew_by_lane<F, Fut>(
+    stale: &StoredToken,
+    renew: F,
+) -> Result<StoredToken, AuthError>
+where
+    F: Fn(Asked) -> Fut,
+    Fut: std::future::Future<Output = Result<StoredToken, AuthError>>,
+{
+    let (renewed, lane) = match stale.lane {
+        Lane::Refused => (renew(Asked::Device).await?, Lane::Refused),
+        Lane::App | Lane::Device => match renew(Asked::App).await {
+            Ok(renewed) => (renewed, Lane::App),
+            Err(error) => {
+                let lane = fallback(stale.lane, &error).ok_or(error)?;
+                (renew(Asked::Device).await?, lane)
+            }
+        },
+    };
+    Ok(StoredToken { lane, ..renewed })
+}
+
+/// Where a session the app client would not renew goes next: to the device
+/// client for good when TIDAL refused it, for this renewal only when it has
+/// not moved yet or the answer was garbled. `None` keeps a moved session
+/// on the app client through a lost connection.
+fn fallback(lane: Lane, error: &AuthError) -> Option<Lane> {
+    if error.is_refusal() {
+        tracing::warn!("TIDAL refused the app client, lossless plays as AAC: {error}");
+        return Some(Lane::Refused);
+    }
+    let lost = matches!(error, AuthError::Http(_));
+    (lane == Lane::Device || !lost).then(|| {
+        tracing::debug!("cannot renew as the app client this time: {error}");
+        Lane::Device
+    })
+}
+
+/// One refresh round trip as `client`.
+async fn renew(
+    http: &reqwest::Client,
+    client: &AuthConfig,
     refresh_token: &str,
 ) -> Result<StoredToken, AuthError> {
     let resp = http
         .post(format!("{AUTH_BASE}/token"))
         .form(&[
-            ("client_id", cfg.client_id.as_str()),
-            ("client_secret", cfg.client_secret.as_str()),
+            ("client_id", client.client_id.as_str()),
+            ("client_secret", client.client_secret.as_str()),
             ("refresh_token", refresh_token),
             ("grant_type", "refresh_token"),
             ("scope", SCOPE),
@@ -314,6 +386,102 @@ mod tests {
             !AuthError::Http(err).is_refusal(),
             "an unreachable server must never delete the stored session"
         );
+    }
+
+    /// A renewal that answers from a script and notes who was asked.
+    async fn renew_scripted(
+        lane: Lane,
+        app: fn() -> Result<StoredToken, AuthError>,
+        device: fn() -> Result<StoredToken, AuthError>,
+    ) -> (Result<StoredToken, AuthError>, Vec<Asked>) {
+        let asked = std::sync::Mutex::new(Vec::new());
+        let stale = StoredToken {
+            lane,
+            ..StoredToken::default()
+        };
+        let renewed = renew_by_lane(&stale, |who| {
+            asked.lock().unwrap().push(who);
+            let answer = match who {
+                Asked::App => app(),
+                Asked::Device => device(),
+            };
+            async move { answer }
+        })
+        .await;
+        (renewed, asked.into_inner().unwrap())
+    }
+
+    fn granted() -> Result<StoredToken, AuthError> {
+        Ok(StoredToken::default())
+    }
+
+    fn refused() -> Result<StoredToken, AuthError> {
+        Err(AuthError::Oauth {
+            error: "invalid_client".into(),
+            description: String::new(),
+        })
+    }
+
+    fn garbled() -> Result<StoredToken, AuthError> {
+        Err(AuthError::NonJsonBody {
+            status: 403,
+            body: "<html>".into(),
+        })
+    }
+
+    #[tokio::test]
+    async fn a_device_session_renews_as_the_app_client_which_tidal_serves_flac() {
+        // Since April 2026 the device client is served AAC where it asks
+        // for CD-quality FLAC; TIDAL's Android app is served FLAC.
+        let (renewed, asked) = renew_scripted(Lane::Device, granted, refused).await;
+        assert_eq!(renewed.unwrap().lane, Lane::App);
+        assert_eq!(asked, [Asked::App]);
+    }
+
+    #[tokio::test]
+    async fn a_session_the_app_client_refuses_stays_on_the_device_client_for_good() {
+        let (renewed, asked) = renew_scripted(Lane::Device, refused, granted).await;
+        assert_eq!(renewed.unwrap().lane, Lane::Refused);
+        assert_eq!(asked, [Asked::App, Asked::Device]);
+
+        let (renewed, asked) = renew_scripted(Lane::Refused, granted, granted).await;
+        assert_eq!(renewed.unwrap().lane, Lane::Refused);
+        assert_eq!(asked, [Asked::Device], "the app client is not asked again");
+    }
+
+    #[tokio::test]
+    async fn a_move_that_did_not_go_through_is_tried_again_next_time() {
+        let (renewed, asked) = renew_scripted(Lane::Device, garbled, granted).await;
+        assert_eq!(renewed.unwrap().lane, Lane::Device);
+        assert_eq!(asked, [Asked::App, Asked::Device]);
+    }
+
+    #[tokio::test]
+    async fn an_app_session_cut_off_by_the_network_is_not_moved_back() {
+        let stale = StoredToken {
+            lane: Lane::App,
+            ..StoredToken::default()
+        };
+        let http = reqwest::Client::new();
+        let asked = std::sync::Mutex::new(Vec::new());
+        let renewed = renew_by_lane(&stale, |who| {
+            asked.lock().unwrap().push(who);
+            let http = http.clone();
+            async move {
+                // A port nothing listens on: a real network error.
+                let error = http.get("http://127.0.0.1:1/").send().await.unwrap_err();
+                Err(AuthError::Http(error))
+            }
+        })
+        .await;
+        assert!(!renewed.unwrap_err().is_refusal(), "the session is kept");
+        assert_eq!(asked.into_inner().unwrap(), [Asked::App]);
+    }
+
+    #[tokio::test]
+    async fn a_refresh_token_both_clients_refuse_still_ends_the_session() {
+        let (renewed, _) = renew_scripted(Lane::Device, refused, refused).await;
+        assert!(renewed.unwrap_err().is_refusal());
     }
 
     #[test]

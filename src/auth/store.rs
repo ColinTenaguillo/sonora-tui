@@ -10,6 +10,24 @@ pub struct StoredToken {
     pub expires_at: u64,
     pub country_code: String,
     pub user_id: u64,
+    /// Which of TIDAL's clients renews the session. A file written before
+    /// this existed reads as `Device`, and moves at its next renewal.
+    pub lane: Lane,
+}
+
+/// Which client a session renews as, which decides what TIDAL serves it:
+/// since April 2026 the device client gets AAC where it asks for CD-quality
+/// FLAC, and TIDAL's Android app gets FLAC at every tier.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Lane {
+    /// The device client the sign-in went through, not moved yet.
+    #[default]
+    Device,
+    /// The Android app's client, served FLAC.
+    App,
+    /// The device client for good: TIDAL refused the move.
+    Refused,
 }
 
 impl Default for StoredToken {
@@ -20,6 +38,7 @@ impl Default for StoredToken {
             expires_at: 0,
             country_code: "US".into(),
             user_id: 0,
+            lane: Lane::Device,
         }
     }
 }
@@ -183,7 +202,23 @@ mod tests {
             expires_at: 1_800_000_000,
             country_code: "TH".into(),
             user_id: 10_000_001,
+            lane: Lane::App,
         }
+    }
+
+    #[test]
+    fn a_session_saved_before_lanes_renews_as_the_device_client_and_a_lane_is_kept() {
+        // Every token.json written before lanes existed came from the device
+        // client, and is moved to the app client on its next renewal.
+        let old = r#"{"access_token":"at","refresh_token":"rt","expires_at":1,"country_code":"FR","user_id":7}"#;
+        let token: StoredToken = serde_json::from_str(old).unwrap();
+        assert_eq!(token.lane, Lane::Device);
+
+        let dir = test_dir("lane");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("token.json");
+        save_to(&path, &sample()).unwrap();
+        assert_eq!(load_from(&path).unwrap().unwrap().lane, Lane::App);
     }
 
     /// A directory unique to one test. Tests run in parallel, and two sharing
