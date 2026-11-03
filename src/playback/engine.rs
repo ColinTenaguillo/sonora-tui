@@ -187,8 +187,12 @@ pub enum PlaybackEvent {
     /// TIDAL rejected the session: the stored token is no good any more.
     SessionExpired,
     /// The audio device went away (a suspend, a headset unplugged) and
-    /// the engine ended with it: only a fresh one plays again.
-    OutputChanged,
+    /// the engine ended with it: only a fresh one plays again. `heard` is
+    /// the track the output was playing and how far into it, when the
+    /// engine knew.
+    OutputChanged {
+        heard: Option<(TrackId, Duration)>,
+    },
     Error(String),
 }
 
@@ -439,7 +443,9 @@ fn translate(
             "Spotify is not granting this account playback keys: free, or a newer account librespot cannot stream for yet (librespot#1649)".into(),
         )),
         Engine::Length { duration, .. } => Some(PlaybackEvent::Length(duration)),
-        Engine::OutputChanged { .. } => Some(PlaybackEvent::OutputChanged),
+        Engine::OutputChanged { heard } => Some(PlaybackEvent::OutputChanged {
+            heard: heard.map(|(id, at)| (TrackId::from(id), at)),
+        }),
         // A resume, a seek and a pause are things the shell already knows.
         Engine::Playing { .. }
         | Engine::Loading { .. }
@@ -502,12 +508,17 @@ mod tests {
     fn a_lost_output_reaches_the_shell() {
         // The engine ends after it: dropped here, every later play
         // fails with "cannot reach the playback engine".
+        let heard = Some(("t".to_owned(), Duration::from_secs(31)));
         let got = translate(
-            music::PlaybackEvent::OutputChanged { heard: None },
+            music::PlaybackEvent::OutputChanged { heard },
             &mut None,
             &NoMeta,
         );
-        assert!(matches!(got, Some(PlaybackEvent::OutputChanged)));
+        assert!(
+            matches!(&got, Some(PlaybackEvent::OutputChanged { heard: Some((id, at)) })
+                if *id == TrackId::from("t") && *at == Duration::from_secs(31)),
+            "{got:?}"
+        );
     }
 
     fn fetch() -> TidalFetch {
