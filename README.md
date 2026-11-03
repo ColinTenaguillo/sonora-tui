@@ -137,10 +137,13 @@ Each signs in from the same screen, its own way:
 | `subsonic` | Server and user asked on the login screen the first time, then kept in the config; the password is typed each time, never stored. |
 | `local` | Nothing: the first run asks for a folder, and the folders in the config are read at each start. |
 
-No webview: the cookies come out of the browser's devtools (Network, any
-request, Request Headers, the `Cookie` line). Cookies, passwords and tokens
-are kept by the provider's own credential store, never written to the
-config.
+On macOS, Enter with nothing pasted opens the service's own sign-in page in
+a window instead: sign in there and it closes itself, handing the cookies
+over. It keeps its own throwaway session, so your browser's session is not
+shared and does not rotate the cookies away. Elsewhere, and as a fallback,
+the cookies come out of the browser's devtools (Network, any request,
+Request Headers, the `Cookie` line). Cookies, passwords and tokens are kept
+by the provider's own credential store, never written to the config.
 
 What each view shows is what the service answers with. The feed, the mixes
 and the hi-res badge are TIDAL's; a Subsonic server has no Explore; the

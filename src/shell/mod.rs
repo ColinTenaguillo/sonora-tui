@@ -50,6 +50,7 @@ pub mod scrollbar;
 pub mod searchview;
 pub mod settings;
 pub mod sidebar;
+pub mod signin_window;
 pub mod theme;
 pub mod trackgrid;
 pub mod tracklist;
@@ -80,6 +81,9 @@ pub enum Action {
     /// What the user typed or picked for the prompt up: the cookies, or
     /// the id of the account.
     Answer(String),
+    /// Open the service's own sign-in page in a window, which answers the
+    /// cookie prompt itself: what Enter on an empty cookie box does.
+    OpenSignInWindow,
     /// Use the service without an account, where it allows that.
     BeginGuest,
     /// A session is in hand, fresh or resumed: start its engine and
@@ -2628,6 +2632,12 @@ impl App {
                 self.login = login::LoginState::Busy("Signing in…".into());
                 None
             }
+            // The window is the loop's to open; it answers the prompt, or
+            // sends it again when the window is closed.
+            Action::OpenSignInWindow => {
+                self.login = login::LoginState::Busy("Sign in in the window that opened…".into());
+                None
+            }
             // The connection is made by the loop; the prompt stays up,
             // emptied, until it answers.
             Action::Connect(_) => None,
@@ -4600,6 +4610,8 @@ impl App {
             KeyCode::Enter if !typed.0.trim().is_empty() => {
                 return Some(Action::Answer(std::mem::take(typed).0));
             }
+            // Nothing pasted: the service's own page, in a window.
+            KeyCode::Enter => return Some(Action::OpenSignInWindow),
             KeyCode::Esc => return Some(Action::CancelLogin),
             _ => {}
         }

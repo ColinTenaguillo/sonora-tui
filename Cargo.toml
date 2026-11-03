@@ -108,6 +108,17 @@ zbus = "6"
 mediaplayer = "0.5.1"
 # The Core Foundation run loop. Kept on the version mediaplayer uses.
 apple-cf = "0.11"
+# The service's own sign-in page in a window, for the cookie sign-ins
+# (Apple Music, Deezer, YouTube Music): sonora's WKWebView over a
+# throwaway data store. The same workspace as `music`, so the same commit.
+webview = { git = "https://github.com/sonorahq/sonora", rev = "11fa44bc0d556c11b365282a21a0b84cd6f2e366" }
+# AppKit's event queue, pumped on the main thread while that window is up:
+# a terminal app has no NSApplication of its own to deliver its clicks
+# and keys.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSGraphics", "NSMenu", "NSMenuItem", "NSResponder", "NSRunningApplication", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDate", "NSGeometry", "NSObject", "NSRunLoop", "NSString"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "WKNavigationAction", "WKUIDelegate", "WKWebView", "WKWebViewConfiguration", "WKWindowFeatures"] }
 
 [dev-dependencies]
 insta = "1"

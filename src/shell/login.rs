@@ -30,9 +30,9 @@ pub enum LoginState {
     /// The service wants authorising in the browser, at this link, and
     /// will hear back on its own -- Spotify's callback port.
     Url(String),
-    /// The service wants the cookies of a signed-in browser tab, pasted.
-    /// No webview in a terminal: the user copies the `Cookie` header out
-    /// of the devtools, and the provider takes what it needs from it.
+    /// The service wants the cookies of a signed-in browser tab: pasted,
+    /// copied out of the devtools, or on macOS taken by the sign-in window
+    /// Enter opens on an empty box. The provider takes what it needs.
     Secret {
         typed: Secret,
     },
@@ -213,7 +213,13 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
             ]),
             Line::from(""),
             Line::from("Enter to send, Esc to cancel."),
-        ],
+        ]
+        .into_iter()
+        .chain(
+            cfg!(target_os = "macos")
+                .then(|| Line::from("Enter with nothing pasted signs in in a window instead.")),
+        )
+        .collect(),
         LoginState::Accounts { choices, selected } => {
             let mut lines = vec![Line::from("Which account?"), Line::from("")];
             for (i, choice) in choices.iter().enumerate() {
@@ -412,6 +418,18 @@ mod tests {
         assert!(text.contains("10 characters"), "{text}");
         assert!(!text.contains("abc123"), "the secret is not drawn:\n{text}");
         assert!(text.contains("Cookie"), "says what to copy:\n{text}");
+    }
+
+    #[test]
+    fn the_cookie_prompt_offers_the_sign_in_window_where_there_is_one() {
+        let text = rendered(&LoginState::Secret {
+            typed: Secret::default(),
+        });
+        assert_eq!(
+            text.contains("Enter with nothing pasted"),
+            cfg!(target_os = "macos"),
+            "{text}"
+        );
     }
 
     #[test]

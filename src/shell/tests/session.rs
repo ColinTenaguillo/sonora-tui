@@ -405,6 +405,34 @@ fn with_a_session_an_error_still_routes_to_the_status_bar() {
 }
 
 #[test]
+fn enter_on_an_empty_cookie_box_asks_for_a_sign_in_window_instead() {
+    // Nothing pasted: Enter opens the service's own sign-in page in a
+    // window, which answers the prompt with the cookies itself. The
+    // screen waits on it; closing the window brings the box back.
+    let mut app = App::default();
+    app.config.provider.kind = crate::config::ProviderKind::Deezer;
+    app.update(Action::LoginPrompt(music::SignInPrompt::Secret));
+
+    assert!(matches!(
+        key(&mut app, KeyCode::Enter),
+        Some(Action::OpenSignInWindow)
+    ));
+    app.update(Action::OpenSignInWindow);
+    assert!(
+        matches!(&app.login, login::LoginState::Busy(m) if m.contains("window")),
+        "{:?}",
+        app.login
+    );
+    assert!(
+        key(&mut app, KeyCode::Enter).is_none(),
+        "Enter while the window is up opens no second one"
+    );
+
+    app.update(Action::LoginPrompt(music::SignInPrompt::Secret));
+    assert!(matches!(app.login, login::LoginState::Secret { .. }));
+}
+
+#[test]
 fn a_cookie_sign_in_takes_what_is_pasted_and_sends_it_as_the_answer() {
     // Deezer, Apple and YouTube want the cookies of a signed-in tab.
     // Enter contacts the service; its Secret prompt opens the box;
