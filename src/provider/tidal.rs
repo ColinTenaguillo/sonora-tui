@@ -92,13 +92,21 @@ impl Inner {
     /// Refresh tokens outlive access tokens by days, so this is what gets
     /// an overnight session back without a browser.
     async fn client(&self) -> Result<Client> {
+        self.client_moved(false).await
+    }
+
+    /// `client`, renewing a session not yet moved to the app client even
+    /// before it runs out: done once at sign-in and at start, so a session
+    /// plays FLAC from its first track rather than hours later.
+    async fn client_moved(&self, move_now: bool) -> Result<Client> {
         let token = lock(&self.token)
             .clone()
             .ok_or(SignInFailure(SignInProblem::Credentials))?;
-        if !token.is_expired_at(now_unix()) {
+        let unmoved = move_now && token.lane == auth::Lane::Device;
+        if !token.is_expired_at(now_unix()) && !unmoved {
             return Ok(Client::new(token));
         }
-        let fresh = match auth::refresh(&self.http, &self.auth, &token.refresh_token).await {
+        let fresh = match auth::refresh(&self.http, &self.auth, &token).await {
             Ok(fresh) => fresh,
             // The server saying no is the end of the session, which the
             // shell hears as a credentials failure. Anything else is the
@@ -326,8 +334,8 @@ impl MusicProvider for TidalProvider {
         self.inner.adopt(token);
         // Refreshed now rather than on the first request, so a dead refresh
         // token sends the user to the sign-in screen instead of failing
-        // every page.
-        match self.inner.client().await {
+        // every page; and moved to the app client, for FLAC.
+        match self.inner.client_moved(true).await {
             Ok(_) => {
                 self.inner.keep_fresh();
                 Ok(Some(self.inner.session()))
@@ -360,6 +368,11 @@ impl MusicProvider for TidalProvider {
             tracing::warn!("could not persist the TIDAL token: {error}");
         }
         self.inner.adopt(token);
+        // The device client is served AAC; the move to the app client is
+        // worth a try now, and the session is good without it.
+        if let Err(error) = self.inner.client_moved(true).await {
+            tracing::warn!("could not move the new TIDAL session to the app client: {error:#}");
+        }
         self.inner.keep_fresh();
         Ok(self.inner.session())
     }
