@@ -43,7 +43,14 @@ jobs:
           # Each rev is a full sha, unique in the file, so a plain substitution
           # moves music, storage and every librespot crate together.
           sed -i -e "s/$old/$new/g" -e "s/$old_ls/$new_ls/g" -e "s/$old_rodio/$new_rodio/g" Cargo.toml
-          test "$(grep -c "$old\|$old_ls\|$old_rodio" Cargo.toml)" = 0
+          # Only a rev that moved has to be gone: librespot and rodio often
+          # stay where they are while sonora moves.
+          for pair in "$old $new" "$old_ls $new_ls" "$old_rodio $new_rodio"; do
+            set -- $pair
+            if [ "$1" != "$2" ] && grep -q "$1" Cargo.toml; then
+              echo "$1 is still in Cargo.toml"; exit 1
+            fi
+          done
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "old=${old:0:7}" >> "$GITHUB_OUTPUT"
           echo "new=${new:0:7}" >> "$GITHUB_OUTPUT"
