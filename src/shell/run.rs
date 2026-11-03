@@ -701,14 +701,14 @@ async fn await_window(
 }
 
 /// What a window's end does: its cookies answer the prompt; closed, or
-/// never opened, it brings the paste box back.
+/// never opened, it leaves the paste box up.
 fn after_window(outcome: super::signin_window::Outcome) -> Action {
     match outcome {
         super::signin_window::Outcome::Cookies(header) => Action::Answer(header),
-        super::signin_window::Outcome::Closed => Action::LoginPrompt(music::SignInPrompt::Secret),
+        super::signin_window::Outcome::Closed => Action::PasteCookies,
         super::signin_window::Outcome::Failed(why) => {
             tracing::warn!("the sign-in window did not open: {why}");
-            Action::LoginPrompt(music::SignInPrompt::Secret)
+            Action::PasteCookies
         }
     }
 }
@@ -1414,10 +1414,7 @@ mod tests {
             Action::Answer(header) if header == "arl=q"
         ));
         for outcome in [Outcome::Closed, Outcome::Failed("no webkit".into())] {
-            assert!(matches!(
-                after_window(outcome),
-                Action::LoginPrompt(music::SignInPrompt::Secret)
-            ));
+            assert!(matches!(after_window(outcome), Action::PasteCookies));
         }
     }
 
@@ -1427,10 +1424,7 @@ mod tests {
         // screen must not be left waiting on a window that never comes.
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         open_sign_in_window(&App::default(), &tx);
-        assert!(matches!(
-            rx.try_recv(),
-            Ok(Action::LoginPrompt(music::SignInPrompt::Secret))
-        ));
+        assert!(matches!(rx.try_recv(), Ok(Action::PasteCookies)));
     }
 
     use crate::shell::Repaint;

@@ -405,16 +405,15 @@ fn with_a_session_an_error_still_routes_to_the_status_bar() {
 }
 
 #[test]
-fn enter_on_an_empty_cookie_box_asks_for_a_sign_in_window_instead() {
-    // Nothing pasted: Enter opens the service's own sign-in page in a
-    // window, which answers the prompt with the cookies itself. The
-    // screen waits on it; closing the window brings the box back.
+fn the_cookie_prompt_opens_the_sign_in_window_and_closing_it_leaves_the_paste_box() {
+    // The service wants cookies: its own sign-in page opens in a window
+    // at once, with no key to press. Closing the window brings the paste
+    // box up instead; Enter on it, empty, opens the window again.
     let mut app = App::default();
     app.config.provider.kind = crate::config::ProviderKind::Deezer;
-    app.update(Action::LoginPrompt(music::SignInPrompt::Secret));
 
     assert!(matches!(
-        key(&mut app, KeyCode::Enter),
+        app.update(Action::LoginPrompt(music::SignInPrompt::Secret)),
         Some(Action::OpenSignInWindow)
     ));
     app.update(Action::OpenSignInWindow);
@@ -428,8 +427,12 @@ fn enter_on_an_empty_cookie_box_asks_for_a_sign_in_window_instead() {
         "Enter while the window is up opens no second one"
     );
 
-    app.update(Action::LoginPrompt(music::SignInPrompt::Secret));
+    app.update(Action::PasteCookies);
     assert!(matches!(app.login, login::LoginState::Secret { .. }));
+    assert!(matches!(
+        key(&mut app, KeyCode::Enter),
+        Some(Action::OpenSignInWindow)
+    ));
 }
 
 #[test]
@@ -456,7 +459,7 @@ fn a_cookie_sign_in_takes_what_is_pasted_and_sends_it_as_the_answer() {
         "Enter while the service is contacted does not start a second sign-in"
     );
 
-    app.update(Action::LoginPrompt(music::SignInPrompt::Secret));
+    app.update(Action::PasteCookies);
     assert!(matches!(app.login, login::LoginState::Secret { .. }));
     for c in ['a', 'r', 'l', '=', 'q'] {
         assert!(

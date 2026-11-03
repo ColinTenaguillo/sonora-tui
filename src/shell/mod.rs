@@ -82,8 +82,12 @@ pub enum Action {
     /// the id of the account.
     Answer(String),
     /// Open the service's own sign-in page in a window, which answers the
-    /// cookie prompt itself: what Enter on an empty cookie box does.
+    /// cookie prompt itself: what the prompt does first, and Enter on an
+    /// empty paste box after.
     OpenSignInWindow,
+    /// The window closed without cookies, or could not open: the box to
+    /// paste a `Cookie` header copied out of the devtools instead.
+    PasteCookies,
     /// Use the service without an account, where it allows that.
     BeginGuest,
     /// A session is in hand, fresh or resumed: start its engine and
@@ -2664,6 +2668,12 @@ impl App {
             }
             Action::SessionExpired => self.on_session_expired(),
             Action::LoginPrompt(prompt) => self.on_login_prompt(prompt),
+            Action::PasteCookies => {
+                self.login = login::LoginState::Secret {
+                    typed: login::Secret::default(),
+                };
+                None
+            }
             // A service whose streams are encrypted needs the module, and
             // the machine is searched once an account is in -- never for
             // a service that does not need it.
@@ -3086,9 +3096,9 @@ impl App {
         self.login = match prompt {
             music::SignInPrompt::Code { code, url } => login::LoginState::Waiting { code, url },
             music::SignInPrompt::Url(url) => login::LoginState::Url(url),
-            music::SignInPrompt::Secret => login::LoginState::Secret {
-                typed: login::Secret::default(),
-            },
+            // The service's own page answers it, with no key to press; the
+            // paste box only comes up if that window is closed.
+            music::SignInPrompt::Secret => return Some(Action::OpenSignInWindow),
             music::SignInPrompt::Accounts(choices) => login::LoginState::Accounts {
                 choices,
                 selected: 0,

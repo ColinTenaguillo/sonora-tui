@@ -30,9 +30,9 @@ pub enum LoginState {
     /// The service wants authorising in the browser, at this link, and
     /// will hear back on its own -- Spotify's callback port.
     Url(String),
-    /// The service wants the cookies of a signed-in browser tab: pasted,
-    /// copied out of the devtools, or on macOS taken by the sign-in window
-    /// Enter opens on an empty box. The provider takes what it needs.
+    /// The service wants the cookies of a signed-in browser tab, pasted
+    /// out of the devtools: what is left once the sign-in window is closed,
+    /// or where there is none. The provider takes what it needs.
     Secret {
         typed: Secret,
     },
@@ -217,7 +217,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
         .into_iter()
         .chain(
             cfg!(target_os = "macos")
-                .then(|| Line::from("Enter with nothing pasted signs in in a window instead.")),
+                .then(|| Line::from("Enter with nothing pasted opens the sign-in window again.")),
         )
         .collect(),
         LoginState::Accounts { choices, selected } => {
