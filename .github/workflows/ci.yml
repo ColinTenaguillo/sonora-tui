@@ -39,7 +39,7 @@ jobs:
       # rust-toolchain.toml pins the channel; this action reads it.
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -55,8 +55,12 @@ jobs:
       - name: Test
         run: cargo test --locked
 
-      # No `cargo fmt --check`: the code is not rustfmt's, and making it so
-      # would rewrite nearly every file to settle a question nobody has
-      # asked. Clippy is the check that finds faults rather than opinions.
+      # The tree is rustfmt's, so a change that is not shows up here rather
+      # than as noise in the next diff that runs `cargo fmt`. Once is enough:
+      # the answer is the same on every platform.
+      - name: Format
+        if: runner.os == 'Linux'
+        run: cargo fmt --check
+
       - name: Clippy
         run: cargo clippy --locked --all-targets -- -D warnings
