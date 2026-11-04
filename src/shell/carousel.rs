@@ -147,6 +147,28 @@ pub fn playlist_card(p: &crate::library::Playlist) -> Card {
     }
 }
 
+/// An album as a row of the list every track list draws, for the Albums
+/// view shown as a list: its year where a track has its album.
+pub fn album_row(a: &crate::library::Album) -> crate::domain::Track {
+    crate::domain::Track {
+        id: crate::domain::TrackId::from(a.id.as_str()),
+        album: a.year.clone().unwrap_or_default(),
+        cover: a.cover.clone(),
+        ..crate::domain::Track::sample(&a.title, &a.artist, a.duration.unwrap_or_default())
+    }
+}
+
+/// A playlist as such a row: who made it, and its count where a track has
+/// its album.
+pub fn playlist_row(p: &crate::library::Playlist) -> crate::domain::Track {
+    crate::domain::Track {
+        id: crate::domain::TrackId::from(p.uuid.as_str()),
+        album: collection_detail(p.track_count, None),
+        cover: p.cover.clone(),
+        ..crate::domain::Track::sample(&p.title, &p.creator, p.duration.unwrap_or_default())
+    }
+}
+
 /// A card's height for `lines` lines of text under the cover.
 pub fn card_height(lines: u16) -> u16 {
     COVER_HEIGHT + lines

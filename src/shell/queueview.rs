@@ -58,6 +58,7 @@ pub fn render<F>(
         list,
         palette,
         TrackList {
+            labels: tracklist::Labels::TRACKS,
             tracks,
             state,
             focused: true,

@@ -101,6 +101,10 @@ const BINDINGS: &[Binding] = &[
         what: "next tab, in search",
     },
     Binding {
+        keys: "v",
+        what: "playlists and albums as covers or as a list",
+    },
+    Binding {
         keys: "Q",
         what: "what is playing next",
     },

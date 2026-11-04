@@ -85,6 +85,7 @@ fn opening_an_artist_never_asks_for_a_square_photo() {
             area,
             palette,
             tracklist::TrackList {
+                labels: tracklist::Labels::TRACKS,
                 tracks: &[],
                 state: &state,
                 focused: true,

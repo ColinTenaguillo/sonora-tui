@@ -51,16 +51,31 @@ pub fn header_rows_with(chrome: Chrome, tabs: &[&str]) -> u16 {
     }
 }
 
+/// How a grid draws its items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shape {
+    /// Cards with this many lines of text under the cover: 2 for albums, 3
+    /// for playlists, 1 for profiles. Fixed per view so rows line up.
+    Cards(u16),
+    /// The rows every track list draws, a record to a row: a long
+    /// collection read at a glance rather than by its covers.
+    List,
+}
+
 /// The card grid a section draws: its columns, and the rows the selection
 /// may land in, counting a tab strip when the view has one.
 pub fn geometry_with(
     width: u16,
     height: u16,
-    lines: u16,
+    shape: Shape,
     chrome: Chrome,
     tabs: &[&str],
 ) -> (usize, usize) {
     let body = height.saturating_sub(header_rows_with(chrome, tabs));
+    let Shape::Cards(lines) = shape else {
+        let rows = super::tracklist::visible_rows_of(body, None, super::tracklist::Chrome::Bare);
+        return (1, rows);
+    };
     // Beside the scrollbar's column, which the renderer holds back before
     // it counts: measured against the whole pane the keys counted one
     // column more at the widths where one more just fit, and each press
@@ -155,16 +170,12 @@ pub fn render<F>(
     F: FnMut(&mut Frame, Rect, &str, super::artwork::Shape) -> bool,
 {
     let Grid {
-        heading,
-        filter_hint,
         cards,
         state,
         focused,
         lines,
-        chrome,
-        filtering,
-        tabs,
         liked,
+        ..
     } = grid;
     if area.width == 0 || area.height == 0 {
         return;
@@ -172,30 +183,8 @@ pub fn render<F>(
     // A column for the scrollbar, held back whether or not it is drawn.
     let area = super::scrollbar::reserve(area);
 
-    let body_y = match chrome {
-        Chrome::Bare => area.y,
-        Chrome::Full => {
-            area.y
-                + super::inputbox::render_headed(
-                    frame,
-                    area,
-                    palette,
-                    heading,
-                    (!tabs.0.is_empty()).then_some(tabs),
-                    filter_hint,
-                    &state.filter,
-                    filtering,
-                )
-        }
-    };
-    if body_y >= area.y + area.height {
+    let Some(body) = draw_chrome(frame, area, palette, &grid) else {
         return;
-    }
-    let body = Rect {
-        x: area.x,
-        y: body_y,
-        width: area.width,
-        height: area.y + area.height - body_y,
     };
 
     let cols = columns(body.width);
@@ -235,32 +224,15 @@ pub fn render<F>(
         return;
     }
 
-    let step_y = card_height(lines) + ROW_GAP;
     let first = state.offset * cols;
-
-    for (i, card) in cards.iter().enumerate().skip(first) {
-        let row = i / cols - state.offset;
-        if row >= visible_rows {
-            break;
-        }
-        let col = i % cols;
-        let x = body.x + col as u16 * (card_width() + GAP);
-        let y = body.y + row as u16 * step_y;
-        // A card that does not fit across is not drawn: clipped to what was
-        // left it painted a sliver of cover under a truncated title, which
-        // reads as a fault rather than as a grid that continues. `columns`
-        // already says how many fit, so this only catches the rounding.
-        if x + card_width() > body.x + body.width || y >= body.y + body.height {
+    for (i, card) in cards
+        .iter()
+        .enumerate()
+        .skip(first)
+        .take(visible_rows * cols)
+    {
+        let Some(card_area) = card_area(i - first, cols, lines, body) else {
             continue;
-        }
-        // Height clips: the bottom row shows as much of itself as fits,
-        // cut off by the pane's edge. Anything past it is not drawn at all,
-        // which the `y >=` guard above catches.
-        let card_area = Rect {
-            x,
-            y,
-            width: card_width(),
-            height: card_height(lines).min(body.y + body.height - y),
         };
         render_card(
             frame,
@@ -272,6 +244,55 @@ pub fn render<F>(
             &mut draw_cover,
         );
     }
+}
+
+/// The heading and filter box over a grid that has them, and the area left
+/// under them for the items; nothing when they took it all.
+fn draw_chrome(frame: &mut Frame, area: Rect, palette: &Palette, grid: &Grid<'_>) -> Option<Rect> {
+    let body_y = match grid.chrome {
+        Chrome::Bare => area.y,
+        Chrome::Full => {
+            area.y
+                + super::inputbox::render_headed(
+                    frame,
+                    area,
+                    palette,
+                    grid.heading,
+                    (!grid.tabs.0.is_empty()).then_some(grid.tabs),
+                    grid.filter_hint,
+                    &grid.state.filter,
+                    grid.filtering,
+                )
+        }
+    };
+    (body_y < area.y + area.height).then(|| Rect {
+        y: body_y,
+        height: area.y + area.height - body_y,
+        ..area
+    })
+}
+
+/// Where the `at`th card drawn goes in `body`, or nowhere when it does not
+/// fit.
+fn card_area(at: usize, cols: usize, lines: u16, body: Rect) -> Option<Rect> {
+    let x = body.x + (at % cols) as u16 * (card_width() + GAP);
+    let y = body.y + (at / cols) as u16 * (card_height(lines) + ROW_GAP);
+    // A card that does not fit across is not drawn: clipped to what was
+    // left it painted a sliver of cover under a truncated title, which
+    // reads as a fault rather than as a grid that continues. `columns`
+    // already says how many fit, so this only catches the rounding.
+    if x + card_width() > body.x + body.width || y >= body.y + body.height {
+        return None;
+    }
+    // Height clips: the bottom row shows as much of itself as fits, cut
+    // off by the pane's edge. Anything past it is not drawn at all, which
+    // the `y >=` guard above catches.
+    Some(Rect {
+        x,
+        y,
+        width: card_width(),
+        height: card_height(lines).min(body.y + body.height - y),
+    })
 }
 
 #[cfg(test)]
@@ -388,7 +409,7 @@ mod tests {
         // counts cards, so the keys have to count the same way. At 92 wide,
         // 95 / 19 says five columns fit; beside the bar only four are drawn.
         // Counting five moved the selection diagonally down a wide screen.
-        let (cols, _) = geometry_with(92, 24, 1, Chrome::Full, &[]);
+        let (cols, _) = geometry_with(92, 24, Shape::Cards(1), Chrome::Full, &[]);
         let beside_bar = super::super::scrollbar::reserve(Rect::new(0, 0, 92, 24)).width;
         assert_eq!(cols, columns(beside_bar));
         assert_eq!(cols, 4);

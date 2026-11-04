@@ -392,14 +392,15 @@ fn draw_grid(
     // `lines` comes from the same place the movement keys read it,
     // so the two cannot drift: they disagreed by a whole row of
     // cards, and the keys reached ones that were never drawn.
-    let lines = app.grid_lines(section);
+    let shape = app.grid_shape(section);
+    let grid::Shape::Cards(lines) = shape else {
+        let kept = grid::filter_indices(&cards, &state.filter);
+        draw_records(frame, app, section, area, &state, &kept);
+        return;
+    };
     let (heading, hint) = match opened {
         Some(open) => (open.title.as_str(), "Filter"),
-        None => match section {
-            sidebar::Section::Playlists => ("Playlists", "Filter playlists"),
-            sidebar::Section::Albums => ("Albums", "Filter albums"),
-            _ => ("Profiles", "Filter profiles"),
-        },
+        None => section_heading(section),
     };
     let liked = liked(&app.favourites);
     let mut art = app.artwork.take();
@@ -424,6 +425,98 @@ fn draw_grid(
     app.artwork = art;
 }
 
+/// A collection section's heading and its filter box's hint.
+fn section_heading(section: sidebar::Section) -> (&'static str, &'static str) {
+    match section {
+        sidebar::Section::Playlists => ("Playlists", "Filter playlists"),
+        sidebar::Section::Albums => ("Albums", "Filter albums"),
+        _ => ("Profiles", "Filter profiles"),
+    }
+}
+
+/// The Albums or Playlists view as a list: the rows every track list
+/// draws, a record to a row, under the view's own heading and filter box.
+/// `kept` is what the filter left, as positions in the section's records.
+fn draw_records(
+    frame: &mut ratatui::Frame,
+    app: &mut App,
+    section: sidebar::Section,
+    area: ratatui::layout::Rect,
+    state: &grid::GridState,
+    kept: &[usize],
+) {
+    let (heading, hint) = section_heading(section);
+    let (rows, labels, liked): (Vec<_>, _, &std::collections::HashSet<String>) = match section {
+        sidebar::Section::Albums => (
+            kept.iter()
+                .map(|&i| carousel::album_row(&app.albums[i]))
+                .collect(),
+            tracklist::Labels {
+                artist: "ARTIST",
+                album: "YEAR",
+            },
+            &app.favourites.albums,
+        ),
+        _ => (
+            kept.iter()
+                .map(|&i| carousel::playlist_row(&app.playlists[i]))
+                .collect(),
+            tracklist::Labels {
+                artist: "BY",
+                album: "TRACKS",
+            },
+            &app.favourites.playlists,
+        ),
+    };
+    let favourites = rows
+        .iter()
+        .filter(|r| liked.contains(r.id.as_str()))
+        .map(|r| r.id.clone())
+        .collect();
+    let area = scrollbar::reserve(area);
+    let top = inputbox::render_headed(
+        frame,
+        area,
+        &app.palette,
+        heading,
+        None,
+        hint,
+        &state.filter,
+        app.filtering,
+    );
+    let body = ratatui::layout::Rect {
+        y: area.y + top,
+        height: area.height.saturating_sub(top),
+        ..area
+    };
+    let list_state = tracklist::TrackListState {
+        selected: state.selected,
+        offset: state.offset,
+        ..Default::default()
+    };
+    let shown: Vec<&crate::domain::Track> = rows.iter().collect();
+    let mut art = app.artwork.take();
+    tracklist::render(
+        frame,
+        body,
+        &app.palette,
+        tracklist::TrackList {
+            labels,
+            tracks: &shown,
+            state: &list_state,
+            focused: MAIN_FOCUSED,
+            playing: None,
+            tier: app.now_playing.tier,
+            banner: None,
+            chrome: tracklist::Chrome::Bare,
+            filtering: app.filtering,
+            favourites: &favourites,
+        },
+        cover_drawer(&mut art),
+    );
+    app.artwork = art;
+}
+
 fn draw_tracks(frame: &mut ratatui::Frame, app: &mut App, area: ratatui::layout::Rect) {
     let visible = tracklist::visible(&app.tracks, &app.tracklist);
     let mut art = app.artwork.take();
@@ -432,6 +525,7 @@ fn draw_tracks(frame: &mut ratatui::Frame, app: &mut App, area: ratatui::layout:
         area,
         &app.palette,
         tracklist::TrackList {
+            labels: tracklist::Labels::TRACKS,
             filtering: app.filtering,
             favourites: &app.favourites.tracks,
             chrome: tracklist::Chrome::Full,
