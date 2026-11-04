@@ -783,7 +783,7 @@ impl App {
         grid::geometry_with(
             self.last_main_width,
             self.search_body_height(),
-            searchview::card_lines(tab),
+            grid::Shape::Cards(searchview::card_lines(tab)),
             grid::Chrome::Bare,
             &[],
         )
@@ -2518,10 +2518,25 @@ impl App {
         grid::geometry_with(
             self.last_main_width,
             self.last_main_height,
-            self.grid_lines(self.sidebar.section()),
+            self.grid_shape(self.sidebar.section()),
             grid::Chrome::Full,
             &[],
         )
+    }
+
+    /// How a section's grid is drawn: Playlists and Albums as a list when
+    /// `v` asked for one, cards otherwise. One place, so the renderer and
+    /// the keys cannot disagree.
+    fn grid_shape(&self, section: sidebar::Section) -> grid::Shape {
+        let listable = matches!(
+            section,
+            sidebar::Section::Playlists | sidebar::Section::Albums
+        );
+        let opened = self.open.is_some() && !self.open_cards.is_empty();
+        match self.config.ui.list_view && listable && !opened {
+            true => grid::Shape::List,
+            false => grid::Shape::Cards(self.grid_lines(section)),
+        }
     }
 
     /// Lines of text under a section's covers, which decides how tall a
@@ -4960,6 +4975,20 @@ impl App {
                 None
             }
             KeyCode::Char('L') => Some(Action::ToggleLyrics),
+            // Covers or a line each, kept for next time.
+            KeyCode::Char('v')
+                if matches!(
+                    self.showing(),
+                    Showing::Section(sidebar::Section::Playlists | sidebar::Section::Albums)
+                ) =>
+            {
+                self.config.ui.list_view = !self.config.ui.list_view;
+                self.save_config();
+                // The covers the grid drew are images, which the list's
+                // text does not write over.
+                self.repaint = Repaint::Wipe;
+                None
+            }
             // What is playing next, and where each of it came from. Capital,
             // because `q` quits and the two would be a bad pair to confuse.
             KeyCode::Char('Q') => self.open_queue(),

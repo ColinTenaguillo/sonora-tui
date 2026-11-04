@@ -255,6 +255,7 @@ Press `?` in the app for the full list.
 | `a` / `c` | Open the artist, or the album whose cover you are looking at |
 | `R` | Radio from the selected track, or the one playing |
 | `t`, `Tab` | Next tab in search; on the sign-in screen, the next service |
+| `v` | Playlists and Albums as covers, or as rows like a track list's (year, or count, and length beside each); kept for next time |
 | `Space` | Pause / resume |
 | `A` | Favourite the track, or take it out again |
 | `F` | Favourite the artist, album, playlist or mix under the cursor, or the one whose view is open; again to take it out |
@@ -451,6 +452,7 @@ the terminal cannot do better.
 nerd_font = true    # Nerd Font glyphs for the icons; off by default, never guessed
 halfblocks = true   # covers as half blocks, for a terminal that claims an image
                     # protocol and draws it wrong; read at start
+list_view = true    # Playlists and Albums as a list rather than covers; `v`
 ```
 
 ## Where things live

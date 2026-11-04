@@ -512,6 +512,7 @@ pub fn render<F>(
                 },
                 palette,
                 tracklist::TrackList {
+                    labels: tracklist::Labels::TRACKS,
                     filtering: false,
                     favourites: view.favourites,
                     tracks: &shown,

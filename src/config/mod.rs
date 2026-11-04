@@ -265,6 +265,9 @@ pub struct UiConfig {
     /// Read once at startup: the protocol is probed before the terminal is
     /// put into raw mode, so this takes effect at the next start.
     pub halfblocks: bool,
+    /// Whether Playlists and Albums are a list, a line each, rather than a
+    /// grid of covers. What `v` toggles there.
+    pub list_view: bool,
     /// Which set of colours to draw with: "default" or "catppuccin".
     ///
     /// A name rather than a table, so the common case is one word. The

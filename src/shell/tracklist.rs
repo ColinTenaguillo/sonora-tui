@@ -225,6 +225,13 @@ fn any_added(tracks: &[&Track]) -> bool {
     tracks.iter().any(|t| t.added.is_some())
 }
 
+/// Whether any row knows its length. An album or playlist drawn as a row
+/// comes without one from every service, and a TIME column of blanks is a
+/// column that says nothing.
+fn any_timed(tracks: &[&Track]) -> bool {
+    tracks.iter().any(|t| !t.duration.is_zero())
+}
+
 /// The day a track was added, out of the timestamp TIDAL sends.
 fn added_day(track: &Track) -> &str {
     track
@@ -253,10 +260,10 @@ fn one_album(tracks: &[&Track]) -> bool {
     }
 }
 
-fn columns(width: u16, in_collection: bool, dated: bool) -> Columns {
+fn columns(width: u16, in_collection: bool, dated: bool, timed: bool) -> Columns {
     let width = width.saturating_sub(RING_WIDTH * 2);
     let number = 4;
-    let duration = 6;
+    let duration = if timed { 6 } else { 0 };
     // A day, "2020-04-04", and the gap before TIME. Not in a narrow pane,
     // where the title needs the room more.
     let added = if dated && width >= 70 { 12 } else { 0 };
@@ -291,6 +298,7 @@ fn columns(width: u16, in_collection: bool, dated: bool) -> Columns {
 }
 
 pub struct TrackList<'a> {
+    pub labels: Labels,
     pub tracks: &'a [&'a Track],
     pub state: &'a TrackListState,
     pub focused: bool,
@@ -315,6 +323,22 @@ pub struct TrackList<'a> {
     /// `added` date of its own, so membership is the only thing that says
     /// whether it is one.
     pub favourites: &'a std::collections::HashSet<crate::domain::TrackId>,
+}
+
+/// What the text columns after the title are headed: a track's artist and
+/// album, or what stands in them on a row that is a record of its own --
+/// the Albums and Playlists views drawn as a list.
+#[derive(Debug, Clone, Copy)]
+pub struct Labels {
+    pub artist: &'static str,
+    pub album: &'static str,
+}
+
+impl Labels {
+    pub const TRACKS: Self = Self {
+        artist: "ARTIST",
+        album: "ALBUM",
+    };
 }
 
 /// The header an opened album or playlist gets: its cover and what it is.
@@ -375,6 +399,7 @@ pub fn render<F>(
     F: FnMut(&mut Frame, Rect, &str, super::artwork::Shape) -> bool,
 {
     let TrackList {
+        labels,
         tracks,
         state,
         focused,
@@ -400,7 +425,12 @@ pub fn render<F>(
     // not of the banner: a row like "TIDAL's Top Hits" opens with a banner
     // and every track on it comes from a different record, so keying on the
     // banner dropped the one column that told them apart.
-    let cols = columns(area.width, one_album(tracks), any_added(tracks));
+    let cols = columns(
+        area.width,
+        one_album(tracks),
+        any_added(tracks),
+        any_timed(tracks),
+    );
     match chrome {
         Chrome::Bare => {
             frame.render_widget(
@@ -421,6 +451,7 @@ pub fn render<F>(
                 palette,
                 &cols,
                 state,
+                labels,
             );
         }
         Chrome::Full => {
@@ -469,6 +500,7 @@ pub fn render<F>(
                     palette,
                     &cols,
                     state,
+                    labels,
                 );
             }
         }
@@ -634,6 +666,7 @@ fn render_header(
     palette: &Palette,
     cols: &Columns,
     state: &TrackListState,
+    labels: Labels,
 ) {
     let style = palette.subtitle();
     // The sorted column says so, and which way.
@@ -666,8 +699,13 @@ fn render_header(
     put(frame, "#", cols.number, left);
     put(frame, "", cols.thumb, left);
     put(frame, &label("TITLE", Column::Title), cols.title, left);
-    put(frame, &label("ARTIST", Column::Artist), cols.artist, left);
-    put(frame, &label("ALBUM", Column::Album), cols.album, left);
+    put(
+        frame,
+        &label(labels.artist, Column::Artist),
+        cols.artist,
+        left,
+    );
+    put(frame, &label(labels.album, Column::Album), cols.album, left);
     put(frame, &label("ADDED", Column::Added), cols.added, left);
     // Centred, so the header sits over the times rather than off to one side.
     put(
@@ -821,22 +859,18 @@ fn render_row<F>(
 
     // Centred in its column: right-aligned, the times sat hard against the
     // pane's edge with the TIME header floating away from them.
-    if text_fits && cols.duration > 0 && x < area.x + area.width {
-        let width = cols.duration.min(area.x + area.width - x);
-        frame.render_widget(
-            Paragraph::new(Line::styled(
-                super::nowplaying::format_time(track.duration),
-                detail,
-            ))
-            .alignment(ratatui::layout::Alignment::Center),
-            Rect {
-                x,
-                y: text_y,
-                width,
-                height: 1,
-            },
-        );
-    }
+    // A length nobody knows is left blank rather than written "0:00": an
+    // album the service gave no running time, a quick pick before it plays.
+    let time = match track.duration.is_zero() {
+        true => String::new(),
+        false => super::nowplaying::format_time(track.duration),
+    };
+    put(
+        frame,
+        &format!("{time:^w$}", w = usize::from(cols.duration)),
+        cols.duration,
+        detail,
+    );
 }
 
 /// The marks that follow a title: explicit, then favourite.
@@ -956,6 +990,7 @@ mod tests {
                 area,
                 palette,
                 TrackList {
+                    labels: Labels::TRACKS,
                     filtering: false,
                     favourites: &favourites,
                     tracks: &refs,
@@ -1007,6 +1042,7 @@ mod tests {
                 area,
                 palette,
                 TrackList {
+                    labels: Labels::TRACKS,
                     filtering: false,
                     favourites: &favourites,
                     tracks: &refs,
@@ -1046,6 +1082,7 @@ mod tests {
                 area,
                 palette,
                 TrackList {
+                    labels: Labels::TRACKS,
                     filtering: false,
                     favourites: &favourites,
                     tracks: &refs,
@@ -1113,6 +1150,7 @@ mod tests {
                 area,
                 palette,
                 TrackList {
+                    labels: Labels::TRACKS,
                     filtering: false,
                     favourites: &favourites,
                     tracks: &refs,
@@ -1160,6 +1198,7 @@ mod tests {
                 area,
                 palette,
                 TrackList {
+                    labels: Labels::TRACKS,
                     filtering: false,
                     favourites: &favourites,
                     tracks: &refs,
@@ -1206,6 +1245,7 @@ mod tests {
                 area,
                 palette,
                 TrackList {
+                    labels: Labels::TRACKS,
                     filtering: false,
                     favourites: &favourites,
                     tracks: &refs,
@@ -1256,6 +1296,7 @@ mod tests {
                 area,
                 palette,
                 TrackList {
+                    labels: Labels::TRACKS,
                     filtering: false,
                     favourites: &favourites,
                     tracks: &refs,
@@ -1303,6 +1344,7 @@ mod tests {
                     area,
                     palette,
                     TrackList {
+                        labels: Labels::TRACKS,
                         filtering,
                         favourites,
                         tracks: &refs,
@@ -1351,6 +1393,7 @@ mod tests {
                     area,
                     palette,
                     TrackList {
+                        labels: Labels::TRACKS,
                         tracks: &refs,
                         state: &state,
                         focused: false,
@@ -1421,6 +1464,7 @@ mod tests {
                 area,
                 palette,
                 TrackList {
+                    labels: Labels::TRACKS,
                     tracks: &refs,
                     state: &state,
                     focused: false,
@@ -1482,6 +1526,7 @@ mod tests {
                 area,
                 palette,
                 TrackList {
+                    labels: Labels::TRACKS,
                     filtering: false,
                     favourites: &favourites,
                     tracks: &refs,
@@ -1527,6 +1572,7 @@ mod tests {
                 area,
                 palette,
                 TrackList {
+                    labels: Labels::TRACKS,
                     filtering: false,
                     favourites: &favourites,
                     tracks: &refs,
@@ -1578,16 +1624,16 @@ mod tests {
     #[test]
     fn narrow_panes_drop_columns_rather_than_squeezing_them_all() {
         // Three text columns in 40 cells would leave each unreadable.
-        let wide = columns(140, false, false);
+        let wide = columns(140, false, false, true);
         assert!(wide.album > 0, "a wide pane shows everything");
 
-        let medium = columns(80, false, false);
+        let medium = columns(80, false, false, true);
         assert!(medium.artist > 0);
 
-        let narrow = columns(50, false, false);
+        let narrow = columns(50, false, false, true);
         assert_eq!(narrow.album, 0, "then the album");
 
-        let tiny = columns(40, false, false);
+        let tiny = columns(40, false, false, true);
         assert_eq!(tiny.artist, 0, "then the artist, leaving the title");
         assert!(tiny.title > 0, "the title always survives");
     }
@@ -1639,14 +1685,14 @@ mod tests {
         // Inside an album every row carries the same album name and no added
         // date. Two columns of identical text push the title into an
         // ellipsis for nothing.
-        let inside = columns(140, true, false);
+        let inside = columns(140, true, false, true);
         assert_eq!(inside.album, 0, "the album column repeats itself");
         assert!(
             inside.artist > 0,
             "the artist still varies, on compilations"
         );
 
-        let outside = columns(140, false, false);
+        let outside = columns(140, false, false, true);
         assert!(
             inside.title > outside.title,
             "the reclaimed space goes to the title: {} vs {}",
@@ -1661,7 +1707,7 @@ mod tests {
             for (in_collection, dated) in
                 [(false, false), (true, false), (false, true), (true, true)]
             {
-                let c = columns(w, in_collection, dated);
+                let c = columns(w, in_collection, dated, true);
                 let total =
                     c.number + c.thumb + c.title + c.artist + c.album + c.added + c.duration;
                 assert!(
@@ -1692,6 +1738,7 @@ mod tests {
                     f.area(),
                     &palette,
                     TrackList {
+                        labels: Labels::TRACKS,
                         filtering: false,
                         favourites: &favourites,
                         chrome: Chrome::Full,
@@ -1733,6 +1780,7 @@ mod tests {
                 f.area(),
                 &palette,
                 TrackList {
+                    labels: Labels::TRACKS,
                     filtering: false,
                     favourites: &favourites,
                     chrome: Chrome::Full,
@@ -1828,6 +1876,7 @@ mod tests {
                     area,
                     palette,
                     TrackList {
+                        labels: Labels::TRACKS,
                         filtering: false,
                         favourites: &favourites,
                         tracks: &refs,
@@ -1873,6 +1922,7 @@ mod tests {
                 area,
                 palette,
                 TrackList {
+                    labels: Labels::TRACKS,
                     tracks: &refs,
                     state: &state,
                     focused: false,
@@ -1976,6 +2026,7 @@ mod tests {
                     area,
                     palette,
                     TrackList {
+                        labels: Labels::TRACKS,
                         filtering: false,
                         favourites: &favourites,
                         tracks: &refs,

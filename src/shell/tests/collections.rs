@@ -42,6 +42,96 @@ fn every_card_a_grid_counts_as_visible_is_drawn() {
 }
 
 #[test]
+fn v_shows_the_albums_and_playlists_as_a_list_and_back() {
+    let mut app = with_albums(30);
+    // A column that says the same on every row is dropped, as an album's
+    // own track list drops ALBUM.
+    app.albums[1].year = Some("1999".into());
+    let press = |app: &mut App, c: char| {
+        if let Some(action) = key(app, KeyCode::Char(c)) {
+            app.update(action);
+        }
+    };
+    let shown = |app: &mut App| {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        geometry::text(terminal.backend().buffer())
+    };
+    let grid_rows = shown(&mut app)
+        .lines()
+        .filter(|l| l.contains("Album "))
+        .count();
+
+    press(&mut app, 'v');
+    assert!(app.config.ui.list_view, "kept in the config for next time");
+    let text = shown(&mut app);
+    // The rows every track list draws: numbered, title, artist and year
+    // side by side, under the columns they are.
+    let header = text
+        .lines()
+        .find(|l| l.contains("TITLE"))
+        .unwrap_or_else(|| panic!("{text}"));
+    assert!(
+        header.contains("ARTIST") && header.contains("YEAR"),
+        "{header}"
+    );
+    // No service hands an album's length to the list: a column of nothing
+    // is not drawn.
+    assert!(!header.contains("TIME"), "{header}");
+    let row = text
+        .lines()
+        .find(|l| l.contains("Album 0 "))
+        .unwrap_or_else(|| panic!("{text}"));
+    assert!(
+        row.contains('1') && row.contains("Artist 0") && row.contains("2026"),
+        "{row}"
+    );
+    assert!(
+        !row.contains("0:00"),
+        "no length is not a length of nothing: {row}"
+    );
+    let listed = text.lines().filter(|l| l.contains("Album ")).count();
+    assert!(listed > grid_rows, "a list holds more: {listed}\n{text}");
+
+    // j is one album down, not a row of covers.
+    press(&mut app, 'j');
+    assert_eq!(app.album_grid.selected, 1);
+    // And it goes all the way down, scrolled into view.
+    for _ in 0..40 {
+        press(&mut app, 'j');
+    }
+    assert_eq!(app.album_grid.selected, 29);
+    assert!(shown(&mut app).contains("Album 29 "));
+
+    // The playlists are drawn the same way, by who made them.
+    let playlist = |title: &str, count: u32| crate::library::Playlist {
+        uuid: title.into(),
+        title: title.into(),
+        track_count: count,
+        duration: Some(std::time::Duration::from_secs(45 * 60)),
+        creator: "TIDAL".into(),
+        cover: None,
+        owned: false,
+    };
+    app.playlists = vec![playlist("Road trip", 12), playlist("Focus", 30)];
+    press(&mut app, '4');
+    assert!(app.config.ui.list_view);
+    let text = shown(&mut app);
+    let row = text
+        .lines()
+        .find(|l| l.contains("Road trip"))
+        .unwrap_or_else(|| panic!("{text}"));
+    assert!(
+        row.contains("TIDAL") && row.contains("12 tracks") && row.contains("45:00"),
+        "{row}"
+    );
+
+    press(&mut app, 'v');
+    assert!(!app.config.ui.list_view, "and back to covers");
+}
+
+#[test]
 fn a_selected_cards_shade_stays_out_of_the_sidebar() {
     // The shade is a column wider than the card, so the leftmost card's
     // ran over the rule and into the nav beside it.

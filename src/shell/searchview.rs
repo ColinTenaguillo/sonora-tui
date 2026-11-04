@@ -263,6 +263,7 @@ pub fn render<F>(
             body,
             palette,
             tracklist::TrackList {
+                labels: tracklist::Labels::TRACKS,
                 // Search has its own box above; this list never has the
                 // keyboard, so it never shows a caret.
                 filtering: false,
@@ -371,6 +372,7 @@ fn render_top_tracks<F>(
         },
         palette,
         tracklist::TrackList {
+            labels: tracklist::Labels::TRACKS,
             filtering: false,
             favourites: view.favourites,
             tracks: &refs,
