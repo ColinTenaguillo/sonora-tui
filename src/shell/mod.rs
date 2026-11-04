@@ -3722,7 +3722,7 @@ impl App {
 
     fn seek(&mut self, forward: bool) -> Option<Action> {
         if let Some(to) = self.seek_target(forward) {
-            self.now_playing.position = to;
+            self.now_playing.seek_to(to);
         }
         None
     }
@@ -3766,7 +3766,7 @@ impl App {
                 // there, for the track still playing.
                 let playing = self.now_playing.track.as_ref().map(|t| &t.id);
                 if let Some((_, at)) = heard.filter(|(id, _)| Some(id) == playing) {
-                    self.now_playing.position = at;
+                    self.now_playing.place(at);
                 }
                 Some(Action::RestartEngine)
             }
@@ -3774,7 +3774,7 @@ impl App {
     }
 
     fn on_position(&mut self, p: std::time::Duration) -> Option<Action> {
-        self.now_playing.position = p;
+        self.now_playing.report(p);
         // Filled while the track is still playing rather
         // than at the silence after the last one: the web
         // client's "up next" is never empty, and fetching
@@ -3821,7 +3821,7 @@ impl App {
         // one, and if that track was the longer of the two
         // the ratio saturated and drew a full bar over a
         // track that had barely started.
-        self.now_playing.position = std::time::Duration::ZERO;
+        self.now_playing.place(std::time::Duration::ZERO);
         self.now_playing.playing = true;
         self.ran_dry = false;
         self.begin_listen();
@@ -3848,7 +3848,7 @@ impl App {
         // Played to the end: the whole of it counts.
         let whole = self.listen.as_ref().map(|p| p.duration);
         self.settle_listen(whole.unwrap_or(self.now_playing.position));
-        self.now_playing.position = std::time::Duration::ZERO;
+        self.now_playing.place(std::time::Duration::ZERO);
         // The sleep timer set to the end of the track: this
         // is it. Paused rather than left, since a gapless
         // engine may already have the next lined up.

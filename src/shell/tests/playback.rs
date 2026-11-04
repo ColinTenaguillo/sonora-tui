@@ -599,6 +599,58 @@ fn changing_the_volume_reaches_the_player() {
 }
 
 #[test]
+fn holding_dot_is_not_pulled_back_by_reports_from_before_the_seek() {
+    // Held, `.` repeats faster than a stream can seek: the engine still
+    // reports where it was, or where an earlier seek of the burst landed,
+    // and the bar jumped back to it -- with the next press counted from
+    // there, so holding the key stuttered rather than moving on.
+    use crate::playback::PlaybackEvent::Position;
+    let secs = std::time::Duration::from_secs;
+    let mut app = signed_in(sidebar::Section::Tracks);
+    app.now_playing.track = Some(crate::domain::Track::sample("Song", "Band", secs(300)));
+    app.now_playing.position = secs(30);
+
+    app.update(Action::SeekForward);
+    app.update(Action::SeekForward);
+    app.update(Action::Playback(Position(secs(31))));
+    app.update(Action::Playback(Position(secs(40))));
+    assert_eq!(
+        app.now_playing.position,
+        secs(50),
+        "stale reports are not shown"
+    );
+    app.update(Action::SeekForward);
+    assert_eq!(
+        app.now_playing.position,
+        secs(60),
+        "and the next press counts from the bar"
+    );
+
+    // Once the engine reports from where the seek landed, it has the bar
+    // again.
+    app.update(Action::Playback(Position(
+        secs(60) + std::time::Duration::from_millis(300),
+    )));
+    app.update(Action::Playback(Position(secs(61))));
+    assert_eq!(app.now_playing.position, secs(61));
+}
+
+#[test]
+fn a_seek_the_engine_never_reaches_lets_go_of_the_bar() {
+    // Landed elsewhere, or not at all: the bar follows the engine again
+    // rather than freezing at a target nothing is playing.
+    use crate::playback::PlaybackEvent::Position;
+    let secs = std::time::Duration::from_secs;
+    let mut app = signed_in(sidebar::Section::Tracks);
+    app.now_playing.track = Some(crate::domain::Track::sample("Song", "Band", secs(300)));
+    app.now_playing.position = secs(30);
+    app.update(Action::SeekForward);
+    app.now_playing.age_seek(secs(10));
+    app.update(Action::Playback(Position(secs(33))));
+    assert_eq!(app.now_playing.position, secs(33));
+}
+
+#[test]
 fn dot_and_comma_seek_ten_seconds_within_the_track() {
     let mut app = signed_in(sidebar::Section::Tracks);
     assert!(
