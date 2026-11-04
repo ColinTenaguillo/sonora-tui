@@ -525,15 +525,15 @@ impl MusicApi for TidalApi {
         Ok(None)
     }
 
-    /// The playlists, and after them the saved mixes: sonora has no mix,
-    /// and a mix is a list of tracks under a name, kept under its prefixed
-    /// id. TIDAL's suggested stations are not saved and stay on the home
-    /// page.
+    /// The playlists, and after them the saved mixes, artists' radios
+    /// among them: sonora has no mix, and a mix is a list of tracks under a
+    /// name, kept under its prefixed id. TIDAL's suggested stations are not
+    /// saved and stay on the home page.
     async fn playlists(&self) -> Result<Vec<Playlist>> {
         let client = self.inner.client().await?;
-        let (lists, mixes) = tokio::join!(library::playlists(&client), browse::mixes(&client));
+        let (lists, mixes) =
+            tokio::join!(library::playlists(&client), browse::saved_mixes(&client));
         let mixes = mixes?
-            .mine
             .into_iter()
             .filter_map(map::item)
             .filter_map(|item| match item {
