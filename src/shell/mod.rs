@@ -1143,6 +1143,8 @@ pub struct App {
     pub showing_help: bool,
     /// How far the key list is scrolled, on a terminal too short for it.
     pub help_scroll: u16,
+    /// What `/` has typed into the key list, to narrow it.
+    pub help_search: help::Search,
     /// A playlist edit's question, while it is up. It takes the keys.
     pub prompt: Option<playlistedit::Prompt>,
     /// A text setting being typed into, while its box is up.
@@ -4281,6 +4283,11 @@ impl App {
         if let Some(half) = self.half_page_key(key) {
             return Some(half);
         }
+        // The key list's search is text too, and the list is on top.
+        if self.showing_help && self.help_search.typing {
+            self.on_help_search_key(key.code);
+            return None;
+        }
         // What the user asked this key to mean, before anything reads it.
         // Rebinding is a translation rather than a table of its own: every
         // key below is guarded by what is on screen, and a table would have
@@ -4583,7 +4590,8 @@ impl App {
 
     fn on_help_key(&mut self, code: KeyCode) -> Option<Action> {
         // Too short a terminal cut the end of the list off, with no
-        // way to reach it: j and k scroll, anything else closes.
+        // way to reach it: j and k scroll, `/` searches, anything else
+        // closes.
         match code {
             KeyCode::Char('j') | KeyCode::Down => {
                 self.help_scroll = self.help_scroll.saturating_add(1);
@@ -4593,16 +4601,42 @@ impl App {
                 self.help_scroll = self.help_scroll.saturating_sub(1);
                 return None;
             }
+            KeyCode::Char('/') => {
+                self.help_search.typing = true;
+                return None;
+            }
             _ => {}
         }
         self.showing_help = false;
         self.help_scroll = 0;
+        self.help_search = help::Search::default();
         // The modal wrote over cells the image protocols had marked
         // `Skip`, and on the next frame they go back to `Skip` — so
         // nothing is written to undo it and a patch of the help stays
         // on the artwork. Only a full repaint clears that.
         self.repaint = Repaint::Wipe;
         None
+    }
+
+    /// While the key list's search has the keyboard, every letter is text:
+    /// enter keeps what it found, esc puts the whole list back.
+    fn on_help_search_key(&mut self, code: KeyCode) {
+        let search = &mut self.help_search;
+        match code {
+            KeyCode::Char(c) => search.query.push(c),
+            KeyCode::Backspace => {
+                search.query.pop();
+            }
+            KeyCode::Enter => search.typing = false,
+            KeyCode::Esc => *search = help::Search::default(),
+            KeyCode::Down => self.help_scroll = self.help_scroll.saturating_add(1),
+            KeyCode::Up => self.help_scroll = self.help_scroll.saturating_sub(1),
+            _ => return,
+        }
+        // A shorter list starts at its top, not where the longer one was.
+        if !matches!(code, KeyCode::Down | KeyCode::Up) {
+            self.help_scroll = 0;
+        }
     }
 
     /// The login screen's own prompts take every key: what is typed

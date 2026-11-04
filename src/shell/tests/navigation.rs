@@ -952,6 +952,64 @@ fn local_files_without_a_folder_ask_for_one_and_write_it() {
 }
 
 #[test]
+fn slash_in_the_help_searches_the_keys() {
+    let shown = |app: &mut App| {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(130, 60)).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        crate::shell::geometry::text(terminal.backend().buffer())
+    };
+    let mut app = signed_in(sidebar::Section::Music);
+    // A rebound key is still its own letter in the search.
+    let binds = [("quit".to_string(), "x".to_string())]
+        .into_iter()
+        .collect();
+    app.keymap = crate::shell::keymap::Keymap::from_config(&binds).0;
+    key(&mut app, KeyCode::Char('?'));
+    key(&mut app, KeyCode::Char('/'));
+    assert!(app.showing_help, "`/` searches rather than closing");
+    // Typed as most people type: no accent, any case, and `q` a letter.
+    for c in "SECONDS q".chars() {
+        key(&mut app, KeyCode::Char(c));
+    }
+    assert_eq!(app.help_search.query, "SECONDS q");
+    key(&mut app, KeyCode::Backspace);
+    key(&mut app, KeyCode::Backspace);
+    assert!(
+        app.showing_help && !app.should_quit,
+        "q was typed, not obeyed"
+    );
+    let help = shown(&mut app);
+    assert!(help.contains("ten seconds forward or back"), "{help}");
+    assert!(help.contains("Playing"), "under its heading: {help}");
+    assert!(
+        !help.contains("pause or resume"),
+        "the rest is filtered out: {help}"
+    );
+    assert!(
+        !help.contains("Moving around"),
+        "and so are empty headings: {help}"
+    );
+
+    // Enter keeps the result and gives the keys back: j scrolls, others close.
+    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Char('j'));
+    assert!(app.showing_help);
+    assert!(shown(&mut app).contains("ten seconds forward"));
+    key(&mut app, KeyCode::Char('x'));
+    assert!(!app.showing_help);
+
+    // Opened again, the whole list; esc while typing clears the search.
+    key(&mut app, KeyCode::Char('?'));
+    assert!(shown(&mut app).contains("pause or resume"));
+    key(&mut app, KeyCode::Char('/'));
+    key(&mut app, KeyCode::Char('z'));
+    key(&mut app, KeyCode::Esc);
+    assert!(app.showing_help);
+    assert!(shown(&mut app).contains("Moving around"));
+}
+
+#[test]
 fn what_opens_over_the_panes_is_drawn_on_top_of_them() {
     let shown = |app: &mut App| {
         let mut terminal =

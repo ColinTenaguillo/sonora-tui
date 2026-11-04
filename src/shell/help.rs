@@ -202,6 +202,62 @@ const BINDINGS: &[Binding] = &[
     },
 ];
 
+/// What `/` typed into the help, and whether it still has the keyboard.
+#[derive(Debug, Default, Clone)]
+pub struct Search {
+    pub query: String,
+    pub typing: bool,
+}
+
+/// The lines a search keeps: each binding it finds, under its heading, and
+/// a blank between groups. Everything when there is nothing typed.
+fn visible(query: &str) -> Vec<&'static Binding> {
+    if query.trim().is_empty() {
+        return BINDINGS.iter().collect();
+    }
+    let mut out: Vec<&Binding> = Vec::new();
+    let mut heading = None;
+    for b in BINDINGS {
+        if b.keys.is_empty() {
+            heading = (!b.what.is_empty()).then_some(b);
+            continue;
+        }
+        // Every word found as written, accents and case aside: the
+        // filter's looser subsequence match ("favo" in "forward ... views
+        // ... sections") lets most of a list this short through.
+        if super::fuzzy::rank(query, &[b.keys, b.what]) != Some(0) {
+            continue;
+        }
+        if let Some(h) = heading.take() {
+            if !out.is_empty() {
+                out.push(&BLANK);
+            }
+            out.push(h);
+        }
+        out.push(b);
+    }
+    out
+}
+
+const BLANK: Binding = Binding { keys: "", what: "" };
+
+/// What the bottom of the frame says: the search, when there is one, and
+/// the keys. In the frame rather than at the end of the list, where a list
+/// that overhangs would have scrolled it out of sight.
+fn footer(search: &Search, overhang: u16) -> (String, &'static str) {
+    let hint = match (search.typing, overhang) {
+        (true, _) => " enter to keep, esc to clear ",
+        (false, 0) => " / to search, any key to close ",
+        (false, _) => " j k to scroll, / to search, any key to close ",
+    };
+    let caret = if search.typing { "█" } else { "" };
+    let query = match search.typing || !search.query.is_empty() {
+        true => format!(" /{}{caret} ", search.query),
+        false => String::new(),
+    };
+    (query, hint)
+}
+
 /// Width of the key column, so the descriptions line up.
 const KEY_WIDTH: usize = 7;
 
@@ -219,16 +275,21 @@ fn centred(area: Rect, width: u16, height: u16) -> Rect {
 
 /// How many lines the list overhangs a terminal `height` rows tall: what
 /// `j` can scroll it by.
-pub fn overflow(height: u16) -> u16 {
-    (BINDINGS.len() as u16 + 2).saturating_sub(height)
+pub fn overflow(height: u16, query: &str) -> u16 {
+    (visible(query).len().max(1) as u16 + 2).saturating_sub(height)
 }
 
-pub fn render(frame: &mut Frame, area: Rect, palette: &Palette, scroll: u16) {
-    // Two for the border; the closing hint sits in it.
+pub fn render(frame: &mut Frame, area: Rect, palette: &Palette, scroll: u16, search: &Search) {
+    let shown = visible(&search.query);
+    // Two for the border; the closing hint sits in it. The whole list's
+    // height whatever a search found: a box that shrank as you typed left
+    // the rest of itself on the covers behind, which the image protocols
+    // never draw over again.
     let height = BINDINGS.len() as u16 + 2;
-    let overhang = overflow(area.height);
+    let overhang = overflow(area.height, &search.query);
     // As wide as the longest line wants, plus the border and a column of
     // air each side: a fixed width cut the end off the longer descriptions.
+    // Measured on the whole list, so the box does not narrow as you type.
     let longest = BINDINGS
         .iter()
         .map(|b| match b.keys.is_empty() {
@@ -242,7 +303,7 @@ pub fn render(frame: &mut Frame, area: Rect, palette: &Palette, scroll: u16) {
         return;
     }
 
-    let lines: Vec<Line> = BINDINGS
+    let mut lines: Vec<Line> = shown
         .iter()
         .map(|b| {
             if b.keys.is_empty() {
@@ -255,13 +316,11 @@ pub fn render(frame: &mut Frame, area: Rect, palette: &Palette, scroll: u16) {
             ])
         })
         .collect();
+    if lines.is_empty() {
+        lines.push(Line::styled("no key matches", palette.subtitle()));
+    }
 
-    // In the frame rather than at the end of the list, where a list that
-    // overhangs would have scrolled it out of sight.
-    let hint = match overhang {
-        0 => " any key to close ",
-        _ => " j k to scroll, any other key to close ",
-    };
+    let (query, hint) = footer(search, overhang);
 
     frame.render_widget(Clear, modal);
     frame.render_widget(
@@ -276,6 +335,7 @@ pub fn render(frame: &mut Frame, area: Rect, palette: &Palette, scroll: u16) {
                     .padding(ratatui::widgets::Padding::horizontal(1))
                     .title(" Keys ")
                     .title_style(palette.page_heading())
+                    .title_bottom(Line::styled(query, palette.title()).left_aligned())
                     .title_bottom(Line::styled(hint, palette.subtitle()).right_aligned()),
             ),
         modal,
@@ -300,10 +360,12 @@ mod tests {
         // At twenty rows the list overhangs: unscrolled, the top is drawn
         // and "quit" is not; scrolled by the overhang, the reverse.
         let draw = |scroll| {
-            let buf = crate::shell::geometry::draw(120, 20, |f, a, p| render(f, a, p, scroll));
+            let buf = crate::shell::geometry::draw(120, 20, |f, a, p| {
+                render(f, a, p, scroll, &Search::default())
+            });
             crate::shell::geometry::text(&buf)
         };
-        let over = overflow(20);
+        let over = overflow(20, "");
         assert!(over > 0);
         let top = draw(0);
         assert!(
@@ -316,12 +378,35 @@ mod tests {
             bottom.contains("quit") && !bottom.contains("Moving around"),
             "{bottom}"
         );
-        assert_eq!(overflow(60), 0, "a tall terminal has nothing to scroll");
+        assert_eq!(overflow(60, ""), 0, "a tall terminal has nothing to scroll");
+    }
+
+    #[test]
+    fn a_search_keeps_the_box_where_the_whole_list_drew_it() {
+        // Shrunk to what it found, the box left the rest of the larger one
+        // on the covers behind, which the image protocols never redraw.
+        let frame_rows = |query: &str| {
+            let search = Search {
+                query: query.into(),
+                typing: true,
+            };
+            let buf = crate::shell::geometry::draw(140, 60, |f, a, p| render(f, a, p, 0, &search));
+            let text = crate::shell::geometry::text(&buf);
+            let rows: Vec<usize> = text
+                .lines()
+                .enumerate()
+                .filter(|(_, l)| l.contains('╭') || l.contains('╰'))
+                .map(|(i, _)| i)
+                .collect();
+            rows
+        };
+        assert_eq!(frame_rows("next"), frame_rows(""));
     }
 
     #[test]
     fn the_longest_line_is_drawn_to_its_end() {
-        let buf = crate::shell::geometry::draw(120, 60, |f, a, p| render(f, a, p, 0));
+        let buf =
+            crate::shell::geometry::draw(120, 60, |f, a, p| render(f, a, p, 0, &Search::default()));
         let text = crate::shell::geometry::text(&buf);
         for b in BINDINGS.iter().filter(|b| !b.what.is_empty()) {
             let tail: String = b
@@ -357,7 +442,8 @@ mod tests {
         let palette = Palette::detect();
         for (w, h) in [(1, 1), (10, 4), (56, 24), (200, 60)] {
             let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-            term.draw(|f| render(f, f.area(), &palette, 3)).unwrap();
+            term.draw(|f| render(f, f.area(), &palette, 3, &Search::default()))
+                .unwrap();
         }
     }
 
