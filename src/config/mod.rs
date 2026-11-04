@@ -146,7 +146,8 @@ pub struct DiscordConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct LocalConfig {
-    /// `~` stands for the home directory, as it does in the shell.
+    /// `~` stands for the home directory, as it does in the shell, before
+    /// either `/` or `\`.
     pub folders: Vec<String>,
 }
 
@@ -158,7 +159,8 @@ impl LocalConfig {
             .iter()
             .map(|f| f.trim())
             .filter(|f| !f.is_empty())
-            .map(|f| match (f.strip_prefix("~/"), &home) {
+            // `~\` too: it is how a Windows user writes the same thing.
+            .map(|f| match (f.strip_prefix('~').and_then(|r| r.strip_prefix(['/', '\\'])), &home) {
                 (Some(rest), Some(home)) => home.join(rest),
                 _ if f == "~" => home.clone().unwrap_or_else(|| PathBuf::from(f)),
                 _ => PathBuf::from(f),
@@ -552,11 +554,17 @@ mod tests {
                 " ".into(),
                 "/media/flac".into(),
                 "~".into(),
+                "~\\Videos".into(),
             ],
         };
         assert_eq!(
             local.folders(),
-            vec![home.join("Music"), PathBuf::from("/media/flac"), home]
+            vec![
+                home.join("Music"),
+                PathBuf::from("/media/flac"),
+                home.clone(),
+                home.join("Videos"),
+            ]
         );
     }
 
