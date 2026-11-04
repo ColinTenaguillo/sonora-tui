@@ -52,15 +52,16 @@ in the terminal, over [sonora](https://github.com/sonorahq/sonora)'s `music` cra
 - Scrobbling to Last.fm, Libre.fm, ListenBrainz and Maloja
 - Discord Rich Presence
 - The keyboard's media keys and the desktop's player widget — MPRIS on
-  Linux, Now Playing on macOS
+  Linux, Now Playing on macOS (none yet on Windows)
 - Cover art through the terminal's image protocol, or half blocks where
   there is none
 - Seven themes, and any colour by hand
 
 ## Install
 
-Runs on macOS 12 or later (Apple Silicon, Intel) and Linux (x86_64,
-aarch64). On Linux it plays through ALSA, which every desktop has.
+Runs on macOS 12 or later (Apple Silicon, Intel), Linux (x86_64,
+aarch64) and Windows (x86_64). On Linux it plays through ALSA, which every
+desktop has.
 
 ### Homebrew
 
@@ -80,9 +81,15 @@ for a newer release.
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/ColinTenaguillo/sonora-tui/releases/latest/download/sonora-tui-installer.sh | sh
 ```
 
+On Windows, in PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/ColinTenaguillo/sonora-tui/releases/latest/download/sonora-tui-installer.ps1 | iex"
+```
+
 ### Nix
 
-The flake builds on the four platforms above:
+The flake builds on the four macOS and Linux platforms above:
 
 ```sh
 nix run github:ColinTenaguillo/sonora-tui
@@ -92,7 +99,7 @@ nix run github:ColinTenaguillo/sonora-tui
 
 Each [release](https://github.com/ColinTenaguillo/sonora-tui/releases/latest)
 carries an archive per platform and its SHA-256. Unpack it and put
-`sonora-tui` on your `PATH`.
+`sonora-tui` (`sonora-tui.exe` on Windows) on your `PATH`.
 
 ### From source
 
@@ -200,7 +207,8 @@ every third-party TIDAL client — sends the `client_id` of one of them, and
 TIDAL believes it is talking to that application. That is a
 misrepresentation, and it is worth knowing before you run it. It is nothing
 private to you: your login happens in your browser, and your session token
-stays on your machine, mode `0600`.
+stays on your machine, mode `0600` (on Windows, under your profile's own
+access rules).
 
 There is no legitimate way to replace them today:
 
@@ -457,14 +465,14 @@ list_view = true    # Playlists and Albums as a list rather than covers; `v`
 
 ## Where things live
 
-| What | Linux | macOS |
-|---|---|---|
-| Config | `~/.config/sonora-tui/config.toml` | `~/Library/Application Support/sonora-tui/config.toml` |
-| TIDAL session token | alongside the config, mode `0600` | same |
-| Other services' sessions | the provider's credential store, under the config directory | same |
-| Scrobbling accounts | `scrobble.json` alongside the config, mode `0600` | same |
-| Local-files index, Widevine module | under the cache directory | same |
-| Log | `~/.cache/sonora-tui/sonora-tui.log` | `~/Library/Caches/sonora-tui/sonora-tui.log` |
+| What | Linux | macOS | Windows |
+|---|---|---|---|
+| Config | `~/.config/sonora-tui/config.toml` | `~/Library/Application Support/sonora-tui/config.toml` | `%APPDATA%\sonora-tui\config\config.toml` |
+| TIDAL session token | alongside the config, mode `0600` | same | alongside the config, under your profile's own access rules |
+| Other services' sessions | the provider's credential store, under the config directory | same | same |
+| Scrobbling accounts | `scrobble.json` alongside the config, mode `0600` | same | `scrobble.json` alongside the config, under your profile's own access rules |
+| Local-files index, Widevine module | under the cache directory | same | same |
+| Log | `~/.cache/sonora-tui/sonora-tui.log` | `~/Library/Caches/sonora-tui/sonora-tui.log` | `%LOCALAPPDATA%\sonora-tui\cache\sonora-tui.log` |
 
 A config, a session or a cache left by ratidal, this app's earlier name, is
 moved under the new name on the first start.
