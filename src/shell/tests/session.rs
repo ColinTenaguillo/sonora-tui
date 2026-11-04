@@ -566,6 +566,20 @@ fn a_protected_service_asks_for_the_module_and_the_keys_answer_it() {
     app.update(Action::CdmFound(Some(music::drm::Origin::Installed)));
     assert_eq!(app.cdm, drmview::Cdm::Ready(music::drm::Origin::Installed));
     assert!(app.status.as_deref().unwrap_or("").contains("browser"));
+
+    // A download that finished says where the module came from, and one that
+    // failed says why and leaves it missing; both clear the offer off the
+    // covers.
+    let mut app = signed_in(sidebar::Section::Tracks);
+    app.update(Action::CdmReady(music::drm::Origin::Fetched));
+    assert_eq!(app.cdm, drmview::Cdm::Ready(music::drm::Origin::Fetched));
+    assert!(app.status.as_deref().unwrap_or("").contains("from Google"));
+    assert_eq!(app.take_repaint(), Repaint::Wipe);
+
+    app.update(Action::CdmFailed("the download broke off".into()));
+    assert_eq!(app.cdm, drmview::Cdm::Missing);
+    assert_eq!(app.status.as_deref(), Some("the download broke off"));
+    assert_eq!(app.take_repaint(), Repaint::Wipe);
 }
 
 #[test]

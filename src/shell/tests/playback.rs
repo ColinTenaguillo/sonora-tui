@@ -599,6 +599,16 @@ fn changing_the_volume_reaches_the_player() {
 }
 
 #[test]
+fn toggling_pause_flips_what_the_bar_shows_until_the_engine_says_otherwise() {
+    let mut app = signed_in(sidebar::Section::Tracks);
+    app.now_playing.playing = true;
+    assert!(app.update(Action::TogglePause).is_none());
+    assert!(!app.now_playing.playing);
+    app.update(Action::TogglePause);
+    assert!(app.now_playing.playing);
+}
+
+#[test]
 fn holding_dot_is_not_pulled_back_by_reports_from_before_the_seek() {
     // Held, `.` repeats faster than a stream can seek: the engine still
     // reports where it was, or where an earlier seek of the burst landed,

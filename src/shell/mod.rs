@@ -2656,10 +2656,130 @@ impl App {
 
     /// Apply one action. Returns a follow-up action when one is implied.
     ///
-    /// A flat dispatcher: every arm that decides anything does so in a
-    /// method of its own, below. The guards stay here, in this order, since
-    /// they are what picks between the arms that share a pattern.
+    /// Only routes: each action goes to the handler for its concern, below,
+    /// and the match is exhaustive so a new action cannot be left unrouted.
+    /// The guards that pick between arms sharing a pattern -- `SeeAll`,
+    /// `ActivateSelection` -- live in their handler, in their old order.
     pub fn update(&mut self, action: Action) -> Option<Action> {
+        match action {
+            a @ (Action::Quit | Action::Key(..) | Action::Error(..) | Action::Tick) => {
+                self.on_app_action(a)
+            }
+            a @ (Action::BeginLogin
+            | Action::BeginGuest
+            | Action::Answer(..)
+            | Action::OpenSignInWindow
+            | Action::CancelLogin
+            | Action::Typed(..)
+            | Action::PasteCookies) => self.on_sign_in_action(a),
+            a @ (Action::SessionOpened(..)
+            | Action::SessionExpired
+            | Action::SessionReady
+            | Action::SwitchProvider
+            | Action::NextService
+            | Action::LoginPrompt(..)
+            | Action::ScrobblersLinked(..)) => self.on_session_action(a),
+            a @ (Action::CdmFound(..)
+            | Action::AnswerCdm(..)
+            | Action::CdmOffered { .. }
+            | Action::CdmReady(..)
+            | Action::CdmFailed(..)) => self.on_cdm_action(a),
+            a @ (Action::TracksLoaded(..)
+            | Action::CollectionLoaded { .. }
+            | Action::ArtistLoaded { .. }
+            | Action::PageLoaded { .. }
+            | Action::OpenTarget { .. }
+            | Action::CloseCollection
+            | Action::LyricsLoaded { .. }) => self.on_reply_action(a),
+            a @ (Action::ExploreLoaded(..)
+            | Action::PlaylistsLoaded(..)
+            | Action::AlbumsLoaded(..)
+            | Action::ArtistsLoaded(..)
+            | Action::HomeLoaded(..)
+            | Action::FeedLoaded(..)
+            | Action::FavouriteIdsLoaded(..)) => self.on_collection_action(a),
+            a @ (Action::TrackNext
+            | Action::TrackPrevious
+            | Action::SidebarNext
+            | Action::SidebarPrevious
+            | Action::HalfPage { .. }
+            | Action::RowNext
+            | Action::RowPrevious) => self.on_vertical_action(a),
+            a @ (Action::CarouselNext
+            | Action::CarouselPrevious
+            | Action::ArtistRight
+            | Action::ArtistLeft
+            | Action::SearchRight
+            | Action::SearchLeft) => self.on_sideways_action(a),
+            a @ Action::SeeAll => self.on_see_all_action(a),
+            a @ (Action::ActivateSelection | Action::OpenTrackAlbum | Action::OpenTrackArtist) => {
+                self.on_open_action(a)
+            }
+            a @ (Action::FetchTrackAlbum(..)
+            | Action::FetchTrackArtist(..)
+            | Action::GoToSection(..)
+            | Action::GoHome
+            | Action::GoBack
+            | Action::GoForward
+            | Action::PlayTrackRadio) => self.on_navigation_action(a),
+            a @ (Action::BeginSearch
+            | Action::RunSearch(..)
+            | Action::SearchLoaded(..)
+            | Action::CloseSearch
+            | Action::NextSearchTab) => self.on_search_action(a),
+            a @ (Action::QueueNext
+            | Action::QueuePrevious
+            | Action::TogglePause
+            | Action::SeekForward
+            | Action::SeekBack
+            | Action::Playback(..)
+            | Action::PlaybackFailed { .. }) => self.on_transport_action(a),
+            a @ (Action::ToggleShuffle
+            | Action::CycleRepeat
+            | Action::AutoplayFailed(..)
+            | Action::ToggleAutoplay
+            | Action::QueueRadio(..)
+            | Action::QueueTrackNext
+            | Action::QueueTrackLast) => self.on_queue_action(a),
+            a @ (Action::FollowChanged { .. }
+            | Action::RadioNamed { .. }
+            | Action::Edit(..)
+            | Action::RemoveFromPlaylist { .. }
+            | Action::PlaylistEdited { .. }
+            | Action::FavouriteChanged { .. }) => self.on_library_action(a),
+            a @ (Action::SettingTyped(..)
+            | Action::SettingChanged(..)
+            | Action::OutputsListed(..)
+            | Action::OutputOpened(..)
+            | Action::CycleSleep
+            | Action::ToggleLyrics) => self.on_settings_action(a),
+            // The loop does these: it has the client, the engine and the
+            // devices, and owns the channel to the audio thread. Nothing here
+            // changes until it answers -- a sign-in's prompt stays up, emptied.
+            Action::Connect(_)
+            | Action::LookForCdm
+            | Action::DownloadCdm
+            | Action::LoadHome
+            | Action::LoadExplore
+            | Action::LoadFeed
+            | Action::LoadFavourites
+            | Action::SetVolume(_)
+            | Action::Preload(_)
+            | Action::RestartEngine
+            | Action::LoadLyrics(_)
+            | Action::PlayQueued
+            | Action::Autoplay { .. }
+            | Action::ToggleFavourite
+            | Action::ToggleFollow
+            | Action::ListOutputs
+            | Action::UseOutput
+            | Action::RemoveQueued(_)
+            | Action::JumpInQueue(_) => None,
+        }
+    }
+
+    /// The app itself: quitting, keys, errors and the clock.
+    fn on_app_action(&mut self, action: Action) -> Option<Action> {
         match action {
             Action::Quit => {
                 self.should_quit = true;
@@ -2671,6 +2791,13 @@ impl App {
                 self.expire_status();
                 self.sleep_due()
             }
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// The sign-in prompts and what is typed into them.
+    fn on_sign_in_action(&mut self, action: Action) -> Option<Action> {
+        match action {
             Action::BeginLogin => self.begin_login(),
             Action::BeginGuest => {
                 self.login = login::LoginState::Busy("Continuing as a guest…".into());
@@ -2688,22 +2815,26 @@ impl App {
                 self.login = login::LoginState::Busy("Sign in in the window that opened…".into());
                 None
             }
-            // The connection is made by the loop; the prompt stays up,
-            // emptied, until it answers.
-            Action::Connect(_) => None,
+            Action::CancelLogin => self.cancel_login(),
+            Action::Typed(field, typed) => self.on_typed(field, typed),
+            Action::PasteCookies => {
+                self.login = login::LoginState::Secret {
+                    typed: login::Secret::default(),
+                };
+                None
+            }
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// A session opening, ending or changing service.
+    fn on_session_action(&mut self, action: Action) -> Option<Action> {
+        match action {
             // Not `SwitchProvider`: that signs in at once, and a sign-in
             // for every service passed on the way to the wanted one would
             // open seven browser tabs. The new service waits for Enter --
             // except a folder of files, which has nothing to ask.
-            Action::CancelLogin => self.cancel_login(),
-            Action::NextService => {
-                settings::cycle(&mut self.config, settings::Setting::Service, true);
-                self.save_config();
-                self.leave_service();
-                let local = self.config.provider.kind == crate::config::ProviderKind::Local;
-                (local && !self.config.local.folders().is_empty()).then_some(Action::BeginLogin)
-            }
-            Action::Typed(field, typed) => self.on_typed(field, typed),
+            Action::NextService => self.next_service(),
             Action::SessionOpened(session) => {
                 self.session = Some(session.clone());
                 self.login_input = None;
@@ -2714,18 +2845,32 @@ impl App {
             }
             Action::SessionExpired => self.on_session_expired(),
             Action::LoginPrompt(prompt) => self.on_login_prompt(prompt),
-            Action::PasteCookies => {
-                self.login = login::LoginState::Secret {
-                    typed: login::Secret::default(),
-                };
-                None
-            }
             // A service whose streams are encrypted needs the module, and
             // the machine is searched once an account is in -- never for
             // a service that does not need it.
             Action::SessionReady => self.on_session_ready(),
-            // Both are the loop's.
-            Action::LookForCdm | Action::DownloadCdm => None,
+            Action::ScrobblersLinked(linked, refused) => self.on_scrobblers_linked(linked, refused),
+            Action::SwitchProvider => {
+                self.leave_service();
+                Some(Action::BeginLogin)
+            }
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// On to the next service on the sign-in screen. Only a folder of files
+    /// already chosen signs in at once; any other waits for Enter.
+    fn next_service(&mut self) -> Option<Action> {
+        settings::cycle(&mut self.config, settings::Setting::Service, true);
+        self.save_config();
+        self.leave_service();
+        let local = self.config.provider.kind == crate::config::ProviderKind::Local;
+        (local && !self.config.local.folders().is_empty()).then_some(Action::BeginLogin)
+    }
+
+    /// The Widevine module: finding it, offering it, and the answer.
+    fn on_cdm_action(&mut self, action: Action) -> Option<Action> {
+        match action {
             Action::CdmFound(found) => self.on_cdm_found(found),
             Action::AnswerCdm(yes) => self.answer_cdm(yes),
             Action::CdmOffered { version, license } => {
@@ -2748,22 +2893,13 @@ impl App {
                 self.say(message);
                 None
             }
-            Action::TrackNext => {
-                self.move_vertical(Dir::Down);
-                None
-            }
-            Action::TrackPrevious => {
-                self.move_vertical(Dir::Up);
-                None
-            }
-            Action::SidebarNext => {
-                self.go_to_section(true);
-                self.load_if_needed()
-            }
-            Action::SidebarPrevious => {
-                self.go_to_section(false);
-                self.load_if_needed()
-            }
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// A reply for the view that is open, and closing it.
+    fn on_reply_action(&mut self, action: Action) -> Option<Action> {
+        match action {
             Action::TracksLoaded(tracks) => self.on_tracks_loaded(tracks),
             Action::CollectionLoaded { request, tracks } => {
                 self.on_collection_loaded(request, tracks)
@@ -2774,6 +2910,30 @@ impl App {
                 title,
                 home,
             } => self.on_page_loaded(request, title, home.rows),
+            Action::LyricsLoaded { id, found } => {
+                self.lyrics.found.insert(id, found);
+                None
+            }
+            // What the fetch found. The pane is already waiting under the
+            // name the row knew; the reply is named by the API, and that
+            // is the name the tracks or the page will arrive under, so the
+            // wait is renamed rather than opened again -- a second open
+            // was a second level to step back out of.
+            Action::OpenTarget {
+                request,
+                target,
+                title,
+                subtitle,
+                cover,
+            } => self.on_open_target(request, target, title, subtitle, cover),
+            Action::CloseCollection => self.close_collection(),
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// The account's lists and pages arriving.
+    fn on_collection_action(&mut self, action: Action) -> Option<Action> {
+        match action {
             Action::ExploreLoaded(home) => {
                 // Explore's own list is named by the nav entry, not by a
                 // heading of its own -- a genre's name left over here would
@@ -2810,8 +2970,40 @@ impl App {
                 self.refresh_collection_home();
                 None
             }
-            Action::CarouselNext => self.move_horizontal(Dir::Right),
-            Action::CarouselPrevious => self.move_horizontal(Dir::Left),
+            Action::FeedLoaded(cards) => {
+                self.feed_cards = cards;
+                self.rebuild_feed();
+                None
+            }
+            Action::FavouriteIdsLoaded(ids) => {
+                self.favourites.artists.extend(ids.artists);
+                self.favourites.albums = ids.albums.into_iter().collect();
+                self.favourites.playlists = ids.playlists.into_iter().collect();
+                None
+            }
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// Moving down and up: rows, the sidebar, half a page.
+    fn on_vertical_action(&mut self, action: Action) -> Option<Action> {
+        match action {
+            Action::TrackNext => {
+                self.move_vertical(Dir::Down);
+                None
+            }
+            Action::TrackPrevious => {
+                self.move_vertical(Dir::Up);
+                None
+            }
+            Action::SidebarNext => {
+                self.go_to_section(true);
+                self.load_if_needed()
+            }
+            Action::SidebarPrevious => {
+                self.go_to_section(false);
+                self.load_if_needed()
+            }
             Action::RowNext => {
                 // A track row is a grid, so down has somewhere to go inside
                 // it before leaving for the next row.
@@ -2826,153 +3018,16 @@ impl App {
                 self.rows_on_screen_mut().up(visible, cols, width);
                 None
             }
-            Action::LoadHome => None,
-            // The request is a side effect in run(), like LoadHome's.
-            Action::LoadExplore => None,
-            Action::LoadFeed => None,
-            Action::LoadFavourites => None,
-            Action::FeedLoaded(cards) => {
-                self.feed_cards = cards;
-                self.rebuild_feed();
-                None
-            }
-            Action::BeginSearch => {
-                // Opening the box does not clear what a previous search
-                // found: reopening it to refine a query should not blank
-                // the results being refined.
-                let state = self.search.get_or_insert_with(SearchState::default);
-                state.typing = true;
-                None
-            }
-            // The request is a side effect in run(); the view only notes
-            // that it is out.
-            Action::RunSearch(_) => self.search_sent(),
-            Action::SearchLoaded(results) => self.on_search_loaded(*results),
-            Action::CloseSearch => {
-                self.search = None;
-                None
-            }
-            // Moving through the queue is decided here; the loop turns the
-            // resulting track into a stream. Split that way so the rules can
-            // be tested without a sound card.
-            Action::QueueNext => self.queue_next(),
-            Action::QueuePrevious => self.queue_previous(),
-            // Sent on to the player by the loop; nothing to change here.
-            Action::SetVolume(_) => None,
-            // Both are the loop's: it has the engine.
-            Action::Preload(_) | Action::RestartEngine => None,
-            Action::CycleSleep => {
-                self.cycle_sleep();
-                None
-            }
-            Action::ToggleLyrics => {
-                self.lyrics.toggle();
-                // The pane goes over cells the image protocols skip, so
-                // every cell is written again -- but over what is up,
-                // without a clear: a wipe blanked the cover until the
-                // terminal had taken it again, which a large one shows.
-                self.repaint = self.repaint.max(Repaint::Redraw);
-                self.lyrics_wanted()
-            }
-            // The search is the loop's.
-            Action::LoadLyrics(_) => None,
-            Action::LyricsLoaded { id, found } => {
-                self.lyrics.found.insert(id, found);
-                None
-            }
-            Action::ScrobblersLinked(linked, refused) => self.on_scrobblers_linked(linked, refused),
-            Action::ToggleShuffle => {
-                let on = !self.queue.shuffled();
-                self.queue
-                    .set_shuffled(on, &mut crate::playback::clock_rng());
-                // No message: the transport row lights the button, which
-                // says it better than a notice that covers the view.
-                None
-            }
-            Action::CycleRepeat => {
-                self.queue.repeat = self.queue.repeat.cycle();
-                None
-            }
-            // Handled in the loop, which has the client to fetch a stream
-            // with; this arm keeps `update` alone from silently doing
-            // nothing.
-            Action::PlayQueued => None,
-            // The fetch belongs to the loop, which has the client; these
-            // arms are here so the match stays exhaustive.
-            Action::Autoplay { .. } => None,
-            Action::AutoplayFailed(seed) => {
-                self.autoplay_fetching = false;
-                self.autoplay_dead_end = Some(seed);
-                None
-            }
             Action::HalfPage { down } => self.on_half_page(down),
-            Action::ToggleAutoplay => self.toggle_autoplay(),
-            // The pane is taken now, under the name the row knows, rather
-            // than when the track comes back: the fetch is a round trip
-            // before the one that brings the album, and for that first
-            // trip nothing changed on screen -- the key looked dead.
-            Action::FetchTrackAlbum(id) => self.fetch_track_album(id),
-            Action::FetchTrackArtist(id) => self.fetch_track_artist(id),
-            // What the fetch found. The pane is already waiting under the
-            // name the row knew; the reply is named by the API, and that
-            // is the name the tracks or the page will arrive under, so the
-            // wait is renamed rather than opened again -- a second open
-            // was a second level to step back out of.
-            Action::OpenTarget {
-                request,
-                target,
-                title,
-                subtitle,
-                cover,
-            } => self.on_open_target(request, target, title, subtitle, cover),
-            Action::QueueRadio(tracks) => self.on_queue_radio(tracks),
-            Action::ToggleFavourite | Action::ToggleFollow => None,
-            Action::FollowChanged {
-                what,
-                name,
-                following,
-            } => self.on_follow_changed(what, name, following),
-            Action::RadioNamed { seed, playlist } => {
-                self.favourites.radios.insert(seed, playlist);
-                None
-            }
-            Action::FavouriteIdsLoaded(ids) => {
-                self.favourites.artists.extend(ids.artists);
-                self.favourites.albums = ids.albums.into_iter().collect();
-                self.favourites.playlists = ids.playlists.into_iter().collect();
-                None
-            }
-            // Applied here rather than in the loop, for the same reason
-            // opening is: the loop's copy could only be exercised by running
-            // the whole app.
-            Action::SeeAll if self.on_artist() => self.see_all_on_artist(),
-            // A Feed section is whole in hand -- the four are cut from one
-            // reply -- so this opens what is held rather than asking for a
-            // page that was never fetched.
-            Action::SeeAll if self.on_feed() => self.see_all_of_row(),
-            // A Top results row offers "See all" when its cards run past the
-            // edge; the whole of what was found is on the kind's own tab.
-            Action::SeeAll if self.on_search() => self.see_all_on_search(),
-            // A home row, or one of a page opened from Explore: whole in
-            // hand, like the Feed's, so it opens from what is held.
-            Action::SeeAll if self.on_home() => self.see_all_of_row(),
-            Action::SeeAll => None,
-            // The edits are requests the loop makes; the answer comes
-            // back as `PlaylistEdited` or `Error`. Said now, so the wait
-            // for the service -- several round trips on TIDAL -- is not
-            // silence.
-            Action::Edit(edit) => self.on_edit(edit),
-            Action::RemoveFromPlaylist { .. } => {
-                self.say("taking the track out…");
-                None
-            }
-            Action::PlaylistEdited {
-                message,
-                uuid,
-                deleted,
-                count_delta,
-            } => self.on_playlist_edited(message, uuid, deleted, count_delta),
-            Action::FavouriteChanged { id, favourite } => self.on_favourite_changed(id, favourite),
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// Moving along a row: carousels, an artist's sections, search results.
+    fn on_sideways_action(&mut self, action: Action) -> Option<Action> {
+        match action {
+            Action::CarouselNext => self.move_horizontal(Dir::Right),
+            Action::CarouselPrevious => self.move_horizontal(Dir::Left),
             Action::ArtistRight => {
                 self.artist_move(Dir::Right);
                 None
@@ -2989,15 +3044,35 @@ impl App {
                 self.search_move(Dir::Left);
                 None
             }
-            Action::NextSearchTab => self.next_search_tab(), // the fetch is a side effect in run()
-            Action::PlaybackFailed { id, message } => self.on_playback_failed(id, message),
-            Action::TogglePause => {
-                self.now_playing.playing = !self.now_playing.playing;
-                None
-            }
-            Action::SeekForward => self.seek(true),
-            Action::SeekBack => self.seek(false),
-            Action::Playback(event) => self.on_playback(event),
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// "See all" of whatever row is on screen.
+    fn on_see_all_action(&mut self, action: Action) -> Option<Action> {
+        match action {
+            // Applied here rather than in the loop, for the same reason
+            // opening is: the loop's copy could only be exercised by running
+            // the whole app.
+            Action::SeeAll if self.on_artist() => self.see_all_on_artist(),
+            // A Feed section is whole in hand -- the four are cut from one
+            // reply -- so this opens what is held rather than asking for a
+            // page that was never fetched.
+            Action::SeeAll if self.on_feed() => self.see_all_of_row(),
+            // A Top results row offers "See all" when its cards run past the
+            // edge; the whole of what was found is on the kind's own tab.
+            Action::SeeAll if self.on_search() => self.see_all_on_search(),
+            // A home row, or one of a page opened from Explore: whole in
+            // hand, like the Feed's, so it opens from what is held.
+            Action::SeeAll if self.on_home() => self.see_all_of_row(),
+            Action::SeeAll => None,
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// Enter on a selection, and opening the album or artist of a track.
+    fn on_open_action(&mut self, action: Action) -> Option<Action> {
+        match action {
             // Opening is applied here rather than in the loop so it can be
             // tested: the loop's copy could only be exercised by running the
             // whole app, and a test that called the helpers directly passed
@@ -3006,35 +3081,8 @@ impl App {
             // folder row it opens the box; on the link row it links; on a
             // toggle it flips, as l would.
             Action::ActivateSelection if self.on_settings() => self.activate_setting(),
-            Action::SettingTyped(setting, text) => {
-                settings::set_text(&mut self.config, setting, &text);
-                self.save_config();
-                Some(Action::SettingChanged(setting))
-            }
-            // What the shell itself reads live; the loop does the rest.
-            Action::SettingChanged(setting) => self.on_setting_changed(setting),
-            // The loop's to do: it lists and opens the devices.
-            Action::ListOutputs | Action::UseOutput => None,
-            Action::OutputsListed(outputs) => {
-                self.outputs = outputs;
-                None
-            }
-            Action::OutputOpened(Ok(label)) => {
-                self.say(format!("Playing on {label}"));
-                Some(Action::RestartEngine)
-            }
-            Action::OutputOpened(Err(why)) => {
-                self.say(why);
-                None
-            }
-            Action::SwitchProvider => {
-                self.leave_service();
-                Some(Action::BeginLogin)
-            }
             Action::ActivateSelection if self.on_grid() || self.on_home() => self.activate_card(),
             Action::ActivateSelection => None, // playback is a side effect in run()
-            // The fetch belongs to the loop, which has the client. These
-            // arms keep the match exhaustive.
             // The pane is taken here, so the reply has a view to land in:
             // a reply is only accepted for the title that is open, and
             // nothing opened one -- every album and artist a key asked for
@@ -3042,13 +3090,19 @@ impl App {
             // the target before this runs, so it sees the same selection.
             Action::OpenTrackAlbum => self.open_track_album(),
             Action::OpenTrackArtist => self.open_track_artist(),
-            // Both change what is playing, which only the loop can do: it
-            // owns the channel to the audio thread.
-            Action::RemoveQueued(_) | Action::JumpInQueue(_) => None,
-            // These only add to the queue, so nothing has to reach the
-            // audio thread: what is playing carries on.
-            Action::QueueTrackNext => self.queue_track(true),
-            Action::QueueTrackLast => self.queue_track(false),
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// Going somewhere: a section, home, back, forward, a track's album, artist or radio.
+    fn on_navigation_action(&mut self, action: Action) -> Option<Action> {
+        match action {
+            // The pane is taken now, under the name the row knows, rather
+            // than when the track comes back: the fetch is a round trip
+            // before the one that brings the album, and for that first
+            // trip nothing changed on screen -- the key looked dead.
+            Action::FetchTrackAlbum(id) => self.fetch_track_album(id),
+            Action::FetchTrackArtist(id) => self.fetch_track_artist(id),
             Action::PlayTrackRadio => self.play_track_radio(),
             Action::GoToSection(section) => self.go_to(section),
             Action::GoHome => {
@@ -3066,7 +3120,152 @@ impl App {
                 self.go_forward();
                 self.load_if_needed()
             }
-            Action::CloseCollection => self.close_collection(),
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// The search box and its results.
+    fn on_search_action(&mut self, action: Action) -> Option<Action> {
+        match action {
+            Action::BeginSearch => {
+                // Opening the box does not clear what a previous search
+                // found: reopening it to refine a query should not blank
+                // the results being refined.
+                let state = self.search.get_or_insert_with(SearchState::default);
+                state.typing = true;
+                None
+            }
+            // The request is a side effect in run(); the view only notes
+            // that it is out.
+            Action::RunSearch(_) => self.search_sent(),
+            Action::SearchLoaded(results) => self.on_search_loaded(*results),
+            Action::CloseSearch => {
+                self.search = None;
+                None
+            }
+            Action::NextSearchTab => self.next_search_tab(), // the fetch is a side effect in run()
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// The transport: next, previous, pause, seek, and the engine's events.
+    fn on_transport_action(&mut self, action: Action) -> Option<Action> {
+        match action {
+            // Moving through the queue is decided here; the loop turns the
+            // resulting track into a stream. Split that way so the rules can
+            // be tested without a sound card.
+            Action::QueueNext => self.queue_next(),
+            Action::QueuePrevious => self.queue_previous(),
+            Action::PlaybackFailed { id, message } => self.on_playback_failed(id, message),
+            Action::TogglePause => {
+                self.now_playing.playing = !self.now_playing.playing;
+                None
+            }
+            Action::SeekForward => self.seek(true),
+            Action::SeekBack => self.seek(false),
+            Action::Playback(event) => self.on_playback(event),
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// The queue's modes and what is added to it.
+    fn on_queue_action(&mut self, action: Action) -> Option<Action> {
+        match action {
+            Action::ToggleShuffle => {
+                let on = !self.queue.shuffled();
+                self.queue
+                    .set_shuffled(on, &mut crate::playback::clock_rng());
+                // No message: the transport row lights the button, which
+                // says it better than a notice that covers the view.
+                None
+            }
+            Action::CycleRepeat => {
+                self.queue.repeat = self.queue.repeat.cycle();
+                None
+            }
+            Action::AutoplayFailed(seed) => {
+                self.autoplay_fetching = false;
+                self.autoplay_dead_end = Some(seed);
+                None
+            }
+            Action::ToggleAutoplay => self.toggle_autoplay(),
+            Action::QueueRadio(tracks) => self.on_queue_radio(tracks),
+            // These only add to the queue, so nothing has to reach the
+            // audio thread: what is playing carries on.
+            Action::QueueTrackNext => self.queue_track(true),
+            Action::QueueTrackLast => self.queue_track(false),
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// Writes to the account: favourites, follows, playlist edits.
+    fn on_library_action(&mut self, action: Action) -> Option<Action> {
+        match action {
+            Action::FollowChanged {
+                what,
+                name,
+                following,
+            } => self.on_follow_changed(what, name, following),
+            Action::RadioNamed { seed, playlist } => {
+                self.favourites.radios.insert(seed, playlist);
+                None
+            }
+            // The edits are requests the loop makes; the answer comes
+            // back as `PlaylistEdited` or `Error`. Said now, so the wait
+            // for the service -- several round trips on TIDAL -- is not
+            // silence.
+            Action::Edit(edit) => self.on_edit(edit),
+            Action::RemoveFromPlaylist { .. } => {
+                self.say("taking the track out…");
+                None
+            }
+            Action::PlaylistEdited {
+                message,
+                uuid,
+                deleted,
+                count_delta,
+            } => self.on_playlist_edited(message, uuid, deleted, count_delta),
+            Action::FavouriteChanged { id, favourite } => self.on_favourite_changed(id, favourite),
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// Settings, the output device, the sleep timer and the lyrics pane.
+    fn on_settings_action(&mut self, action: Action) -> Option<Action> {
+        match action {
+            Action::CycleSleep => {
+                self.cycle_sleep();
+                None
+            }
+            Action::ToggleLyrics => {
+                self.lyrics.toggle();
+                // The pane goes over cells the image protocols skip, so
+                // every cell is written again -- but over what is up,
+                // without a clear: a wipe blanked the cover until the
+                // terminal had taken it again, which a large one shows.
+                self.repaint = self.repaint.max(Repaint::Redraw);
+                self.lyrics_wanted()
+            }
+            Action::SettingTyped(setting, text) => {
+                settings::set_text(&mut self.config, setting, &text);
+                self.save_config();
+                Some(Action::SettingChanged(setting))
+            }
+            // What the shell itself reads live; the loop does the rest.
+            Action::SettingChanged(setting) => self.on_setting_changed(setting),
+            Action::OutputsListed(outputs) => {
+                self.outputs = outputs;
+                None
+            }
+            Action::OutputOpened(Ok(label)) => {
+                self.say(format!("Playing on {label}"));
+                Some(Action::RestartEngine)
+            }
+            Action::OutputOpened(Err(why)) => {
+                self.say(why);
+                None
+            }
+            other => unreachable!("{other:?} is routed elsewhere by update"),
         }
     }
 
