@@ -386,8 +386,10 @@ pub async fn run(
     icons::set_nerd_font(config.ui.nerd_font);
 
     let mut app = app_for(&config);
-    // The engine reads the shared equaliser from its first frame.
+    // The engine reads the shared equaliser from its first frame, and opens
+    // on the output the config names.
     app.apply_equalizer();
+    choose_output(&config.audio);
     restore_history(&mut app);
     resume_session(&mut app, &config).await;
 
@@ -578,6 +580,12 @@ fn side_effects(app: &mut App, action: &Action, out: &Outlets) {
             relink_scrobblers(app, setting, action_tx);
         }
         Action::SettingChanged(settings::Setting::Discord) => restart_presence(app),
+        Action::SettingChanged(settings::Setting::MatchRate) => {
+            music::output::choose_match_rate(app.config.audio.match_rate);
+            restart_engine(app, cmd_tx);
+        }
+        Action::ListOutputs => list_outputs(action_tx),
+        Action::UseOutput => use_output(app, action_tx),
         Action::Edit(edit) => edit_playlist(app, edit, action_tx),
         Action::RemoveFromPlaylist { uuid, track } => {
             remove_from_playlist(app, uuid, track, action_tx);
@@ -1159,6 +1167,54 @@ fn load_lyrics(
 
 /// A fresh engine on the same session, picking the track back up where
 /// it was, paused if it was paused.
+/// The outputs the system offers, read off the loop: listing opens
+/// devices on some systems.
+fn list_outputs(action_tx: &tokio::sync::mpsc::UnboundedSender<Action>) {
+    let tx = action_tx.clone();
+    tokio::spawn(async move {
+        if let Ok(devices) = tokio::task::spawn_blocking(music::output::devices).await {
+            let _ = tx.send(Action::OutputsListed(settings::listed(devices)));
+        }
+    });
+}
+
+/// The output and sample-rate following the config names, before anything
+/// plays. One that is not connected gives way to the system's default.
+pub(crate) fn choose_output(audio: &crate::config::AudioConfig) {
+    music::output::choose_device(Some(audio.output.clone()).filter(|id| !id.is_empty()));
+    music::output::choose_match_rate(audio.match_rate);
+}
+
+/// Opens the output the config names, off the loop since CoreAudio can
+/// take ten seconds to give up on a device, and plays on it once it has
+/// opened. The stream it opened is held a moment, for the engine starting
+/// again to join rather than open the device a second time.
+fn use_output(app: &App, action_tx: &tokio::sync::mpsc::UnboundedSender<Action>) {
+    let id = Some(app.config.audio.output.clone()).filter(|id| !id.is_empty());
+    let label = settings::output_label(&app.config.audio.output, &app.outputs);
+    let tx = action_tx.clone();
+    tokio::spawn(async move {
+        let wanted = id.clone();
+        let opened = tokio::task::spawn_blocking(move || music::output::open(wanted.as_deref()))
+            .await
+            .map_err(anyhow::Error::from)
+            .and_then(|opened| opened);
+        match opened {
+            Ok(held) => {
+                music::output::choose_device(id);
+                let _ = tx.send(Action::OutputOpened(Ok(label)));
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                drop(held);
+            }
+            Err(error) => {
+                let _ = tx.send(Action::OutputOpened(Err(format!(
+                    "could not open {label}: {error:#}"
+                ))));
+            }
+        }
+    });
+}
+
 fn restart_engine(app: &App, cmd_tx: &std::sync::mpsc::Sender<crate::playback::Cmd>) {
     if let Some(session) = &app.session {
         let _ = cmd_tx.send(crate::playback::Cmd::Attach {

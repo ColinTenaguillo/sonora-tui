@@ -341,7 +341,7 @@ ai = true         # false: tracks marked AI-generated do not play
 
 ## Sound
 
-Three rows the engine reads, all written to the config:
+The rows the engine reads, all written to the config:
 
 ```toml
 [audio]
@@ -349,10 +349,20 @@ normalisation = false   # bring every track to one level, from the service's own
 gapless = true          # line the next track up behind this one
 equalizer = "off"       # or flat, rock, pop, jazz, classical, electronic, acoustic,
                         # vocal, bass-boost, bass-reducer, treble-boost, loudness
+output = ""             # empty for the system's default, or an id the Output row picks
+match_rate = false      # on a direct output, follow each track's sample rate
 ```
 
-The equaliser changes as you step through the presets. The other two restart
-the engine, which picks the track back up where it was.
+The equaliser changes as you step through the presets. Normalisation and
+gapless restart the engine, which picks the track back up where it was.
+
+**Bit-perfect.** The Output row lists every output the system offers, `h`
+and `l` to pick and Enter to play on it. One marked `direct` is played on past
+the sound server and taken from every other app while it plays: on macOS
+through CoreAudio's hog mode, on Linux as the sound card's own ALSA device.
+With Match sample rate on, a direct output switches to each track's own rate,
+so nothing resamples it on the way to the DAC. For the samples to reach it
+untouched, keep the volume full and the equaliser and normalisation off.
 
 ## Lyrics
 
@@ -461,9 +471,9 @@ moved under the new name on the first start.
 
 - **One service at a time.** Switching signs out of the view, not of the
   account: each service keeps its session.
-- **Not bit-perfect.** The device's physical format is left alone, so content
-  is resampled to whatever rate it is already at. The quality badge reports
-  what the service delivered, not what reached the speakers.
+- **Bit-perfect only on a direct output.** A shared one, the default, is left
+  at the rate it runs at, so content is resampled to it. The quality badge
+  reports what the service delivered, not what reached the speakers.
 - **No videos.** This plays audio, so the video rows on genre pages are left
   out.
 - **A refused scrobble is retried** with the next batch, in memory, up to

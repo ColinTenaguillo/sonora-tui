@@ -21,6 +21,8 @@ pub enum Setting {
     Normalisation,
     Gapless,
     Equalizer,
+    Output,
+    MatchRate,
     Autoplay,
     Explicit,
     Ai,
@@ -56,13 +58,15 @@ pub enum Kind {
 }
 
 impl Setting {
-    pub const ALL: [Setting; 22] = [
+    pub const ALL: [Setting; 24] = [
         Setting::Service,
         Setting::Quality,
         Setting::Volume,
         Setting::Normalisation,
         Setting::Gapless,
         Setting::Equalizer,
+        Setting::Output,
+        Setting::MatchRate,
         Setting::Autoplay,
         Setting::Explicit,
         Setting::Ai,
@@ -87,9 +91,11 @@ impl Setting {
             | Setting::Quality
             | Setting::Volume
             | Setting::Equalizer
+            | Setting::Output
             | Setting::Theme => Kind::Cycle,
             Setting::Normalisation
             | Setting::Gapless
+            | Setting::MatchRate
             | Setting::Autoplay
             | Setting::Explicit
             | Setting::Ai
@@ -117,6 +123,8 @@ impl Setting {
             | Setting::Normalisation
             | Setting::Gapless
             | Setting::Equalizer
+            | Setting::Output
+            | Setting::MatchRate
             | Setting::Autoplay
             | Setting::Explicit
             | Setting::Ai => "Playback",
@@ -160,6 +168,8 @@ impl Setting {
             Setting::Normalisation => "Normalise loudness",
             Setting::Gapless => "Gapless playback",
             Setting::Equalizer => "Equaliser",
+            Setting::Output => "Output",
+            Setting::MatchRate => "Match sample rate",
             Setting::Autoplay => "Autoplay",
             Setting::Explicit => "Allow explicit content",
             Setting::Ai => "Allow AI-generated content",
@@ -190,6 +200,8 @@ impl Setting {
             }
             Setting::Gapless => "Line the next track up behind this one, so the join has no gap.",
             Setting::Equalizer => "A preset, or off to leave the signal alone.",
+            Setting::Output => "h or l to pick one, Enter to play on it. A direct one is bit-perfect, with the volume full and the equaliser and loudness off.",
+            Setting::MatchRate => "On a direct output, the device follows each track's sample rate, so nothing resamples it.",
             Setting::Autoplay => "Keep playing something similar when the queue runs out.",
             Setting::Explicit => "Off, tracks marked E will not play.",
             Setting::Ai => "Off, tracks marked AI will not play.",
@@ -437,6 +449,9 @@ pub fn cycle(config: &mut crate::config::Config, setting: Setting, forward: bool
             let next = if forward { at + 1 } else { at + n - 1 };
             config.audio.equalizer = EQUALIZERS[next % n].to_string();
         }
+        // Stepped by the app, which holds the list of outputs.
+        Setting::Output => {}
+        Setting::MatchRate => config.audio.match_rate = !config.audio.match_rate,
         Setting::Autoplay => config.playback.autoplay = !config.playback.autoplay,
         Setting::Explicit => config.playback.explicit = !config.playback.explicit,
         Setting::Ai => config.playback.ai = !config.playback.ai,
@@ -524,6 +539,64 @@ fn set_or_not(text: &str) -> String {
     }
 }
 
+/// What the rows show that the config does not hold: each scrobbler
+/// linked now, as (service id, label, whether it is on), and the outputs
+/// the system offers.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Live<'a> {
+    pub linked: &'a [(String, String, bool)],
+    pub outputs: &'a [Output],
+}
+
+/// An output the Output row can pick: its id, as the config keeps it,
+/// and how the row reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Output {
+    pub id: String,
+    pub label: String,
+}
+
+/// The outputs as the system lists them, a direct one marked as such: it
+/// is the same device, played on bit-perfect and taken from other apps.
+pub fn listed(devices: Vec<music::output::DeviceOption>) -> Vec<Output> {
+    devices
+        .into_iter()
+        .map(|device| Output {
+            label: match device.direct {
+                true => format!("{} \u{b7} direct", device.name),
+                false => device.name,
+            },
+            id: device.id,
+        })
+        .collect()
+}
+
+/// The output after (or before) `current`, with the system's default,
+/// empty, ahead of the listed ones. One no longer listed steps from the
+/// default.
+pub fn step_output(outputs: &[Output], current: &str, forward: bool) -> String {
+    let ids: Vec<&str> = std::iter::once("")
+        .chain(outputs.iter().map(|o| o.id.as_str()))
+        .collect();
+    let at = ids.iter().position(|id| *id == current).unwrap_or(0);
+    let n = ids.len();
+    let next = if forward { at + 1 } else { at + n - 1 };
+    ids[next % n].to_owned()
+}
+
+/// How the Output row names `id`: the system's default, a listed output,
+/// or one that is saved but not connected now.
+pub fn output_label(id: &str, outputs: &[Output]) -> String {
+    if id.is_empty() {
+        return "System default".to_owned();
+    }
+    outputs
+        .iter()
+        .find(|o| o.id == id)
+        .map(|o| o.label.clone())
+        .unwrap_or_else(|| format!("{id} (not connected)"))
+}
+
 /// `linked` is each scrobbler linked right now, as (service id, label,
 /// whether it is on).
 fn value_of(
@@ -578,6 +651,8 @@ fn value_of(
         Setting::Normalisation => on_off(config.audio.normalisation),
         Setting::Gapless => on_off(config.audio.gapless),
         Setting::Equalizer => equalizer_value(config),
+        Setting::Output => output_label(&config.audio.output, &[]),
+        Setting::MatchRate => on_off(config.audio.match_rate),
         Setting::Autoplay => on_off(config.playback.autoplay),
         Setting::Explicit => on_off(config.playback.explicit),
         Setting::Ai => on_off(config.playback.ai),
@@ -664,8 +739,9 @@ pub fn render(
     config: &crate::config::Config,
     state: &SettingsState,
     focused: bool,
-    linked: &[(String, String, bool)],
+    live: Live,
 ) {
+    let Live { linked, outputs } = live;
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -736,7 +812,13 @@ pub fn render(
                     format!("  {:width$}", setting.label(), width = label_width()),
                     palette.title(),
                 ),
-                Span::styled(value_of(config, *setting, linked), palette.accent_text()),
+                Span::styled(
+                    match setting {
+                        Setting::Output => output_label(&config.audio.output, outputs),
+                        _ => value_of(config, *setting, linked),
+                    },
+                    palette.accent_text(),
+                ),
             ])),
             Rect {
                 x: area.x,
@@ -927,7 +1009,7 @@ mod tests {
                 &crate::config::Config::default(),
                 &SettingsState::default(),
                 true,
-                &[],
+                Live::default(),
             );
         });
         let text = crate::shell::geometry::text(&buf);
@@ -986,7 +1068,7 @@ mod tests {
         let last = state.current();
         assert_eq!(Some(last), Setting::ALL.last().copied());
         let buf = crate::shell::geometry::draw(120, 24, |f, area, palette| {
-            render(f, area, palette, &config, &state, true, &[]);
+            render(f, area, palette, &config, &state, true, Live::default());
         });
         let text = crate::shell::geometry::text(&buf);
         assert!(
@@ -1008,7 +1090,7 @@ mod tests {
         let mut state = SettingsState::default();
         let draw = |state: &SettingsState| {
             crate::shell::geometry::draw(120, 24, |f, area, palette| {
-                render(f, area, palette, &config, state, true, &[]);
+                render(f, area, palette, &config, state, true, Live::default());
             });
             state.first.get()
         };
@@ -1044,7 +1126,7 @@ mod tests {
         let config = crate::config::Config::default();
         let thumb = |state: &SettingsState, height: u16| -> Vec<u16> {
             let buf = crate::shell::geometry::draw(120, height, |f, area, palette| {
-                render(f, area, palette, &config, state, true, &[]);
+                render(f, area, palette, &config, state, true, Live::default());
             });
             (0..height)
                 .filter(|y| buf[(119, *y)].symbol() == "\u{2588}")
@@ -1083,7 +1165,7 @@ mod tests {
         let config = crate::config::Config::default();
         let state = SettingsState::default();
         let buf = crate::shell::geometry::draw(120, 100, |f, area, palette| {
-            render(f, area, palette, &config, &state, false, &[]);
+            render(f, area, palette, &config, &state, false, Live::default());
         });
         let text = crate::shell::geometry::text(&buf);
 

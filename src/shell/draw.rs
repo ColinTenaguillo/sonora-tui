@@ -254,7 +254,10 @@ fn draw_section(
                 &app.config,
                 &app.settings,
                 MAIN_FOCUSED,
-                &linked,
+                settings::Live {
+                    linked: &linked,
+                    outputs: &app.outputs,
+                },
             );
         }
         section @ (sidebar::Section::Playlists
