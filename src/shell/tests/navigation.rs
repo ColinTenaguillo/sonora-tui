@@ -539,6 +539,20 @@ fn the_movement_keys_drive_explores_own_rows() {
     app.update(Action::RowNext);
     assert_eq!(app.explore.row, 1, "explore's own selection moved");
     assert_eq!(app.home.row, 0, "and the home page's did not");
+    app.update(Action::RowPrevious);
+    assert_eq!(app.explore.row, 0, "and back up it goes");
+}
+
+#[test]
+fn a_key_sent_as_an_action_is_the_key_and_quit_quits() {
+    // The loop hands keys to `update` like any other action, not to
+    // `on_key` directly as the other tests here do.
+    let mut app = signed_in(sidebar::Section::Music);
+    app.update(Action::Key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE)));
+    assert!(app.showing_help);
+    assert!(!app.should_quit);
+    assert!(app.update(Action::Quit).is_none());
+    assert!(app.should_quit);
 }
 
 #[test]
