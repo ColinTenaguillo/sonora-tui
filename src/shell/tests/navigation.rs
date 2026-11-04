@@ -548,7 +548,10 @@ fn a_key_sent_as_an_action_is_the_key_and_quit_quits() {
     // The loop hands keys to `update` like any other action, not to
     // `on_key` directly as the other tests here do.
     let mut app = signed_in(sidebar::Section::Music);
-    app.update(Action::Key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE)));
+    app.update(Action::Key(KeyEvent::new(
+        KeyCode::Char('?'),
+        KeyModifiers::NONE,
+    )));
     assert!(app.showing_help);
     assert!(!app.should_quit);
     assert!(app.update(Action::Quit).is_none());

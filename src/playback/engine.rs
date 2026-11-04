@@ -492,7 +492,10 @@ mod tests {
         tap.format(44_100, 1);
         // A second of a 1 kHz tone, more than the analyser's window.
         for i in 0..44_100 {
-            tap.push(0, (std::f32::consts::TAU * 1_000.0 * i as f32 / 44_100.0).sin());
+            tap.push(
+                0,
+                (std::f32::consts::TAU * 1_000.0 * i as f32 / 44_100.0).sin(),
+            );
         }
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
         while bands.levels().iter().all(|&level| level == 0.0) {

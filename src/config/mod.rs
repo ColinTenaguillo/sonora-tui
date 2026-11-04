@@ -160,10 +160,16 @@ impl LocalConfig {
             .map(|f| f.trim())
             .filter(|f| !f.is_empty())
             // `~\` too: it is how a Windows user writes the same thing.
-            .map(|f| match (f.strip_prefix('~').and_then(|r| r.strip_prefix(['/', '\\'])), &home) {
-                (Some(rest), Some(home)) => home.join(rest),
-                _ if f == "~" => home.clone().unwrap_or_else(|| PathBuf::from(f)),
-                _ => PathBuf::from(f),
+            .map(|f| {
+                match (
+                    f.strip_prefix('~')
+                        .and_then(|r| r.strip_prefix(['/', '\\'])),
+                    &home,
+                ) {
+                    (Some(rest), Some(home)) => home.join(rest),
+                    _ if f == "~" => home.clone().unwrap_or_else(|| PathBuf::from(f)),
+                    _ => PathBuf::from(f),
+                }
             })
             .collect()
     }
