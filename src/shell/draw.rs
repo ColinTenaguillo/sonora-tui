@@ -631,7 +631,15 @@ fn draw_overlays(frame: &mut ratatui::Frame, app: &mut App, main: ratatui::layou
     if app.showing_help {
         // Clamped here, where the height is known: the key handler only
         // counts.
-        app.help_scroll = app.help_scroll.min(help::overflow(frame.area().height));
-        help::render(frame, frame.area(), &palette, app.help_scroll);
+        app.help_scroll = app
+            .help_scroll
+            .min(help::overflow(frame.area().height, &app.help_search.query));
+        help::render(
+            frame,
+            frame.area(),
+            &palette,
+            app.help_scroll,
+            &app.help_search,
+        );
     }
 }
