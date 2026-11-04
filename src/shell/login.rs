@@ -128,10 +128,11 @@ pub fn open_in_browser(url: &str) {
         c.arg(url);
         c
     } else if cfg!(target_os = "windows") {
-        // `start` is a cmd builtin, and its first quoted argument is taken as
-        // a window title — hence the empty one.
-        let mut c = Command::new("cmd");
-        c.args(["/C", "start", "", url]);
+        // Not `cmd /C start`: cmd reads `&`, `|` and `^` in the URL as its
+        // own, so a link's second query parameter would run as a command.
+        // url.dll hands the link to the registered browser with no shell.
+        let mut c = Command::new("rundll32");
+        c.args(["url.dll,FileProtocolHandler", url]);
         c
     } else {
         let mut c = Command::new("xdg-open");
