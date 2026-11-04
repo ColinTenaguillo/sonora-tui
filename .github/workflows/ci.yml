@@ -21,11 +21,11 @@ jobs:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
-      # Both platforms are reported even when one fails: which of them broke
+      # Every platform is reported even when one fails: which one broke
       # is usually the first thing worth knowing.
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
 
