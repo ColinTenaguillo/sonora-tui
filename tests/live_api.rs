@@ -759,20 +759,17 @@ async fn the_real_feed_falls_into_more_than_one_section() {
 
 #[tokio::test]
 #[ignore = "needs the network and a signed-in session"]
-async fn the_radio_tab_is_not_empty() {
-    // It was: the tab split `/my-collection/mixes` on `mixType`, and what
-    // an account saves there is DAILY_MIX and TRACK_MIX -- never a
-    // station -- so the tab was empty whatever the account held. The
-    // stations live on `/pages/for_you`.
+async fn what_the_saved_mixes_hold() {
+    // Every saved mix that plays reaches the playlists, an artist's radio
+    // (ARTIST_MIX) among them: printed with the raw types, to see what an
+    // account actually keeps there.
     let Some(token) = session() else { return };
     let client = sonora_tui::tidal::Client::new(token);
-    let mixes = sonora_tui::browse::mixes(&client).await.expect("the mixes");
-    println!("mine: {} cards", mixes.mine.len());
-    for c in mixes.mine.iter().take(8) {
-        println!("    {:?} / {:?}", c.title, c.subtitle);
-    }
-    println!("radio: {} cards", mixes.radio.len());
-    for c in mixes.radio.iter().take(8) {
+    let mixes = sonora_tui::browse::saved_mixes(&client)
+        .await
+        .expect("the mixes");
+    println!("saved: {} cards", mixes.len());
+    for c in mixes.iter().take(8) {
         println!("    {:?} / {:?}", c.title, c.subtitle);
     }
 
@@ -799,14 +796,6 @@ async fn the_radio_tab_is_not_empty() {
         }
     }
     println!("mixType values: {kinds:?}");
-    assert!(
-        !kinds.contains_key("ARTIST_MIX"),
-        "the collection holds no stations, which is why the tab reads elsewhere"
-    );
-    assert!(
-        !mixes.radio.is_empty(),
-        "and the tab is filled from the page that does have them"
-    );
 }
 
 #[tokio::test]
@@ -1670,36 +1659,24 @@ async fn the_mixes_section_comes_back_populated() {
     // has them; this is what the section will actually show.
     let Some(token) = session() else { return };
     let client = sonora_tui::tidal::Client::new(token);
-    match sonora_tui::browse::mixes(&client).await {
+    match sonora_tui::browse::saved_mixes(&client).await {
         Ok(mixes) => {
-            println!("{} mine, {} radio", mixes.mine.len(), mixes.radio.len());
-            for c in mixes.mine.iter().take(3) {
-                println!("  mine  {:?} / cover {}", c.title, c.cover_url.is_some());
-            }
-            for c in mixes.radio.iter().take(3) {
-                println!("  radio {:?} / cover {}", c.title, c.cover_url.is_some());
+            println!("{} saved", mixes.len());
+            for c in mixes.iter().take(3) {
+                println!("  {:?} / cover {}", c.title, c.cover_url.is_some());
             }
             // Whatever the account has saved: this one has four daily
             // mixes and no stations, and a collection with neither is a
             // legitimate empty section rather than a failure.
-            assert!(
-                mixes.mine.iter().chain(mixes.radio.iter()).count() > 0,
-                "this account has saved mixes"
-            );
+            assert!(!mixes.is_empty(), "this account has saved mixes");
             // Video mixes cannot be played, so they must not be listed.
             assert!(
-                !mixes
-                    .mine
-                    .iter()
-                    .chain(mixes.radio.iter())
-                    .any(|c| c.title.contains("Video")),
+                !mixes.iter().any(|c| c.title.contains("Video")),
                 "video mixes are left out"
             );
             // Seven ids appear on both pages; each must be listed once.
             let ids: Vec<_> = mixes
-                .mine
                 .iter()
-                .chain(mixes.radio.iter())
                 .filter_map(|c| match &c.target {
                     Some(sonora_tui::shell::carousel::Target::Playlist(id)) => Some(id.clone()),
                     _ => None,
@@ -3232,13 +3209,10 @@ async fn a_mix_says_whether_it_has_a_cover() {
     let Some(token) = session() else { return };
     let client = sonora_tui::tidal::Client::new(token);
 
-    let mixes = sonora_tui::browse::mixes(&client).await.expect("mixes");
-    let mix = mixes
-        .mine
-        .iter()
-        .chain(mixes.radio.iter())
-        .next()
-        .expect("no mixes to test with");
+    let mixes = sonora_tui::browse::saved_mixes(&client)
+        .await
+        .expect("mixes");
+    let mix = mixes.first().expect("no mixes to test with");
     println!("mix card: {:?} cover={:?}", mix.title, mix.cover_url);
     assert!(
         mix.cover_url.is_some(),

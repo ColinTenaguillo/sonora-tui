@@ -254,21 +254,6 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
-/// What the Mixes & Radio section shows, in its two tabs.
-///
-/// The split is `mixType`, not the page: seven of the account's mixes
-/// appear on both pages, so taking one page per tab would have listed them
-/// twice.
-#[derive(Debug, Default, Clone)]
-pub struct Mixes {
-    /// Built from what the user listens to: DAILY_MIX, plus the discovery
-    /// and new-release mixes.
-    pub mine: Vec<Card>,
-    /// ARTIST_MIX — a station per artist, which is TIDAL's own selection
-    /// rather than a mix of the user's listening.
-    pub radio: Vec<Card>,
-}
-
 /// Whether a module is a row of videos, which this app cannot play.
 ///
 /// VIDEO_LIST is what a genre page's "New Music Videos" comes back as; the
@@ -287,77 +272,25 @@ fn is_playable_mix(mix_type: &str) -> bool {
     !mix_type.starts_with("VIDEO")
 }
 
-/// Whether this is a radio station rather than one of the user's own mixes.
-///
-/// ARTIST_MIX is the only type TIDAL returns that is a station rather than
-/// a mix built from listening.
-fn is_radio(mix_type: &str) -> bool {
-    mix_type == "ARTIST_MIX"
-}
-
-/// The mixes the user has saved.
+/// The mixes the user has saved, video ones left out.
 ///
 /// `/my-collection/mixes`, which is the section the web client calls My
-/// Mixes — not the page of suggestions behind it. That page was built
-/// first, when this endpoint answered with nothing because the account had
-/// saved none; it is a catalogue to pick from rather than the user's own.
-pub async fn mixes(client: &Client) -> Result<Mixes, TidalError> {
+/// Mixes — not the page of suggestions behind it. An artist's radio saved
+/// with `F` is among them, as an ARTIST_MIX.
+pub async fn saved_mixes(client: &Client) -> Result<Vec<Card>, TidalError> {
     let body = client
         .get_raw_v2("/my-collection/mixes", &[("limit", MAX_PAGE.to_string())])
         .await?;
-    let mut out = split_mixes(parse_saved_mixes(&body));
-
-    // The stations come from elsewhere. Splitting the collection on
-    // `mixType` left the tab permanently empty: what the user has saved is
-    // DAILY_MIX and TRACK_MIX -- checked against a real account -- and a
-    // station is never among it. `/pages/for_you` is where the web client
-    // gets them, under a heading of its own.
-    if out.radio.is_empty() {
-        out.radio = radio_stations(client).await;
-    }
-    Ok(out)
+    Ok(playable_saved_mixes(&body))
 }
 
-/// The radio stations TIDAL suggests, or nothing if the page cannot be read.
-///
-/// Best-effort: a station list that fails to load costs the tab its
-/// contents, not the section.
-async fn radio_stations(client: &Client) -> Vec<Card> {
-    let Ok(page) = page_of_rows(client, "/pages/for_you").await else {
-        return Vec::new();
-    };
-    page.rows
+/// The cards of a `/my-collection/mixes` response that can be played.
+fn playable_saved_mixes(body: &str) -> Vec<Card> {
+    parse_saved_mixes(body)
         .into_iter()
-        .find(|row| is_radio_heading(&row.heading))
-        .map(|row| row.cards)
-        .unwrap_or_default()
-}
-
-/// Whether a row of `/pages/for_you` is the station list.
-///
-/// Matched on the heading because the page gives every row the same module
-/// type: "Radio stations for you" is what it is called, and matching the
-/// two words rather than the whole phrase leaves room for it to be
-/// reworded around them.
-fn is_radio_heading(heading: &str) -> bool {
-    let lower = heading.to_lowercase();
-    lower.contains("radio") && lower.contains("station")
-}
-
-/// Sort mixes into the section's two tabs, dropping what cannot be played.
-fn split_mixes(mixes: Vec<(Card, String)>) -> Mixes {
-    let mut out = Mixes::default();
-    for (card, mix_type) in mixes {
-        if !is_playable_mix(&mix_type) {
-            continue;
-        }
-        if is_radio(&mix_type) {
-            out.radio.push(card);
-        } else {
-            out.mine.push(card);
-        }
-    }
-    out
+        .filter(|(_, mix_type)| is_playable_mix(mix_type))
+        .map(|(card, _)| card)
+        .collect()
 }
 
 /// The mixes of a `/my-collection/mixes` response.
@@ -1318,10 +1251,7 @@ mod tests {
         // Which is what this account looked like until mixes were saved to
         // it — and what sent the first version of this off to build the
         // page of suggestions behind the section instead.
-        let got = parse_saved_mixes(r#"{"items":[],"cursor":null}"#);
-        assert!(got.is_empty());
-        let split = split_mixes(got);
-        assert!(split.mine.is_empty() && split.radio.is_empty());
+        assert!(playable_saved_mixes(r#"{"items":[],"cursor":null}"#).is_empty());
     }
 
     fn row(heading: &str, n: usize) -> HomeRow {
@@ -1681,59 +1611,18 @@ mod tests {
     }
 
     #[test]
-    fn a_saved_video_mix_is_not_offered() {
-        // Nothing stops a video mix being saved, and this app cannot play
-        // one — a card that does nothing is worse than no card.
-        let split = split_mixes(parse_saved_mixes(&saved(&[
+    fn every_saved_mix_but_a_video_one_is_offered() {
+        // An artist's radio saved with `F` is an ARTIST_MIX, and was sorted
+        // away from the user's own mixes into a tab that no longer exists,
+        // so it never reached the playlists. A video mix cannot be played
+        // here -- a card that does nothing is worse than no card.
+        let got = playable_saved_mixes(&saved(&[
             ("My Mix 1", "DAILY_MIX"),
             ("My Video Mix 1", "VIDEO_DAILY_MIX"),
             ("Miley Cyrus", "ARTIST_MIX"),
-        ])));
-        assert_eq!(split.mine.len(), 1, "the daily mix");
-        assert_eq!(split.radio.len(), 1, "the station");
-        assert!(
-            !split
-                .mine
-                .iter()
-                .chain(split.radio.iter())
-                .any(|c| c.title.contains("Video")),
-            "and no video mix anywhere"
-        );
-    }
-
-    #[test]
-    fn the_station_row_is_found_by_its_heading() {
-        // The stations are not in the user's collection at all: what is
-        // saved there is DAILY_MIX and TRACK_MIX, checked against a real
-        // account, so splitting it on `mixType` left the Radio tab empty
-        // whatever the account held. They come from `/pages/for_you`,
-        // where every row has the same module type and only the heading
-        // says which is which.
-        assert!(is_radio_heading("Radio stations for you"));
-        assert!(is_radio_heading("RADIO STATIONS"), "however it is cased");
-        assert!(
-            !is_radio_heading("Custom mixes"),
-            "the mixes beside it are not stations"
-        );
-        assert!(
-            !is_radio_heading("Because you listened to Daft Punk"),
-            "nor the suggestions under them"
-        );
-    }
-
-    #[test]
-    fn a_station_is_told_from_the_users_own_mixes() {
-        // ARTIST_MIX is TIDAL's selection for an artist; the daily,
-        // discovery and new-release mixes are built from what the user
-        // listens to. They are different things, so they get a tab each.
-        for (kind, radio) in [
-            ("ARTIST_MIX", true),
-            ("DAILY_MIX", false),
-            ("DISCOVERY_MIX", false),
-            ("NEW_RELEASE_MIX", false),
-        ] {
-            assert_eq!(is_radio(kind), radio, "{kind}");
-        }
+        ]));
+        let titles: Vec<&str> = got.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, ["My Mix 1", "Miley Cyrus"]);
     }
 
     use super::*;
