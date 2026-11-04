@@ -153,7 +153,7 @@ pub struct LocalConfig {
 impl LocalConfig {
     /// The folders as paths, `~` expanded. Blank entries are skipped.
     pub fn folders(&self) -> Vec<PathBuf> {
-        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let home = std::env::home_dir();
         self.folders
             .iter()
             .map(|f| f.trim())
@@ -545,7 +545,7 @@ mod tests {
 
     #[test]
     fn local_folders_expand_the_tilde_and_skip_blanks() {
-        let home = std::env::var_os("HOME").map(PathBuf::from).expect("a home");
+        let home = std::env::home_dir().expect("a home");
         let local = LocalConfig {
             folders: vec![
                 "~/Music".into(),
