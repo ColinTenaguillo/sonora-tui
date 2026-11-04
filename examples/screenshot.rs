@@ -259,13 +259,12 @@ fn sample_app(section: Section) -> App {
     .collect();
 
     // The fourth track is the one playing, so the marker and the bar agree.
-    app.now_playing = sonora_tui::shell::nowplaying::NowPlaying {
-        track: app.tracks.get(3).cloned(),
-        position: std::time::Duration::from_secs(111),
-        playing: true,
-        quality: Some("24-bit 176.4kHz".into()),
-        tier: sonora_tui::shell::nowplaying::Tier::Max,
-    };
+    app.now_playing = Default::default();
+    app.now_playing.track = app.tracks.get(3).cloned();
+    app.now_playing.position = std::time::Duration::from_secs(111);
+    app.now_playing.playing = true;
+    app.now_playing.quality = Some("24-bit 176.4kHz".into());
+    app.now_playing.tier = sonora_tui::shell::nowplaying::Tier::Max;
     app.tracklist.selected = 3;
 
     app.home = HomeState {

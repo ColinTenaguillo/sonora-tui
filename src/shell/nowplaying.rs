@@ -16,6 +16,50 @@ pub struct NowPlaying {
     /// The DELIVERED quality, e.g. "24-bit 44.1kHz". Never the requested one.
     pub quality: Option<String>,
     pub tier: Tier,
+    /// The last seek's target, and when it was asked for, until the engine
+    /// reports from there.
+    seeking: Option<(Duration, std::time::Instant)>,
+}
+
+/// How near a report must land to the target to be the seek arriving: the
+/// decoder reports a little ahead of what is heard.
+const SEEK_LANDED: Duration = Duration::from_secs(2);
+/// How long the bar waits for a seek to arrive before following the engine
+/// again, wherever it is.
+const SEEK_PATIENCE: Duration = Duration::from_secs(5);
+
+impl NowPlaying {
+    /// Move the bar to a seek's target at once, ahead of the engine.
+    pub fn seek_to(&mut self, to: Duration) {
+        self.position = to;
+        self.seeking = Some((to, std::time::Instant::now()));
+    }
+
+    /// A position from the engine. Ignored while a seek is on its way and
+    /// this is not it: a stream seeks slower than a held key repeats, and
+    /// a report from before the seek pulled the bar back, with the next
+    /// press counted from there.
+    pub fn report(&mut self, at: Duration) {
+        if let Some((target, since)) = self.seeking {
+            if since.elapsed() < SEEK_PATIENCE && at.abs_diff(target) > SEEK_LANDED {
+                return;
+            }
+        }
+        self.place(at);
+    }
+
+    /// Put the bar here, whatever seek was on its way: a new track, an end.
+    pub fn place(&mut self, at: Duration) {
+        self.position = at;
+        self.seeking = None;
+    }
+
+    #[cfg(test)]
+    pub fn age_seek(&mut self, by: Duration) {
+        if let Some((_, since)) = self.seeking.as_mut() {
+            *since -= by;
+        }
+    }
 }
 
 /// The queue's modes, as the bar draws them.
@@ -821,6 +865,7 @@ mod tests {
             playing: true,
             quality: None,
             tier: Tier::Low,
+            ..Default::default()
         };
         let mut drawn = Vec::new();
         let _ = geometry::draw(100, crate::shell::layout::NOW_PLAYING_HEIGHT, |f, a, p| {
@@ -928,6 +973,7 @@ mod tests {
                 playing,
                 quality: Some("24-bit".into()),
                 tier: Tier::Max,
+                ..Default::default()
             };
             geometry::draw(
                 76,
@@ -987,6 +1033,7 @@ mod tests {
                 playing: true,
                 quality: Some("24-bit".into()),
                 tier: Tier::Max,
+                ..Default::default()
             };
             geometry::draw(
                 80,
@@ -1037,6 +1084,7 @@ mod tests {
                 playing,
                 quality: Some("24-bit".into()),
                 tier: Tier::Max,
+                ..Default::default()
             };
             geometry::draw(
                 80,
@@ -1082,6 +1130,7 @@ mod tests {
             playing: false,
             quality: Some("24-bit".into()),
             tier: Tier::Max,
+            ..Default::default()
         };
         let buf = geometry::draw(
             80,
@@ -1119,6 +1168,7 @@ mod tests {
             playing: true,
             quality: Some("24-bit".into()),
             tier: Tier::Max,
+            ..Default::default()
         };
         let buf = geometry::draw(
             80,
@@ -1158,6 +1208,7 @@ mod tests {
                 playing: true,
                 quality: None,
                 tier: Tier::Max,
+                ..Default::default()
             };
             geometry::draw(
                 100,
@@ -1240,6 +1291,7 @@ mod tests {
                 playing: true,
                 quality: Some("24-bit 44.1kHz".into()),
                 tier: Tier::Max,
+                ..Default::default()
             };
             let buf = geometry::draw(100, height, move |f, area, p| {
                 render(f, area, p, &state, Modes::default())
@@ -1263,6 +1315,7 @@ mod tests {
             playing: true,
             quality: Some("24-bit 44.1kHz".into()),
             tier: Tier::Max,
+            ..Default::default()
         };
         geometry::draw(
             width,
@@ -1488,6 +1541,7 @@ mod tests {
             playing: true,
             quality: Some("24-bit 44.1kHz".into()),
             tier: Tier::Max,
+            ..Default::default()
         };
         let text = rendered(&state, 100);
         assert!(text.contains("Money Trees"), "title:\n{text}");
@@ -1535,6 +1589,7 @@ mod tests {
             playing: true,
             quality: Some("24-bit 44.1kHz".into()),
             tier: Tier::Max,
+            ..Default::default()
         };
         let text = rendered(&state, 100);
         assert!(
@@ -1563,6 +1618,7 @@ mod tests {
             playing: true,
             quality: None,
             tier: Tier::Low,
+            ..Default::default()
         };
         let _ = rendered(&state, 8);
     }
