@@ -377,6 +377,13 @@ pub struct AudioConfig {
     /// An equaliser preset by name -- `flat`, `rock`, `bass-boost`,
     /// `vocal`... -- or `off`, which leaves the signal alone.
     pub equalizer: String,
+    /// The output to play on, by the id `music::output::devices` gives it,
+    /// or empty for the system's default. A direct one is played on past
+    /// the sound server, taken from every other app: bit-perfect.
+    pub output: String,
+    /// On a direct output, run the device at each track's own sample rate,
+    /// so nothing resamples it on the way to the DAC.
+    pub match_rate: bool,
 }
 
 impl Default for AuthConfig {
@@ -435,6 +442,8 @@ impl Default for AudioConfig {
             normalisation: false,
             gapless: true,
             equalizer: "off".into(),
+            output: String::new(),
+            match_rate: false,
         }
     }
 }

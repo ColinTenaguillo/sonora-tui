@@ -120,6 +120,16 @@ pub enum Action {
     /// the scrobblers link again, the Discord presence restarts, a folder
     /// of files is read again, the colours change.
     SettingChanged(settings::Setting),
+    /// Ask the system for its outputs, off the loop: opening the settings
+    /// page does, so a device plugged in since is there.
+    ListOutputs,
+    /// The outputs the system offers, for the Output row.
+    OutputsListed(Vec<settings::Output>),
+    /// Play on the output the Output row names: opened off the loop first,
+    /// since a device can take seconds to answer.
+    UseOutput,
+    /// The output opened, by its label, or why it did not.
+    OutputOpened(Result<String, String>),
     /// The service took an edit. The playlists are reloaded alongside;
     /// an open playlist that was edited is reloaded, a deleted one closed.
     PlaylistEdited {
@@ -1078,6 +1088,8 @@ pub struct App {
     /// view edits them.
     pub config: crate::config::Config,
     pub settings: settings::SettingsState,
+    /// The outputs the system offered when the settings page last opened.
+    pub outputs: Vec<settings::Output>,
     /// Where the settings are written. `None` in tests, which must not
     /// touch the real file — one that did left this machine on LOW.
     pub config_path: Option<std::path::PathBuf>,
@@ -1528,6 +1540,18 @@ impl App {
         }
     }
 
+    /// Step `which` in the config. The output steps through the list the
+    /// system gave, which the config does not hold.
+    fn step_setting(&mut self, which: settings::Setting, forward: bool) {
+        match which {
+            settings::Setting::Output => {
+                self.config.audio.output =
+                    settings::step_output(&self.outputs, &self.config.audio.output, forward);
+            }
+            _ => settings::cycle(&mut self.config, which, forward),
+        }
+    }
+
     /// Step the highlighted setting and write the file.
     ///
     /// Saved on the keystroke rather than on leaving the view: there is no
@@ -1536,7 +1560,7 @@ impl App {
     /// of leaving the user to find out next launch.
     fn change_setting(&mut self, forward: bool) -> Option<Action> {
         let which = self.settings.current();
-        settings::cycle(&mut self.config, which, forward);
+        self.step_setting(which, forward);
         self.save_config();
         // The volume is heard now rather than on the next track: a level
         // you cannot hear yourself setting is one you set by guessing.
@@ -1558,10 +1582,15 @@ impl App {
             settings::Setting::Normalisation | settings::Setting::Gapless => {
                 Some(Action::RestartEngine)
             }
+            // The output module reads it; the loop tells it.
+            settings::Setting::MatchRate => Some(Action::SettingChanged(which)),
             // The icons are already swapped -- `cycle` does that, so the row
             // shows the new set as it is chosen -- and the rest of the
-            // screen picks them up on the next frame.
-            settings::Setting::Quality
+            // screen picks them up on the next frame. An output is picked
+            // here and opened on Enter: stepping through the list must not
+            // open, and take, every device on the way.
+            settings::Setting::Output
+            | settings::Setting::Quality
             | settings::Setting::Autoplay
             | settings::Setting::Explicit
             | settings::Setting::Ai
@@ -2967,6 +2996,20 @@ impl App {
             }
             // What the shell itself reads live; the loop does the rest.
             Action::SettingChanged(setting) => self.on_setting_changed(setting),
+            // The loop's to do: it lists and opens the devices.
+            Action::ListOutputs | Action::UseOutput => None,
+            Action::OutputsListed(outputs) => {
+                self.outputs = outputs;
+                None
+            }
+            Action::OutputOpened(Ok(label)) => {
+                self.say(format!("Playing on {label}"));
+                Some(Action::RestartEngine)
+            }
+            Action::OutputOpened(Err(why)) => {
+                self.say(why);
+                None
+            }
             Action::SwitchProvider => {
                 self.leave_service();
                 Some(Action::BeginLogin)
@@ -3834,6 +3877,7 @@ impl App {
         let which = self.settings.current();
         match (which, which.kind()) {
             (settings::Setting::Service, _) => Some(Action::SwitchProvider),
+            (settings::Setting::Output, _) => Some(Action::UseOutput),
             (_, settings::Kind::Text { .. } | settings::Kind::Folders) => {
                 self.setting_edit = Some(settings::Edit {
                     setting: which,
@@ -4177,6 +4221,8 @@ impl App {
                 Some(Action::LoadFavourites)
             }
             sidebar::Section::Albums if self.albums.is_empty() => Some(Action::LoadFavourites),
+            // Every time: an output plugged in since the last visit is there.
+            sidebar::Section::Settings => Some(Action::ListOutputs),
             _ => None,
         }
     }

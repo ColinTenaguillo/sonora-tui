@@ -1398,3 +1398,167 @@ fn sleep_at_the_end_of_the_track_pauses_there_and_preloads_nothing() {
         "the queue did not move on"
     );
 }
+
+/// The settings page with `row` selected.
+fn on_setting(row: settings::Setting) -> App {
+    let mut app = signed_in(sidebar::Section::Settings);
+    while app.settings.current() != row {
+        app.settings.next();
+    }
+    app
+}
+
+fn outputs() -> Vec<settings::Output> {
+    vec![
+        settings::Output {
+            id: "coreaudio:dac".into(),
+            label: "USB DAC".into(),
+        },
+        settings::Output {
+            id: "direct:coreaudio:dac".into(),
+            label: "USB DAC · direct".into(),
+        },
+    ]
+}
+
+#[test]
+fn the_settings_page_lists_the_outputs_each_time_it_is_opened() {
+    // A DAC plugged in after the start is there the next time the page
+    // is opened, without a restart.
+    let mut app = signed_in(sidebar::Section::Music);
+    assert!(matches!(
+        app.update(Action::GoToSection(sidebar::Section::Settings)),
+        Some(Action::ListOutputs)
+    ));
+    app.update(Action::OutputsListed(outputs()));
+    assert_eq!(app.outputs, outputs());
+}
+
+#[test]
+fn the_output_row_picks_with_h_and_l_and_switches_on_enter() {
+    // Opening a device can stall for seconds and a direct one is taken
+    // from every other app, so stepping through the list opens nothing:
+    // Enter does, as it switches the service.
+    let mut app = on_setting(settings::Setting::Output);
+    app.outputs = outputs();
+    assert_eq!(app.config.audio.output, "", "the system's default to start");
+
+    assert!(
+        app.update(Action::CarouselNext).is_none(),
+        "nothing opens yet"
+    );
+    assert_eq!(app.config.audio.output, "coreaudio:dac");
+    app.update(Action::CarouselNext);
+    assert_eq!(app.config.audio.output, "direct:coreaudio:dac");
+    app.update(Action::CarouselNext);
+    assert_eq!(app.config.audio.output, "", "and round to the default");
+    app.update(Action::CarouselPrevious);
+    assert_eq!(app.config.audio.output, "direct:coreaudio:dac");
+
+    assert!(matches!(
+        app.update(Action::ActivateSelection),
+        Some(Action::UseOutput)
+    ));
+}
+
+#[test]
+fn an_output_that_opened_restarts_the_engine_on_it_and_one_that_did_not_says_why() {
+    let mut app = on_setting(settings::Setting::Output);
+    assert!(matches!(
+        app.update(Action::OutputOpened(Ok("USB DAC · direct".into()))),
+        Some(Action::RestartEngine)
+    ));
+    let said = app.status.clone().unwrap_or_default();
+    assert!(said.contains("USB DAC · direct"), "{said}");
+
+    assert!(app
+        .update(Action::OutputOpened(Err("the device is busy".into())))
+        .is_none());
+    let said = app.status.clone().unwrap_or_default();
+    assert!(said.contains("the device is busy"), "{said}");
+}
+
+#[test]
+fn matching_the_sample_rate_is_a_toggle_heard_at_once() {
+    let mut app = on_setting(settings::Setting::MatchRate);
+    assert!(!app.config.audio.match_rate);
+    assert!(matches!(
+        app.update(Action::ActivateSelection),
+        Some(Action::SettingChanged(settings::Setting::MatchRate))
+    ));
+    assert!(app.config.audio.match_rate);
+}
+
+#[test]
+fn the_output_row_names_the_device_and_the_default() {
+    assert_eq!(settings::output_label("", &outputs()), "System default");
+    assert_eq!(
+        settings::output_label("direct:coreaudio:dac", &outputs()),
+        "USB DAC · direct"
+    );
+    assert_eq!(
+        settings::output_label("coreaudio:gone", &outputs()),
+        "coreaudio:gone (not connected)"
+    );
+}
+
+#[test]
+fn stepping_a_row_hands_on_what_has_to_follow_it() {
+    // Heard at once, an engine started again, something off the loop told,
+    // or nothing at all: what each row's change sets going.
+    let step = |row: settings::Setting| {
+        let mut app = on_setting(row);
+        app.update(Action::CarouselNext)
+    };
+    assert!(
+        step(settings::Setting::Equalizer).is_none(),
+        "heard at once"
+    );
+    assert!(matches!(
+        step(settings::Setting::Normalisation),
+        Some(Action::RestartEngine)
+    ));
+    assert!(matches!(
+        step(settings::Setting::Gapless),
+        Some(Action::RestartEngine)
+    ));
+    assert!(matches!(
+        step(settings::Setting::Theme),
+        Some(Action::SettingChanged(settings::Setting::Theme))
+    ));
+    assert!(
+        step(settings::Setting::LastfmKey).is_none(),
+        "typed into, not stepped"
+    );
+}
+
+#[test]
+fn a_direct_output_is_listed_as_such() {
+    let device = |id: &str, direct: bool| music::output::DeviceOption {
+        id: id.into(),
+        name: "USB DAC".into(),
+        card: None,
+        label: "USB DAC".into(),
+        detail: None,
+        system: false,
+        direct,
+        sink: None,
+    };
+    assert_eq!(
+        settings::listed(vec![device("dac", false), device("direct:dac", true)]),
+        outputs_for("dac", "direct:dac"),
+    );
+}
+
+fn outputs_for(shared: &str, direct: &str) -> Vec<settings::Output> {
+    vec![
+        settings::Output {
+            id: shared.into(),
+            label: "USB DAC".into(),
+        },
+        settings::Output {
+            id: direct.into(),
+            label: "USB DAC · direct".into(),
+        },
+    ]
+}
