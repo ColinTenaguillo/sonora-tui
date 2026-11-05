@@ -132,6 +132,118 @@ fn v_shows_the_albums_and_playlists_as_a_list_and_back() {
 }
 
 #[test]
+fn an_opened_playlist_gives_the_list_its_length_and_a_reload_keeps_it() {
+    // No service lists a playlist's length the same way, so it is added up
+    // from the tracks once they are here -- and the list's TIME column has
+    // it from then on, rather than only the banner of the open playlist.
+    let secs = std::time::Duration::from_secs;
+    let mut app = signed_in(sidebar::Section::Playlists);
+    // Two tracks each, which is what opening one brings below.
+    let two = |uuid: &str, title: &str| {
+        let mut p = owned_playlist(uuid, title, false);
+        p.track_count = 2;
+        p
+    };
+    app.playlists = vec![two("u1", "Road"), two("u2", "Focus")];
+    assert_eq!(app.playlists[0].duration, None);
+
+    with_open_playlist(&mut app, "u1");
+    let request = open_request(&app);
+    let tracks = vec![
+        crate::domain::Track::sample("A", "Band", secs(200)),
+        crate::domain::Track::sample("B", "Band", secs(100)),
+    ];
+    app.update(Action::CollectionLoaded { request, tracks });
+    assert_eq!(app.playlists[0].duration, Some(secs(300)));
+    assert_eq!(app.playlists[1].duration, None, "only the one opened");
+
+    // The list comes again -- after a favourite, say -- without lengths:
+    // what was added up stays.
+    app.update(Action::PlaylistsLoaded(vec![
+        two("u1", "Road"),
+        two("u2", "Focus"),
+    ]));
+    assert_eq!(app.playlists[0].duration, Some(secs(300)));
+
+    // And the list draws it, on that row alone.
+    app.open = None;
+    app.config.ui.list_view = true;
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let text = geometry::text(terminal.backend().buffer());
+    let row = |title: &str| {
+        text.lines()
+            .find(|l| l.contains(title))
+            .unwrap_or_else(|| panic!("{text}"))
+            .to_owned()
+    };
+    assert!(row("Road").contains("5:00"), "{text}");
+    assert!(!row("Focus").contains(':'), "{text}");
+}
+
+#[test]
+fn a_playlist_length_is_only_kept_while_it_still_adds_up() {
+    let secs = std::time::Duration::from_secs;
+    let tracks = |n: u64| -> Vec<crate::domain::Track> {
+        (0..n)
+            .map(|i| crate::domain::Track::sample(&format!("T{i}"), "Band", secs(60)))
+            .collect()
+    };
+    let open = |app: &mut App, uuid: &str, got: Vec<crate::domain::Track>| {
+        with_open_playlist(app, uuid);
+        app.open.as_mut().unwrap().request = app.next_request();
+        let request = open_request(app);
+        app.update(Action::CollectionLoaded {
+            request,
+            tracks: got,
+        });
+    };
+    let mut app = signed_in(sidebar::Section::Playlists);
+    let mut road = owned_playlist("u1", "Road", true);
+    road.track_count = 3;
+    app.playlists = vec![road];
+
+    // Some services send only a first page of a long playlist: what came
+    // is not the length of the whole.
+    open(&mut app, "u1", tracks(2));
+    assert_eq!(
+        app.playlists[0].duration, None,
+        "a first page is not the whole"
+    );
+    open(&mut app, "u1", tracks(3));
+    assert_eq!(app.playlists[0].duration, Some(secs(180)));
+
+    // Tracks that carry no length add up to nothing, which says nothing.
+    let silent = vec![crate::domain::Track::sample("S", "Band", secs(0)); 3];
+    open(&mut app, "u1", silent);
+    assert_eq!(
+        app.playlists[0].duration,
+        Some(secs(180)),
+        "a known length stays"
+    );
+
+    // A track added here changes the count, and the length with it.
+    app.update(Action::PlaylistEdited {
+        message: "added".into(),
+        uuid: "u1".into(),
+        deleted: false,
+        count_delta: 1,
+    });
+    assert_eq!(
+        app.playlists[0].duration, None,
+        "no longer the length of it"
+    );
+
+    // Nor is a length carried over a reload that counts other tracks.
+    open(&mut app, "u1", tracks(4));
+    assert_eq!(app.playlists[0].duration, Some(secs(240)));
+    let mut grown = owned_playlist("u1", "Road", true);
+    grown.track_count = 30;
+    app.update(Action::PlaylistsLoaded(vec![grown]));
+    assert_eq!(app.playlists[0].duration, None, "edited elsewhere");
+}
+
+#[test]
 fn a_selected_cards_shade_stays_out_of_the_sidebar() {
     // The shade is a column wider than the card, so the leftmost card's
     // ran over the rule and into the nav beside it.

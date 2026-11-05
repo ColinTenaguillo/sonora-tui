@@ -2944,12 +2944,7 @@ impl App {
                 self.explore_loaded = true;
                 None
             }
-            Action::PlaylistsLoaded(playlists) => {
-                self.playlists = playlists;
-                self.playlist_grid.clamp(self.playlists.len());
-                self.refresh_collection_home();
-                None
-            }
+            Action::PlaylistsLoaded(playlists) => self.on_playlists_loaded(playlists),
             Action::AlbumsLoaded(albums) => {
                 self.albums = albums;
                 self.album_grid.clamp(self.albums.len());
@@ -3449,11 +3444,56 @@ impl App {
                 if let Some(open) = self.open.as_mut() {
                     open.detail = detail;
                 }
+                let opened = self.open.as_ref().and_then(|o| o.target.clone());
+                if let Some(Collection::Playlist(uuid)) = opened {
+                    self.note_playlist_length(&uuid, self.tracks.len(), total);
+                }
             }
             // Closed, or already moved on to another album: this
             // reply is for a view that is no longer on screen.
             _ => tracing::info!("dropping tracks for {request:?}, no longer open"),
         }
+        None
+    }
+
+    /// The length of a playlist whose `held` tracks have arrived, kept on its
+    /// entry in the list: no service lists one the same way, so the TIME
+    /// column fills in as playlists are opened. Only when they are all of
+    /// it -- some services send a long playlist's first page -- and only
+    /// when they say how long they are.
+    fn note_playlist_length(&mut self, uuid: &str, held: usize, total: std::time::Duration) {
+        let Some(playlist) = self.playlists.iter_mut().find(|p| p.uuid == uuid) else {
+            return;
+        };
+        let whole = playlist.track_count == 0 || held >= playlist.track_count as usize;
+        if !whole || total.is_zero() {
+            return;
+        }
+        playlist.duration = Some(total);
+        // The collection home's playlist cards carry the length too.
+        self.refresh_collection_home();
+    }
+
+    /// The list of playlists again, keeping the lengths added up so far for
+    /// the ones that come back without one and still hold as many tracks.
+    fn on_playlists_loaded(
+        &mut self,
+        mut playlists: Vec<crate::library::Playlist>,
+    ) -> Option<Action> {
+        let known: std::collections::HashMap<&str, (u32, std::time::Duration)> = self
+            .playlists
+            .iter()
+            .filter_map(|p| Some((p.uuid.as_str(), (p.track_count, p.duration?))))
+            .collect();
+        for playlist in playlists.iter_mut().filter(|p| p.duration.is_none()) {
+            playlist.duration = known
+                .get(playlist.uuid.as_str())
+                .filter(|(count, _)| *count == playlist.track_count)
+                .map(|(_, length)| *length);
+        }
+        self.playlists = playlists;
+        self.playlist_grid.clamp(self.playlists.len());
+        self.refresh_collection_home();
         None
     }
 
@@ -3863,6 +3903,11 @@ impl App {
         self.say(message);
         if let Some(p) = self.playlists.iter_mut().find(|p| p.uuid == uuid) {
             p.track_count = p.track_count.saturating_add_signed(count_delta);
+            // The length added up before the edit is no longer this
+            // playlist's; reopening adds it up again.
+            if count_delta != 0 {
+                p.duration = None;
+            }
         }
         let open_is_it = matches!(
             self.open.as_ref().and_then(|o| o.target.as_ref()),
