@@ -178,23 +178,108 @@ fn playlist(p: music::Playlist) -> Playlist {
     }
 }
 
-/// At most this many artists read off a search's tracks and albums.
-const ARTISTS_BEHIND: usize = 20;
+/// At most this many artists a search shows, the service's own and the
+/// ones behind the tracks and albums it found together.
+const ARTISTS_SHOWN: usize = 20;
 
-/// One artist read off a search's results.
+/// An artist a search may show: one the service's own search named, with
+/// its picture, or one read off the tracks and albums it found.
 #[derive(Debug, PartialEq, Eq)]
-struct Behind {
+struct ShownArtist {
     id: String,
     name: String,
+    /// The service's own picture, for an artist its search named.
+    picture: Option<String>,
     /// The cover of the first track or album they were seen on: what the
     /// card shows when the service has no portrait to give for the id.
     cover: Option<String>,
 }
 
-/// The artists behind what a search found, for a service that does not
-/// search them itself: each once, the most frequent first.
-fn artists_behind(tracks: &[music::Track], albums: &[music::Album]) -> Vec<Behind> {
-    let mut seen: Vec<(Behind, usize)> = Vec::new();
+/// The artists a service's own search found. A failed artist search is
+/// none -- the search still answers with the tracks and albums it found,
+/// and the artists behind them stand in -- unless the session was refused,
+/// which sends the listener back to sign in as any other search would.
+fn found_artists(found: anyhow::Result<Vec<music::SavedArtist>>) -> Result<Vec<Artist>> {
+    match found.map_err(error) {
+        Ok(found) => Ok(found.into_iter().map(artist).collect()),
+        Err(Error::Unauthorized) => Err(Error::Unauthorized),
+        Err(Error::Other(why)) => {
+            tracing::warn!("the artist search failed: {why}");
+            Ok(Vec::new())
+        }
+    }
+}
+
+/// The artists a search shows: the service's own first, as it ranked
+/// them, each once, then the ones behind the tracks and albums it found
+/// that it did not name. Those keep up to half the row, or a broad query
+/// would fill it with name matches and hide them. Matched by id alone: two
+/// artists can share a name, and hiding the one behind the tracks found is
+/// worse than one artist showing twice under two ids.
+fn merge_artists(found: Vec<Artist>, behind: Vec<ShownArtist>) -> Vec<ShownArtist> {
+    let covers: std::collections::HashMap<String, Option<String>> = behind
+        .iter()
+        .map(|b| (b.id.clone(), b.cover.clone()))
+        .collect();
+    let mut ids = std::collections::HashSet::new();
+    let mut named = Vec::new();
+    for artist in found {
+        if !ids.insert(artist.id.clone()) {
+            continue;
+        }
+        named.push(ShownArtist {
+            cover: covers.get(&artist.id).cloned().flatten(),
+            id: artist.id,
+            name: artist.name,
+            picture: artist.picture,
+        });
+    }
+    let behind: Vec<ShownArtist> = behind
+        .into_iter()
+        .filter(|b| !ids.contains(&b.id))
+        .collect();
+    let kept_for_behind = behind.len().min(ARTISTS_SHOWN / 2);
+    named
+        .into_iter()
+        .take(ARTISTS_SHOWN - kept_for_behind)
+        .chain(behind)
+        .take(ARTISTS_SHOWN)
+        .collect()
+}
+
+/// The artists shown without a picture of their own: the only ones worth
+/// asking the service for a portrait.
+fn unpictured(shown: &[ShownArtist]) -> Vec<String> {
+    shown
+        .iter()
+        .filter(|s| s.picture.is_none())
+        .map(|s| s.id.clone())
+        .collect()
+}
+
+/// The artists as drawn: the service's picture, else a portrait, else a
+/// cover they were seen on.
+fn pictured(
+    shown: Vec<ShownArtist>,
+    portraits: &std::collections::HashMap<String, String>,
+) -> Vec<Artist> {
+    shown
+        .into_iter()
+        .map(|b| Artist {
+            picture: b
+                .picture
+                .or_else(|| portraits.get(&b.id).cloned())
+                .or(b.cover),
+            id: b.id,
+            name: b.name,
+        })
+        .collect()
+}
+
+/// The artists behind what a search found: each once, the most frequent
+/// first.
+fn artists_behind(tracks: &[music::Track], albums: &[music::Album]) -> Vec<ShownArtist> {
+    let mut seen: Vec<(ShownArtist, usize)> = Vec::new();
     let refs = tracks
         .iter()
         .flat_map(|t| t.artist_refs.iter().map(move |a| (a, &t.cover)))
@@ -213,9 +298,10 @@ fn artists_behind(tracks: &[music::Track], albums: &[music::Album]) -> Vec<Behin
                 }
             }
             None => seen.push((
-                Behind {
+                ShownArtist {
                     id: id.clone(),
                     name: artist.name.clone(),
+                    picture: None,
                     cover: cover.clone(),
                 },
                 1,
@@ -223,7 +309,7 @@ fn artists_behind(tracks: &[music::Track], albums: &[music::Album]) -> Vec<Behin
         }
     }
     seen.sort_by_key(|entry| std::cmp::Reverse(entry.1));
-    seen.truncate(ARTISTS_BEHIND);
+    seen.truncate(ARTISTS_SHOWN);
     seen.into_iter().map(|(b, _)| b).collect()
 }
 
@@ -541,40 +627,34 @@ impl Session {
         Ok(track(self.api.track(&id.0).await.map_err(error)?))
     }
 
-    /// Tracks, albums, playlists, and artists: the service's own where it
-    /// searches them, otherwise the ones behind the tracks and albums.
+    /// Portraits for the artists shown without a picture: no request at all
+    /// when none lacks one.
+    async fn portraits(&self, wanted: Vec<String>) -> std::collections::HashMap<String, String> {
+        if wanted.is_empty() {
+            return Default::default();
+        }
+        self.api.artist_images(wanted).await.unwrap_or_default()
+    }
+
+    /// Tracks, albums, playlists, and artists: the ones the service found by
+    /// name first, then the ones behind the tracks and albums it found.
     pub async fn search(&self, query: &str) -> Result<Results> {
         let (tracks, albums, playlists, artists) = tokio::join!(
             self.api.search(query),
             self.api.search_albums(query),
             self.api.search_playlists(query),
-            self.provider.search_artists(query)
+            self.api.search_artists(query)
         );
         let (tracks, albums) = (tracks.map_err(error)?, albums.map_err(error)?);
-        let mut artists = artists.map_err(error)?;
-        if artists.is_empty() {
-            let behind = artists_behind(&tracks, &albums);
-            let ids = behind.iter().map(|b| b.id.clone()).collect();
-            let pictures = self.api.artist_images(ids).await.unwrap_or_default();
-            artists = behind
-                .into_iter()
-                .map(|b| Artist {
-                    picture: pictures.get(&b.id).cloned().or(b.cover),
-                    id: b.id,
-                    name: b.name,
-                })
-                .collect();
-        }
+        let playlists = playlists.map_err(error)?;
+        let shown = merge_artists(found_artists(artists)?, artists_behind(&tracks, &albums));
+        let portraits = self.portraits(unpictured(&shown)).await;
         Ok(Results {
             query: query.to_owned(),
             tracks: tracks.into_iter().map(track).collect(),
             albums: albums.into_iter().map(album).collect(),
-            artists,
-            playlists: playlists
-                .map_err(error)?
-                .into_iter()
-                .map(playlist)
-                .collect(),
+            artists: pictured(shown, &portraits),
+            playlists: playlists.into_iter().map(playlist).collect(),
         })
     }
 
@@ -656,6 +736,116 @@ mod tests {
             !super::same_tracks(&[], &picks),
             "an empty row repeats nothing"
         );
+    }
+
+    #[test]
+    fn the_services_artists_lead_and_the_ones_behind_follow() {
+        // What the service found by name comes first, as it ranked them;
+        // the artists behind the tracks and albums follow, once each, so a
+        // narrow match by name does not hide them. Pictures come from the
+        // service, then a portrait, then a cover they were seen on --
+        // asked for only for the artists shown without one, once each.
+        let named = |id: &str, picture: Option<&str>| Artist {
+            id: id.into(),
+            name: id.to_uppercase(),
+            picture: picture.map(Into::into),
+        };
+        let seen = |id: &str, name: &str, cover: Option<&str>| super::ShownArtist {
+            id: id.into(),
+            name: name.into(),
+            picture: None,
+            cover: cover.map(Into::into),
+        };
+        // A service may name one artist twice -- YouTube's top result and
+        // its artists shelf -- and it is shown once.
+        let found = vec![
+            named("a", Some("https://x/a")),
+            named("b", None),
+            named("a", Some("https://x/a")),
+            named("e", None),
+        ];
+        let behind = vec![
+            seen("a", "A", None),
+            // Another artist who shares a name with one the service found
+            // is still the one behind those tracks: both are shown.
+            seen("b2", "b", None),
+            seen("e", "E", Some("https://cover/e")),
+            seen("c", "C", Some("https://cover/c")),
+            seen("d", "D", None),
+        ];
+        let shown = super::merge_artists(found, behind);
+        let ids: Vec<&str> = shown.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["a", "b", "e", "b2", "c", "d"],
+            "found first, each once"
+        );
+        assert_eq!(super::unpictured(&shown), ["b", "e", "b2", "c", "d"]);
+
+        let portraits: std::collections::HashMap<String, String> = [
+            ("b".to_string(), "https://face/b".to_string()),
+            ("d".to_string(), "https://face/d".to_string()),
+        ]
+        .into();
+        let artists = super::pictured(shown, &portraits);
+        let pictures: Vec<Option<&str>> = artists.iter().map(|a| a.picture.as_deref()).collect();
+        assert_eq!(
+            pictures,
+            [
+                Some("https://x/a"),
+                Some("https://face/b"),
+                Some("https://cover/e"),
+                None,
+                Some("https://cover/c"),
+                Some("https://face/d"),
+            ],
+            "the service's, a portrait, else a cover -- for a named one too"
+        );
+
+        // A broad query fills the row with name matches; the artists behind
+        // the results keep up to half of it.
+        let many: Vec<Artist> = (0..25)
+            .map(|i| named(&format!("n{i}"), Some("p")))
+            .collect();
+        let five: Vec<super::ShownArtist> = (0..5)
+            .map(|i| seen(&format!("b{i}"), &format!("ShownArtist {i}"), None))
+            .collect();
+        let shown = super::merge_artists(many.clone(), five);
+        assert_eq!(shown.len(), super::ARTISTS_SHOWN);
+        assert!(
+            shown[15..].iter().all(|s| s.id.starts_with('b')),
+            "five behind, last"
+        );
+        assert_eq!(
+            super::merge_artists(many, Vec::new()).len(),
+            super::ARTISTS_SHOWN
+        );
+        assert!(super::unpictured(&super::merge_artists(
+            vec![named("p", Some("p"))],
+            Vec::new()
+        ))
+        .is_empty());
+    }
+
+    #[test]
+    fn a_failed_artist_search_is_none_but_a_refused_session_is_still_refused() {
+        assert!(matches!(
+            super::found_artists(Err(anyhow::anyhow!("rate limited"))),
+            Ok(found) if found.is_empty()
+        ));
+        let refused = anyhow::Error::from(crate::tidal::TidalError::Unauthorized);
+        assert!(matches!(
+            super::found_artists(Err(refused)),
+            Err(super::Error::Unauthorized)
+        ));
+        let one = music::SavedArtist {
+            id: "a".into(),
+            name: "A".into(),
+            cover: Some("https://x/a".into()),
+            added_at: None,
+        };
+        let kept = super::found_artists(Ok(vec![one])).unwrap();
+        assert_eq!(kept[0].picture.as_deref(), Some("https://x/a"));
     }
 
     #[test]
