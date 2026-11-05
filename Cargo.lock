@@ -2823,7 +2823,7 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 [[package]]
 name = "music"
 version = "0.47.0"
-source = "git+https://github.com/sonorahq/sonora?rev=8ac14902c08eb3575973f48e2d3fc0f9ff1287c2#8ac14902c08eb3575973f48e2d3fc0f9ff1287c2"
+source = "git+https://github.com/sonorahq/sonora?rev=899dd729f0a5c8c9a7ab543d0efb4fdff4de2862#899dd729f0a5c8c9a7ab543d0efb4fdff4de2862"
 dependencies = [
  "alsa",
  "anyhow",
@@ -5239,7 +5239,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "storage"
 version = "0.47.0"
-source = "git+https://github.com/sonorahq/sonora?rev=8ac14902c08eb3575973f48e2d3fc0f9ff1287c2#8ac14902c08eb3575973f48e2d3fc0f9ff1287c2"
+source = "git+https://github.com/sonorahq/sonora?rev=899dd729f0a5c8c9a7ab543d0efb4fdff4de2862#899dd729f0a5c8c9a7ab543d0efb4fdff4de2862"
 dependencies = [
  "anyhow",
  "dirs",
@@ -6463,7 +6463,7 @@ dependencies = [
 [[package]]
 name = "webview"
 version = "0.47.0"
-source = "git+https://github.com/sonorahq/sonora?rev=8ac14902c08eb3575973f48e2d3fc0f9ff1287c2#8ac14902c08eb3575973f48e2d3fc0f9ff1287c2"
+source = "git+https://github.com/sonorahq/sonora?rev=899dd729f0a5c8c9a7ab543d0efb4fdff4de2862#899dd729f0a5c8c9a7ab543d0efb4fdff4de2862"
 dependencies = [
  "anyhow",
  "block2",
@@ -6615,7 +6615,7 @@ dependencies = [
 [[package]]
 name = "widevine"
 version = "0.47.0"
-source = "git+https://github.com/sonorahq/sonora?rev=8ac14902c08eb3575973f48e2d3fc0f9ff1287c2#8ac14902c08eb3575973f48e2d3fc0f9ff1287c2"
+source = "git+https://github.com/sonorahq/sonora?rev=899dd729f0a5c8c9a7ab543d0efb4fdff4de2862#899dd729f0a5c8c9a7ab543d0efb4fdff4de2862"
 dependencies = [
  "anyhow",
  "cc",
@@ -7098,7 +7098,7 @@ dependencies = [
 [[package]]
 name = "ytmusic"
 version = "0.1.0"
-source = "git+https://github.com/sonorahq/ytmusic-rs?rev=d47b3ae#d47b3ae3212084e6f3f3027d06b0a9d29dcdcfb9"
+source = "git+https://github.com/sonorahq/ytmusic-rs?rev=937abca#937abcabca6534732fbdec13d4c15e2615190fb6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7114,6 +7114,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
+ "tempfile",
  "tokio",
 ]
 
