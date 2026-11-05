@@ -494,7 +494,9 @@ impl MusicApi for TidalApi {
         })
     }
 
-    /// Every artist this hands out already carries its picture.
+    /// No portraits to look up here: the artists TIDAL's own search names
+    /// carry their picture, and the ones read off the tracks and albums a
+    /// search found fall back to a cover they were seen on.
     async fn artist_images(&self, _ids: Vec<String>) -> Result<HashMap<String, String>> {
         Ok(HashMap::new())
     }
@@ -693,6 +695,13 @@ impl MusicApi for TidalApi {
         Ok(found.albums.into_iter().map(map::album).collect())
     }
 
+    /// TIDAL's search answers artists beside the tracks, albums and
+    /// playlists, through the same `Inner::search` the other three use.
+    async fn search_artists(&self, query: &str) -> Result<Vec<SavedArtist>> {
+        let found = self.inner.search(query).await?;
+        Ok(found.artists.into_iter().map(map::artist).collect())
+    }
+
     async fn search_playlists(&self, query: &str) -> Result<Vec<Playlist>> {
         let found = self.inner.search(query).await?;
         Ok(found.playlists.into_iter().map(map::playlist).collect())
@@ -743,10 +752,6 @@ impl crate::catalogue::Provider for TidalProvider {
 
     fn has_feed(&self) -> bool {
         true
-    }
-
-    async fn search_artists(&self, query: &str) -> Result<Vec<crate::library::Artist>> {
-        Ok(self.inner.search(query).await?.artists)
     }
 
     /// Releases from the artists followed, dated, as the web's Feed page.
