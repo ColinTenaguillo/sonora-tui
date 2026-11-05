@@ -32,6 +32,12 @@ in the terminal, over [sonora](https://github.com/sonorahq/sonora)'s `music` cra
   <img src="docs/demo.gif" alt="A tour: the home page, a search, a hi-res album playing, the artist page and biography, a track queued next, synced lyrics, an Explore genre, a fuzzy-filtered and sorted list, zen, themes switched live in Settings, and the key list">
 </p>
 
+> **Not part of Sonora.** sonora-tui is an independent project, not affiliated
+> with or endorsed by [Sonora](https://github.com/sonorahq/sonora); it builds
+> on Sonora's open-source `music` crate. Please report sonora-tui problems
+> [here](https://github.com/ColinTenaguillo/sonora-tui/issues), not to the
+> Sonora project.
+
 > **Not a piracy tool.** Each service wants the subscription it wants — a
 > paid TIDAL or Spotify Premium account, an Apple Music subscription — and so
 > does this. Nothing here exports streams, keys or licences, and nothing here
