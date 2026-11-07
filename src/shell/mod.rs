@@ -3590,14 +3590,15 @@ impl App {
             if state.query.trim() == results.query {
                 state.pending = false;
                 state.results = results;
-                state.tab = 0;
-                // New results: every tab's position means nothing.
+                // The tab stays: a run of artist searches stays on
+                // Artists. Only the place inside each tab is stale.
                 state.tracks = tracklist::TrackListState::default();
                 state.albums = grid::GridState::default();
                 state.artists = grid::GridState::default();
                 state.playlists = grid::GridState::default();
                 state.top_artists = carousel::CarouselState::default();
                 state.top_albums = carousel::CarouselState::default();
+                state.top = searchview::TopSection::default();
                 state.top_scroll = 0;
             } else {
                 tracing::info!(
