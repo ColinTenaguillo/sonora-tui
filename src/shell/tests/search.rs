@@ -850,9 +850,9 @@ fn the_three_grid_tabs_each_hold_their_own_selection() {
 }
 
 #[test]
-fn new_results_put_every_tab_back_to_the_top() {
-    // A different query is a different list; a position kept from the
-    // last one would point at something unrelated.
+fn new_results_start_every_tab_from_its_first_row() {
+    // New results are a different list, even for the same query; a
+    // position kept from the last one would point at something unrelated.
     let mut app = signed_in(sidebar::Section::Music);
     app.update(Action::BeginSearch);
     for c in "daft punk".chars() {
@@ -868,10 +868,17 @@ fn new_results_put_every_tab_back_to_the_top() {
     }
     assert!(app.search.as_ref().unwrap().tracks.selected > 0);
 
+    app.search.as_mut().unwrap().top = searchview::TopSection::Artists;
+
     // The same query again, with fresh results.
     app.update(Action::SearchLoaded(Box::new(some_results())));
-    assert_eq!(app.search.as_ref().unwrap().tracks.selected, 0);
-    assert_eq!(app.search.as_ref().unwrap().tab, 0);
+    let state = app.search.as_ref().unwrap();
+    assert_eq!(state.tracks.selected, 0);
+    assert_eq!(
+        state.top,
+        searchview::TopSection::default(),
+        "Top results starts where a first search does"
+    );
 }
 
 #[test]
@@ -935,4 +942,65 @@ fn o_on_the_search_tracks_tab_walks_only_the_columns_the_results_draw() {
         Some(tracklist::Column::Duration),
         "but no result carries an added date, so that column is skipped"
     );
+}
+
+/// Search for "daft punk" from the results, with `found` coming back.
+fn search_again(app: &mut App, found: crate::search::Results) {
+    press(app, KeyCode::Char('s'));
+    press(app, KeyCode::Enter);
+    app.update(Action::SearchLoaded(Box::new(found)));
+}
+
+/// Search results for "daft punk", turned to the Artists tab.
+fn on_artists() -> App {
+    let mut app = signed_in(sidebar::Section::Music);
+    app.update(Action::BeginSearch);
+    for c in "daft punk".chars() {
+        key(&mut app, KeyCode::Char(c));
+    }
+    press(&mut app, KeyCode::Enter);
+    app.update(Action::SearchLoaded(Box::new(some_results())));
+    // Only Top results' rows have a "See all".
+    let screen = drawn(&mut app);
+    assert!(
+        screen.contains("See all"),
+        "the first search opens on Top results\n{screen}"
+    );
+    for _ in 0..3 {
+        press(&mut app, KeyCode::Char('t'));
+    }
+    app
+}
+
+#[test]
+fn a_new_search_lands_on_the_tab_that_was_showing() {
+    // Every result reset the view to Top results, so a run of artist
+    // searches meant pressing t back to Artists after each one.
+    let mut app = on_artists();
+    press(&mut app, KeyCode::Char('j'));
+    assert_ne!(app.search.as_ref().unwrap().artists.selected, 0);
+
+    search_again(&mut app, some_results());
+    let screen = drawn(&mut app);
+    assert!(
+        screen.contains("Artist 0") && !screen.contains("See all"),
+        "still on Artists, not back on Top results\n{screen}"
+    );
+    assert_eq!(
+        app.search.as_ref().unwrap().artists.selected,
+        0,
+        "the new results start from their first artist"
+    );
+}
+
+#[test]
+fn a_kept_tab_the_new_search_left_empty_says_so() {
+    let mut app = on_artists();
+    let no_artists = crate::search::Results {
+        artists: Vec::new(),
+        ..some_results()
+    };
+    search_again(&mut app, no_artists);
+    let screen = drawn(&mut app);
+    assert!(screen.contains("Nothing found"), "{screen}");
 }
