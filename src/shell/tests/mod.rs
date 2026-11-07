@@ -78,6 +78,19 @@ fn key(app: &mut App, code: KeyCode) -> Option<Action> {
     app.on_key(KeyEvent::new(code, KeyModifiers::NONE))
 }
 
+/// Press a key and carry out what it asks for, as the event loop does.
+fn press(app: &mut App, code: KeyCode) {
+    if let Some(action) = key(app, code) {
+        app.update(action);
+    }
+}
+
+fn drawn(app: &mut App) -> String {
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|f| draw(f, app)).unwrap();
+    geometry::text(terminal.backend().buffer())
+}
+
 fn with_albums(n: u64) -> App {
     let mut app = signed_in(sidebar::Section::Albums);
     app.albums = (0..n)
