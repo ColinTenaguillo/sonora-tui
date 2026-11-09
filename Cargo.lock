@@ -2822,8 +2822,8 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "music"
-version = "0.47.0"
-source = "git+https://github.com/sonorahq/sonora?rev=899dd729f0a5c8c9a7ab543d0efb4fdff4de2862#899dd729f0a5c8c9a7ab543d0efb4fdff4de2862"
+version = "0.48.1"
+source = "git+https://github.com/sonorahq/sonora?rev=ace5ea21771adc2d1b93ab9fc409a44b270e97a3#ace5ea21771adc2d1b93ab9fc409a44b270e97a3"
 dependencies = [
  "alsa",
  "anyhow",
@@ -5238,8 +5238,8 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "storage"
-version = "0.47.0"
-source = "git+https://github.com/sonorahq/sonora?rev=899dd729f0a5c8c9a7ab543d0efb4fdff4de2862#899dd729f0a5c8c9a7ab543d0efb4fdff4de2862"
+version = "0.48.1"
+source = "git+https://github.com/sonorahq/sonora?rev=ace5ea21771adc2d1b93ab9fc409a44b270e97a3#ace5ea21771adc2d1b93ab9fc409a44b270e97a3"
 dependencies = [
  "anyhow",
  "dirs",
@@ -6462,8 +6462,8 @@ dependencies = [
 
 [[package]]
 name = "webview"
-version = "0.47.0"
-source = "git+https://github.com/sonorahq/sonora?rev=899dd729f0a5c8c9a7ab543d0efb4fdff4de2862#899dd729f0a5c8c9a7ab543d0efb4fdff4de2862"
+version = "0.48.1"
+source = "git+https://github.com/sonorahq/sonora?rev=ace5ea21771adc2d1b93ab9fc409a44b270e97a3#ace5ea21771adc2d1b93ab9fc409a44b270e97a3"
 dependencies = [
  "anyhow",
  "block2",
@@ -6614,8 +6614,8 @@ dependencies = [
 
 [[package]]
 name = "widevine"
-version = "0.47.0"
-source = "git+https://github.com/sonorahq/sonora?rev=899dd729f0a5c8c9a7ab543d0efb4fdff4de2862#899dd729f0a5c8c9a7ab543d0efb4fdff4de2862"
+version = "0.48.1"
+source = "git+https://github.com/sonorahq/sonora?rev=ace5ea21771adc2d1b93ab9fc409a44b270e97a3#ace5ea21771adc2d1b93ab9fc409a44b270e97a3"
 dependencies = [
  "anyhow",
  "cc",
@@ -6623,6 +6623,8 @@ dependencies = [
  "flate2",
  "libc",
  "log",
+ "objc2-app-kit",
+ "objc2-foundation",
  "reqwest 0.13.5",
  "serde_json",
  "sha2",
@@ -7098,7 +7100,7 @@ dependencies = [
 [[package]]
 name = "ytmusic"
 version = "0.1.0"
-source = "git+https://github.com/sonorahq/ytmusic-rs?rev=937abca#937abcabca6534732fbdec13d4c15e2615190fb6"
+source = "git+https://github.com/sonorahq/ytmusic-rs?rev=db4ab87#db4ab872cabd1648a2fb32626471427f2deb07ea"
 dependencies = [
  "anyhow",
  "async-trait",
