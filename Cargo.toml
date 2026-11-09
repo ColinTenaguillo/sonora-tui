@@ -87,15 +87,15 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # It compiles a small C++ shim, so a build from source wants a C++
 # compiler; the module itself is never shipped, only fetched on the
 # machine that uses it, with Google's terms shown first.
-music = { git = "https://github.com/sonorahq/sonora", rev = "899dd729f0a5c8c9a7ab543d0efb4fdff4de2862", features = ["bundled-sqlite", "widevine"] }
+music = { git = "https://github.com/sonorahq/sonora", rev = "ace5ea21771adc2d1b93ab9fc409a44b270e97a3", features = ["bundled-sqlite", "widevine"] }
 # The SQLite files the local-files provider keeps its index in. The same
 # workspace, so the same commit.
-storage = { git = "https://github.com/sonorahq/sonora", rev = "899dd729f0a5c8c9a7ab543d0efb4fdff4de2862", features = ["bundled-sqlite"] }
+storage = { git = "https://github.com/sonorahq/sonora", rev = "ace5ea21771adc2d1b93ab9fc409a44b270e97a3", features = ["bundled-sqlite"] }
 # The service's own sign-in page in a window, for the cookie sign-ins
 # (Apple Music, Deezer, YouTube Music), over a throwaway data store:
 # WKWebView on macOS, WebKitGTK on Linux, opened at runtime so a system
 # without it still starts. The same workspace, so the same commit.
-webview = { git = "https://github.com/sonorahq/sonora", rev = "899dd729f0a5c8c9a7ab543d0efb4fdff4de2862" }
+webview = { git = "https://github.com/sonorahq/sonora", rev = "ace5ea21771adc2d1b93ab9fc409a44b270e97a3" }
 
 # The OS media keys. MPRIS is a D-Bus interface, so it is Linux-only by
 # definition; macOS has its own below.
