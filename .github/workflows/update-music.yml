@@ -54,6 +54,9 @@ jobs:
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "old=${old:0:7}" >> "$GITHUB_OUTPUT"
           echo "new=${new:0:7}" >> "$GITHUB_OUTPUT"
+          # The commit subject is the changelog line and the PR title has to
+          # match it, so both are this one string.
+          echo "subject=build(deps): move music, storage and webview from sonorahq/sonora@${old:0:7} to ${new:0:7}" >> "$GITHUB_OUTPUT"
 
       - name: Install the audio headers
         if: steps.pin.outputs.changed == 'true'
@@ -79,11 +82,16 @@ jobs:
         if: steps.pin.outputs.changed == 'true'
         with:
           branch: deps/music
-          title: "build(deps): bump music to sonorahq/sonora@${{ steps.pin.outputs.new }}"
-          commit-message: "build(deps): bump music from sonorahq/sonora@${{ steps.pin.outputs.old }} to ${{ steps.pin.outputs.new }}"
+          # Without this the commit is signed with the login of whoever
+          # triggered the run, a second author name in the history.
+          author: Colin Tenaguillo <36203690+ColinTenaguillo@users.noreply.github.com>
+          title: ${{ steps.pin.outputs.subject }}
+          commit-message: ${{ steps.pin.outputs.subject }}
           body: |
-            Re-pins the `music` git dependency from `${{ steps.pin.outputs.old }}` to `${{ steps.pin.outputs.new }}`.
+            Re-pins the `music`, `storage` and `webview` git dependencies from `${{ steps.pin.outputs.old }}` to `${{ steps.pin.outputs.new }}`.
             Built and tested on ubuntu in the workflow run that opened this PR.
+
+            Before merging, add to the commit subject and to this title what the range brings: the workflow cannot tell.
 
             https://github.com/sonorahq/sonora/compare/${{ steps.pin.outputs.old }}...${{ steps.pin.outputs.new }}
           delete-branch: true
