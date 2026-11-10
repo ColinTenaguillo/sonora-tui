@@ -3268,6 +3268,9 @@ impl App {
     // arms appear there.
 
     fn on_error(&mut self, message: String) -> Option<Action> {
+        // An error often quotes the address it failed on, token included,
+        // and what is on screen ends up in screenshots.
+        let message = music::redact(&message).into_owned();
         // A failed request is still an answer: the pane stops
         // waiting, or a view whose fetch died says "loading" for
         // the rest of the session.

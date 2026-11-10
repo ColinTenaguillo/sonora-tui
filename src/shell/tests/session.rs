@@ -405,6 +405,23 @@ fn with_a_session_an_error_still_routes_to_the_status_bar() {
 }
 
 #[test]
+fn an_error_is_shown_without_the_token_in_its_address() {
+    let mut app = App {
+        session: Some(sample_session()),
+        ..App::default()
+    };
+
+    app.update(Action::Error(
+        "error sending request for url (https://api.example/v1/me?token=s3cret)".into(),
+    ));
+
+    assert_eq!(
+        app.status.as_deref(),
+        Some("error sending request for url (https://api.example/v1/me?<redacted>)")
+    );
+}
+
+#[test]
 fn the_cookie_prompt_opens_the_sign_in_window_and_closing_it_leaves_the_paste_box() {
     // The service wants cookies: its own sign-in page opens in a window
     // at once, with no key to press. Closing the window brings the paste

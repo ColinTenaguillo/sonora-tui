@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+pub mod log;
+
 pub mod paths {
     use std::path::PathBuf;
 
