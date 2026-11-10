@@ -61,13 +61,8 @@ fn app() -> anyhow::Result<()> {
     if let Some(dir) = sonora_tui::config::paths::cache_dir() {
         std::fs::create_dir_all(&dir)?;
         let appender = tracing_appender::rolling::never(&dir, "sonora-tui.log");
-        tracing_subscriber::fmt()
-            .with_writer(appender)
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| "sonora_tui=info,rodio=warn".into()),
-            )
-            .init();
+        use tracing_subscriber::util::SubscriberInitExt;
+        sonora_tui::config::log::to(appender).init();
     }
 
     // On macOS a runtime is already running on this thread -- `main` handed
