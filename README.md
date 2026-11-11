@@ -161,9 +161,11 @@ Headers, the `Cookie` line); Enter on the empty box opens the window
 again. Cookies, passwords and tokens are kept
 by the provider's own credential store, never written to the config.
 
-What each view shows is what the service answers with. The feed, the mixes
-and the hi-res badge are TIDAL's; a Subsonic server has no Explore; the
-local library has no radio.
+What each view shows is what the service answers with. The feed and the
+mixes are TIDAL's; a Subsonic server has no Explore; the local library has
+no radio. The quality badge shows on any service that names how its stream
+is encoded. The audio quality in Settings is asked of every service that
+has levels to choose from, starting with the next track.
 
 ### Subsonic
 

@@ -89,11 +89,6 @@ impl Session {
         self.meta.clone()
     }
 
-    /// What to ask for from now on. A service with one quality ignores it.
-    pub fn set_quality(&self, wanted: Quality) {
-        self.meta.set_quality(wanted);
-    }
-
     /// The tracks a station built on `seed` plays, for the radio key and
     /// autoplay. Empty where the service has no stations.
     pub async fn track_radio(&self, seed: &TrackId) -> Result<Vec<Track>> {

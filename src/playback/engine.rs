@@ -5,6 +5,7 @@
 //! translation between the shell's vocabulary and the engine's, and the
 //! `Fetch` that teaches the engine TIDAL is in `fetch.rs`.
 
+use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -14,7 +15,8 @@ use crate::playback::fetch::{Meta, TidalFetch};
 
 /// What the engine's events leave out and the badge wants: the bit depth,
 /// the rate and the tier of the stream that just started, and why a load
-/// failed. TIDAL's fetch records them; another service has none to give.
+/// failed. TIDAL's fetch records them; for another service the engine's
+/// own word on the stream is all there is.
 pub trait StreamMeta: Send + Sync {
     fn take_meta(&self, _id: &str) -> Option<Meta> {
         None
@@ -45,12 +47,15 @@ impl StreamMeta for TidalFetch {
 
 /// What an engine is started with, from the user's settings. The
 /// equaliser is a shared handle: the engine keeps reading it, so a preset
-/// chosen later reaches the output without a restart. The two flags are
-/// read once, at the start, so changing them restarts the engine.
+/// chosen later reaches the output without a restart. The rest is read
+/// once, at the start: changing a flag restarts the engine, and a changed
+/// quality starts a fresh one at the next track.
 #[derive(Clone, Debug)]
 pub struct Options {
     pub normalisation: bool,
     pub gapless: bool,
+    /// What every service is asked for, where it has levels to choose from.
+    pub quality: crate::domain::Quality,
     pub equalizer: music::Equalizer,
 }
 
@@ -59,6 +64,7 @@ impl Default for Options {
         Self {
             normalisation: false,
             gapless: true,
+            quality: crate::domain::Quality::HiResLossless,
             equalizer: music::equalizer::EqualizerWriter::new(
                 false,
                 music::equalizer::Preset::Flat.curve(),
@@ -107,6 +113,11 @@ pub enum Cmd {
         meta: Arc<dyn StreamMeta>,
         options: Options,
     },
+    /// What to ask for from the next track on. An engine asks for one
+    /// quality from its start, so another one starts a fresh engine and
+    /// the same one does nothing. Sent before each `Play`, so the track
+    /// being heard is left alone.
+    Quality(crate::domain::Quality),
     /// Fetch and play a track. What to ask for, and with which token, the
     /// service's fetch already knows.
     Play(TrackId),
@@ -244,14 +255,26 @@ fn config(options: &Options) -> music::PlaybackConfig {
         position_interval: Duration::from_millis(250),
         gain: 1.0,
         equalizer: options.equalizer.clone(),
-        // The server-side conversion, the quality pick, the level meter,
-        // the spectrum analyzer and the download vault are sonora's desktop
-        // features; the TUI has no screen for any of them yet.
+        quality: engine_quality(options.quality),
+        // The server-side conversion, the level meter, the spectrum
+        // analyzer and the download vault are sonora's desktop features;
+        // the TUI has no screen for any of them yet.
         transcode: music::Transcode::default(),
-        quality: music::Quality::default(),
         meter: music::Meter::default(),
         analyzer: music::Analyzer::default(),
         vault: None,
+    }
+}
+
+/// The setting's level as sonora names it. A service takes the best it
+/// serves at or below it.
+fn engine_quality(wanted: crate::domain::Quality) -> music::Quality {
+    use crate::domain::Quality;
+    match wanted {
+        Quality::HiResLossless => music::Quality::HiRes,
+        Quality::Lossless => music::Quality::Lossless,
+        Quality::High => music::Quality::High,
+        Quality::Low => music::Quality::Low,
     }
 }
 
@@ -266,15 +289,56 @@ fn forward_commands(
     // session, and a fresh engine starts at full.
     let mut volume = 1.0f32;
     let segue: SharedSegue = Arc::default();
+    // What the running engine was started with, to start another like it.
+    let mut attached: Option<Attached> = None;
     while let Ok(cmd) = cmds.recv() {
         match cmd {
             Cmd::Attach {
                 factory,
                 meta,
                 options,
-            } => player = Some(attach(&*factory, meta, &options, volume, &segue, &events)),
+            } => {
+                let fresh = Attached {
+                    factory,
+                    meta,
+                    options,
+                };
+                player = Some(fresh.start(volume, &segue, &events));
+                attached = Some(fresh);
+            }
+            Cmd::Quality(wanted) => {
+                if let Some(running) = attached.as_mut().filter(|a| a.options.quality != wanted) {
+                    running.options.quality = wanted;
+                    player = Some(running.start(volume, &segue, &events));
+                }
+            }
             cmd => command(player.as_deref(), cmd, &mut volume, &segue, &events),
         }
+    }
+}
+
+/// What an engine was started with.
+struct Attached {
+    factory: Arc<dyn music::PlaybackFactory>,
+    meta: Arc<dyn StreamMeta>,
+    options: Options,
+}
+
+impl Attached {
+    fn start(
+        &self,
+        volume: f32,
+        segue: &SharedSegue,
+        events: &tokio::sync::mpsc::UnboundedSender<PlaybackEvent>,
+    ) -> Box<dyn music::Player> {
+        attach(
+            &*self.factory,
+            self.meta.clone(),
+            &self.options,
+            volume,
+            segue,
+            events,
+        )
     }
 }
 
@@ -288,6 +352,9 @@ fn attach(
     events: &tokio::sync::mpsc::UnboundedSender<PlaybackEvent>,
 ) -> Box<dyn music::Player> {
     *lock(segue) = Segue::default();
+    // An engine asks for one quality from its start, so a fetch of our own
+    // hears of it here too rather than at some later play.
+    meta.set_quality(options.quality);
     let (fresh, stream) = factory.start(config(options));
     fresh.set_gain(volume);
     if let Some(spectrum) = fresh.spectrum() {
@@ -331,7 +398,7 @@ fn command(
     };
     match cmd {
         // Taken by the loop before it gets here.
-        Cmd::Attach { .. } => {}
+        Cmd::Attach { .. } | Cmd::Quality(_) => {}
         Cmd::Play(id) => {
             let seamless = lock(segue).seamless(&id);
             if let Err(error) = player.load(id.as_str(), Duration::ZERO, seamless) {
@@ -374,9 +441,7 @@ fn forward_events(
             return;
         }
     };
-    // The track whose `Started` has gone out, so a resume or a seek on it
-    // does not reset the badge and the position.
-    let mut announced: Option<String> = None;
+    let mut starts = Starts::default();
     runtime.block_on(async {
         while let Some(event) = events.next().await {
             // Before the shell hears of it: its `Play` for what follows
@@ -384,7 +449,7 @@ fn forward_events(
             if matches!(event, music::PlaybackEvent::Ended { .. }) {
                 lock(&segue).ended();
             }
-            let Some(event) = translate(event, &mut announced, meta.as_ref()) else {
+            let Some(event) = translate(event, &mut starts, meta.as_ref()) else {
                 continue;
             };
             if out.send(event).is_err() {
@@ -394,33 +459,85 @@ fn forward_events(
     });
 }
 
+/// What the event thread remembers between the engine's events, to tell
+/// the shell of each start once and with what the stream is.
+#[derive(Default)]
+struct Starts {
+    /// The track whose `Started` has gone out, so a resume or a seek on it
+    /// does not reset the badge and the position.
+    announced: Option<String>,
+    /// What the engine said of each track it opened and has not yet
+    /// played: it opens the next one while this one is still heard.
+    // ponytail: a track opened and never played, or sought in, keeps its
+    // entry until the engine is replaced. A few bytes each; drop them on
+    // `Ended` if a session ever shows it matters.
+    signals: HashMap<String, Meta>,
+}
+
+impl Starts {
+    /// The `Started` of a track the shell has not been told of yet.
+    fn start(&mut self, id: String, meta: &dyn StreamMeta) -> PlaybackEvent {
+        let signal = self.signals.remove(&id);
+        // The fetch's own record first: TIDAL's answer names the tier,
+        // where the engine only knows what the decoder saw. A stream
+        // nobody described still started: the badge is left blank rather
+        // than the track left looking stopped.
+        let found = meta.take_meta(&id).or(signal).unwrap_or(Meta {
+            bit_depth: None,
+            delivered: crate::domain::Quality::Lossless,
+            sample_rate: 0,
+        });
+        self.announced = Some(id);
+        PlaybackEvent::Started {
+            bit_depth: found.bit_depth,
+            sample_rate: found.sample_rate,
+            delivered: found.delivered,
+        }
+    }
+}
+
+/// The engine's word on a stream, as the badge reads one, where the
+/// service named its encoding. Without a name the rate alone would be
+/// drawn as lossy or as lossless, and either may be wrong: no badge. The
+/// tier above lossless follows from the depth and the rate.
+fn signal_meta(track: &music::TrackSignal) -> Option<Meta> {
+    use crate::domain::Quality;
+    use music::Encoding;
+    let delivered = match track.encoding? {
+        Encoding::Flac { .. } | Encoding::Alac { .. } | Encoding::Pcm { .. } => Quality::Lossless,
+        Encoding::Aac { .. }
+        | Encoding::Vorbis { .. }
+        | Encoding::Mp3 { .. }
+        | Encoding::Opus { .. } => Quality::High,
+        Encoding::Other => return None,
+    };
+    Some(Meta {
+        bit_depth: track.encoding.and_then(Encoding::depth),
+        delivered,
+        sample_rate: track.rate,
+    })
+}
+
 fn translate(
     event: music::PlaybackEvent,
-    announced: &mut Option<String>,
+    starts: &mut Starts,
     meta: &dyn StreamMeta,
 ) -> Option<PlaybackEvent> {
     use music::PlaybackEvent as Engine;
     match event {
-        Engine::Playing { id: Some(id), .. } if announced.as_deref() != Some(id.as_str()) => {
-            // A service whose fetch says nothing about the stream still
-            // started one: the badge is left blank rather than the track
-            // left looking stopped.
-            let found = meta.take_meta(&id).unwrap_or(Meta {
-                bit_depth: None,
-                delivered: crate::domain::Quality::Lossless,
-                sample_rate: 0,
-            });
-            *announced = Some(id);
-            Some(PlaybackEvent::Started {
-                bit_depth: found.bit_depth,
-                sample_rate: found.sample_rate,
-                delivered: found.delivered,
-            })
+        Engine::Signal { id, track } => {
+            if let Some(found) = signal_meta(&track) {
+                starts.signals.insert(id, found);
+            }
+            None
+        }
+        Engine::Playing { id: Some(id), .. } if starts.announced.as_deref() != Some(&id) => {
+            Some(starts.start(id, meta))
         }
         Engine::Position { at, .. } => Some(PlaybackEvent::Position(at)),
         Engine::Downloaded { id: Some(id) } => Some(PlaybackEvent::Downloaded(TrackId::from(id))),
         Engine::Ended { .. } => {
-            *announced = None;
+            starts.announced = None;
             Some(PlaybackEvent::Finished)
         }
         Engine::Unavailable { id: Some(id) } => {
@@ -453,8 +570,7 @@ fn translate(
         | Engine::Seeked { .. }
         | Engine::Downloaded { id: None }
         | Engine::Unavailable { id: None }
-        | Engine::Throttled { id: None }
-        | Engine::Signal { .. } => None,
+        | Engine::Throttled { id: None } => None,
     }
 }
 
@@ -472,13 +588,12 @@ mod tests {
 
     #[test]
     fn the_length_of_a_stream_reaches_the_shell() {
-        let mut announced = None;
         let got = translate(
             music::PlaybackEvent::Length {
                 id: Some("t".into()),
                 duration: Duration::from_secs(90),
             },
-            &mut announced,
+            &mut Starts::default(),
             &NoMeta,
         );
         assert!(matches!(got, Some(PlaybackEvent::Length(d)) if d == Duration::from_secs(90)));
@@ -514,7 +629,7 @@ mod tests {
         let heard = Some(("t".to_owned(), Duration::from_secs(31)));
         let got = translate(
             music::PlaybackEvent::OutputChanged { heard },
-            &mut None,
+            &mut Starts::default(),
             &NoMeta,
         );
         assert!(
@@ -562,7 +677,7 @@ mod tests {
         // `Playing` on every resume and after every seek, and a resume
         // that drew the bar back to zero would be a bug the user sees.
         let fetch = fetch();
-        let mut announced = None;
+        let mut starts = Starts::default();
         let playing = |at| music::PlaybackEvent::Playing {
             id: Some("1".into()),
             at,
@@ -576,7 +691,7 @@ mod tests {
                 sample_rate: 96_000,
             },
         );
-        match translate(playing(Duration::ZERO), &mut announced, &fetch) {
+        match translate(playing(Duration::ZERO), &mut starts, &fetch) {
             Some(PlaybackEvent::Started {
                 bit_depth,
                 sample_rate,
@@ -589,42 +704,202 @@ mod tests {
             }
             other => panic!("expected Started, got {other:?}"),
         }
-        assert_eq!(announced.as_deref(), Some("1"));
+        assert_eq!(starts.announced.as_deref(), Some("1"));
 
         // A resume, or the engine confirming a seek: same track, no badge reset.
-        assert!(translate(playing(Duration::from_secs(30)), &mut announced, &fetch).is_none());
-        assert!(translate(playing(Duration::ZERO), &mut announced, &fetch).is_none());
+        assert!(translate(playing(Duration::from_secs(30)), &mut starts, &fetch).is_none());
+        assert!(translate(playing(Duration::ZERO), &mut starts, &fetch).is_none());
     }
 
     #[test]
     fn a_stream_that_says_nothing_about_itself_is_still_announced() {
         // Another service's fetch records no meta. The track started all
         // the same, and a shell that never hears so draws it stopped.
-        let mut announced = None;
+        let mut starts = Starts::default();
         let event = translate(
             music::PlaybackEvent::Playing {
                 id: Some("sub-1".into()),
                 at: Duration::ZERO,
             },
-            &mut announced,
+            &mut starts,
             &NoMeta,
         );
         assert!(
             matches!(event, Some(PlaybackEvent::Started { sample_rate: 0, .. })),
             "{event:?}"
         );
-        assert_eq!(announced.as_deref(), Some("sub-1"));
+        assert_eq!(starts.announced.as_deref(), Some("sub-1"));
+    }
+
+    fn signal(id: &str, encoding: Option<music::Encoding>, rate: u32) -> music::PlaybackEvent {
+        music::PlaybackEvent::Signal {
+            id: id.into(),
+            track: music::TrackSignal {
+                encoding,
+                rate,
+                channels: 2,
+                normalisation: music::Normalisation::Off,
+            },
+        }
+    }
+
+    /// What the shell is told once `id` plays, after the engine's events
+    /// before it.
+    fn started(
+        before: Vec<music::PlaybackEvent>,
+        id: &str,
+        meta: &dyn StreamMeta,
+    ) -> (Option<u8>, u32, Quality) {
+        let mut starts = Starts::default();
+        for event in before {
+            assert!(translate(event, &mut starts, meta).is_none());
+        }
+        let playing = music::PlaybackEvent::Playing {
+            id: Some(id.into()),
+            at: Duration::ZERO,
+        };
+        match translate(playing, &mut starts, meta) {
+            Some(PlaybackEvent::Started {
+                bit_depth,
+                sample_rate,
+                delivered,
+            }) => (bit_depth, sample_rate, delivered),
+            other => panic!("expected Started, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn what_the_engine_says_of_a_stream_fills_the_badge_of_any_service() {
+        let flac = music::Encoding::Flac {
+            depth: 24,
+            rate: 96_000,
+        };
+        assert_eq!(
+            started(vec![signal("a", Some(flac), 96_000)], "a", &NoMeta),
+            (Some(24), 96_000, Quality::Lossless)
+        );
+        let vorbis = music::Encoding::Vorbis { kbps: 320 };
+        assert_eq!(
+            started(vec![signal("a", Some(vorbis), 44_100)], "a", &NoMeta),
+            (None, 44_100, Quality::High),
+            "lossy, whatever its bit rate"
+        );
+        for unnamed in [None, Some(music::Encoding::Other)] {
+            assert_eq!(
+                started(vec![signal("a", unnamed, 48_000)], "a", &NoMeta),
+                (None, 0, Quality::Lossless),
+                "an encoding nobody named is drawn as nothing, not guessed"
+            );
+        }
+    }
+
+    #[test]
+    fn a_track_lined_up_keeps_its_own_signal_until_it_plays() {
+        // The engine opens the next track while this one plays, at times
+        // before it has said this one plays, and a seek opens this one
+        // again: each start reads its own track's signal.
+        let alac = music::Encoding::Alac { depth: 16 };
+        let mp3 = music::Encoding::Mp3 { kbps: 128 };
+        let mut starts = Starts::default();
+        let play = |starts: &mut Starts, events: Vec<music::PlaybackEvent>| {
+            events
+                .into_iter()
+                .filter_map(|event| translate(event, starts, &NoMeta))
+                .last()
+        };
+        let playing = |id: &str| music::PlaybackEvent::Playing {
+            id: Some(id.into()),
+            at: Duration::ZERO,
+        };
+        play(
+            &mut starts,
+            vec![
+                signal("a", Some(mp3), 44_100),
+                signal("b", Some(alac), 44_100),
+                playing("a"),
+            ],
+        );
+        let next = play(
+            &mut starts,
+            vec![signal("a", Some(mp3), 44_100), playing("b")],
+        );
+        assert!(
+            matches!(
+                next,
+                Some(PlaybackEvent::Started {
+                    bit_depth: Some(16),
+                    delivered: Quality::Lossless,
+                    ..
+                })
+            ),
+            "{next:?}"
+        );
+        assert!(!starts.signals.contains_key("b"), "read once");
+    }
+
+    #[test]
+    fn a_fetch_that_records_its_own_stream_is_believed_over_the_engine() {
+        // TIDAL's answer names the tier; the decoder only knows the rate.
+        let fetch = fetch();
+        fetch.record_meta(
+            "1",
+            Meta {
+                bit_depth: Some(24),
+                delivered: Quality::HiResLossless,
+                sample_rate: 96_000,
+            },
+        );
+        assert_eq!(
+            started(vec![signal("1", None, 96_000)], "1", &fetch),
+            (Some(24), 96_000, Quality::HiResLossless)
+        );
+    }
+
+    /// A service's fetch that writes down the quality it is told to ask for.
+    #[derive(Default)]
+    struct Asked(Mutex<Vec<Quality>>);
+
+    impl StreamMeta for Asked {
+        fn set_quality(&self, wanted: Quality) {
+            self.0.lock().unwrap().push(wanted);
+        }
+    }
+
+    #[test]
+    fn an_engine_starts_at_the_quality_the_settings_ask_for() {
+        // Both who fetch hear of it: sonora's factory through its config,
+        // and a fetch of our own through its handle.
+        let cases = [
+            (Quality::HiResLossless, "hi-res"),
+            (Quality::Lossless, "lossless"),
+            (Quality::High, "high"),
+            (Quality::Low, "low"),
+        ];
+        for (quality, named) in cases {
+            let engine = Recorder::default();
+            let asked = Arc::new(Asked::default());
+            let (out, _events) = tokio::sync::mpsc::unbounded_channel();
+            let options = Options {
+                quality,
+                ..Options::default()
+            };
+            attach(&engine, asked.clone(), &options, 1.0, &Arc::default(), &out);
+            assert_eq!(
+                engine.0.lock().unwrap().first().map(String::as_str),
+                Some(format!("start {named}").as_str())
+            );
+            assert_eq!(*asked.0.lock().unwrap(), [quality]);
+        }
     }
 
     #[test]
     fn a_failed_load_names_the_track_and_the_reason() {
         let fetch = fetch();
-        let mut announced = None;
         let event = translate(
             music::PlaybackEvent::Unavailable {
                 id: Some("655911".into()),
             },
-            &mut announced,
+            &mut Starts::default(),
             &fetch,
         );
         match event {
@@ -637,11 +912,43 @@ mod tests {
     }
 
     #[test]
+    fn the_rest_of_what_the_engine_says_reaches_the_shell_in_its_own_words() {
+        let tell = |event| translate(event, &mut Starts::default(), &NoMeta);
+        let id = || Some("7".to_owned());
+        let at = Duration::from_secs(12);
+        assert!(matches!(
+            tell(music::PlaybackEvent::Position { id: id(), at }),
+            Some(PlaybackEvent::Position(got)) if got == at
+        ));
+        assert!(matches!(
+            tell(music::PlaybackEvent::Downloaded { id: id() }),
+            Some(PlaybackEvent::Downloaded(got)) if got == TrackId::from("7")
+        ));
+        assert!(matches!(
+            tell(music::PlaybackEvent::Throttled { id: id() }),
+            Some(PlaybackEvent::Failed { id, message })
+                if id == TrackId::from("7") && message.contains("rate limiting")
+        ));
+        assert!(matches!(
+            tell(music::PlaybackEvent::Refused),
+            Some(PlaybackEvent::Error(message)) if message.contains("playback keys")
+        ));
+    }
+
+    /// Track 1 already announced to the shell.
+    fn playing_one() -> Starts {
+        Starts {
+            announced: Some("1".to_owned()),
+            ..Starts::default()
+        }
+    }
+
+    #[test]
     fn a_gated_load_expires_the_session() {
         let fetch = fetch();
-        let mut announced = Some("1".to_owned());
+        let mut starts = playing_one();
         assert!(matches!(
-            translate(music::PlaybackEvent::Gated, &mut announced, &fetch),
+            translate(music::PlaybackEvent::Gated, &mut starts, &fetch),
             Some(PlaybackEvent::SessionExpired)
         ));
     }
@@ -650,24 +957,24 @@ mod tests {
     fn the_end_of_a_track_clears_the_announcement() {
         // So the same track played twice in a row is announced twice.
         let fetch = fetch();
-        let mut announced = Some("1".to_owned());
+        let mut starts = playing_one();
         assert!(matches!(
             translate(
                 music::PlaybackEvent::Ended {
                     id: Some("1".into())
                 },
-                &mut announced,
+                &mut starts,
                 &fetch
             ),
             Some(PlaybackEvent::Finished)
         ));
-        assert_eq!(announced, None);
+        assert_eq!(starts.announced, None);
     }
 
     #[test]
     fn what_the_shell_already_knows_is_not_repeated() {
         let fetch = fetch();
-        let mut announced = Some("1".to_owned());
+        let mut starts = playing_one();
         for event in [
             music::PlaybackEvent::Paused {
                 id: Some("1".into()),
@@ -683,7 +990,7 @@ mod tests {
             },
         ] {
             assert!(
-                translate(event.clone(), &mut announced, &fetch).is_none(),
+                translate(event.clone(), &mut starts, &fetch).is_none(),
                 "{event:?} reached the shell"
             );
         }
@@ -811,8 +1118,9 @@ mod tests {
     impl music::PlaybackFactory for Recorder {
         fn start(
             &self,
-            _config: music::PlaybackConfig,
+            config: music::PlaybackConfig,
         ) -> (Box<dyn music::Player>, Box<dyn music::PlaybackEvents>) {
+            self.note(format!("start {}", config.quality.id()));
             (Box::new(self.clone()), Box::new(Silent))
         }
     }
@@ -858,6 +1166,8 @@ mod tests {
                 meta: Arc::new(NoMeta),
                 options: Options::default(),
             },
+            // The quality it runs at already: the same engine.
+            Cmd::Quality(crate::domain::Quality::HiResLossless),
             Cmd::Play(id("a")),
             Cmd::Preload(id("b")),
             // Lined up but not joined: a skip to it is a fresh load.
@@ -868,6 +1178,10 @@ mod tests {
             Cmd::Seek(Duration::from_secs(12)),
             Cmd::Volume(4.0),
             Cmd::Stop,
+            // Another one: a fresh engine, at the level kept, for the
+            // track that follows.
+            Cmd::Quality(crate::domain::Quality::Low),
+            Cmd::Play(id("d")),
         ] {
             tx.send(cmd).unwrap();
         }
@@ -877,6 +1191,7 @@ mod tests {
         assert_eq!(
             *engine.0.lock().unwrap(),
             [
+                "start hi-res",
                 "gain 0.25",
                 "load a 0s seamless=false",
                 "preload b segue=true",
@@ -887,6 +1202,9 @@ mod tests {
                 "seek 12s",
                 "gain 1",
                 "pause",
+                "start low",
+                "gain 1",
+                "load d 0s seamless=false",
             ]
         );
         assert!(matches!(
