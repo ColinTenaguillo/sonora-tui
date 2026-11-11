@@ -173,7 +173,8 @@ fn start_track(
     track: Option<crate::domain::Track>,
     cmd_tx: &std::sync::mpsc::Sender<crate::playback::Cmd>,
 ) {
-    let (Some(session), Some(track)) = (&app.session, track) else {
+    // Nothing plays signed out: there is no engine to ask.
+    let Some(track) = track.filter(|_| app.session.is_some()) else {
         return;
     };
     // What the user allows. Both paths into playback come through here, so a
@@ -195,7 +196,7 @@ fn start_track(
     }
     // The engine fetches the stream itself and reports back as events: a
     // rejected session as `SessionExpired`, anything else as `Failed`.
-    session.set_quality(wanted);
+    let _ = cmd_tx.send(crate::playback::Cmd::Quality(wanted));
     let _ = cmd_tx.send(crate::playback::Cmd::Play(track.id.clone()));
     app.now_playing.track = Some(track);
     app.now_playing.playing = true;
@@ -1472,6 +1473,27 @@ mod tests {
         for outcome in [Outcome::Closed, Outcome::Failed("no webkit".into())] {
             assert!(matches!(after_window(outcome), Action::PasteCookies));
         }
+    }
+
+    #[test]
+    fn a_track_is_asked_for_at_the_quality_in_the_settings_and_not_at_all_signed_out() {
+        use crate::domain::{Quality, Track};
+        use crate::playback::Cmd;
+        let track = || Some(Track::sample("t", "a", std::time::Duration::from_secs(200)));
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        super::start_track(&mut App::default(), track(), &tx);
+        assert!(rx.try_recv().is_err(), "signed out: no engine to ask");
+
+        let mut app = App {
+            session: Some(crate::catalogue::Session::sample()),
+            ..App::default()
+        };
+        app.config.audio.set_quality(Quality::High);
+        super::start_track(&mut app, track(), &tx);
+        // In this order: the engine that plays it is the one told.
+        assert!(matches!(rx.try_recv(), Ok(Cmd::Quality(Quality::High))));
+        assert!(matches!(rx.try_recv(), Ok(Cmd::Play(_))));
     }
 
     #[test]

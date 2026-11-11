@@ -1664,6 +1664,7 @@ impl App {
         crate::playback::Options {
             normalisation: self.config.audio.normalisation,
             gapless: self.config.audio.gapless,
+            quality: self.config.audio.quality(),
             equalizer: self.equalizer.0.reader(),
         }
     }
@@ -4077,8 +4078,8 @@ impl App {
         // 22050 Hz to "22.1".
         let khz = format!("{:.2}", sample_rate as f64 / 1000.0);
         let khz = khz.strip_suffix('0').unwrap_or(&khz);
-        // A file of your own reports no rate: no badge,
-        // rather than "0.0kHz".
+        // A stream nobody described reports no rate: no
+        // badge, rather than "0.0kHz".
         self.now_playing.quality = (sample_rate > 0).then(|| format!("{bits}{khz}kHz"));
         self.now_playing.tier = nowplaying::Tier::of_quality(delivered, bit_depth, sample_rate);
         // A new stream starts at the beginning. Without this
