@@ -631,8 +631,18 @@ impl Session {
     /// the top tracks where the page carried fewer than are shown, and
     /// what the artist appears on.
     pub async fn artist_page(&self, id: &str) -> Result<ArtistPage> {
-        let (artist, more) = tokio::join!(self.api.artist(id), self.api.artist_catalogue(id, &[]));
+        let (artist, more, fans) = tokio::join!(
+            self.api.artist(id),
+            self.api.artist_catalogue(id, &[]),
+            self.extras.artist_fans(id)
+        );
         let mut page = page(id, artist.map_err(error)?);
+        // Where sonora counted none: the page is drawn without the count
+        // rather than not at all.
+        match fans {
+            Ok(fans) => page.fans = page.fans.or(fans),
+            Err(error) => tracing::warn!("no count of the artist's followers: {error:#}"),
+        }
         if let Ok(more) = more {
             if !more.top_tracks.is_empty() {
                 page.top_tracks = more
@@ -644,7 +654,20 @@ impl Session {
             }
             page.appears_on = more.appears_on.into_iter().map(album).collect();
         }
+        if page.picture.is_none() {
+            page.picture = self.picture_of(id).await;
+        }
         Ok(page)
+    }
+
+    /// What the service draws an artist with when sonora found no portrait
+    /// of them, where it has a word on that. The page is drawn without
+    /// one rather than not at all.
+    async fn picture_of(&self, artist_id: &str) -> Option<String> {
+        let picture = self.extras.artist_picture(artist_id).await;
+        picture
+            .inspect_err(|error| tracing::warn!("no picture for the artist: {error:#}"))
+            .ok()?
     }
 
     pub async fn track(&self, id: &TrackId) -> Result<Track> {
@@ -739,11 +762,9 @@ impl Session {
         // The service's own word first, where it has one: it knows what
         // stands in for an artist it keeps no portrait of, and sonora's
         // lookup is then only for the artists it left out.
-        let asked = ids.iter().map(|id| async move {
-            let picture = self.extras.artist_picture(id).await;
-            let picture = picture.inspect_err(|error| tracing::warn!("no picture: {error:#}"));
-            Some((id.clone(), picture.ok()??))
-        });
+        let asked = ids
+            .iter()
+            .map(|id| async move { Some((id.clone(), self.picture_of(id).await?)) });
         let mut portraits: std::collections::HashMap<String, String> =
             futures::future::join_all(asked)
                 .await
@@ -910,6 +931,26 @@ mod tests {
             })
             .collect();
         assert_eq!(covers, [Some("https://x/a.jpg"), None]);
+    }
+
+    #[test]
+    fn an_artist_sonora_has_no_portrait_of_is_asked_of_the_service() {
+        let session = session_with(Pages(None));
+        assert_eq!(
+            wait(session.picture_of("a")).as_deref(),
+            Some("https://x/a.jpg")
+        );
+        assert_eq!(
+            wait(session.picture_of("b")),
+            None,
+            "the service has none either"
+        );
+        let plain = super::Session::sample();
+        assert_eq!(
+            wait(plain.picture_of("a")),
+            None,
+            "a service with no word on it"
+        );
     }
 
     #[test]

@@ -68,6 +68,12 @@ pub trait Extras: Send + Sync {
         Ok(None)
     }
 
+    /// How many follow an artist, where sonora reads no such count for
+    /// the service.
+    async fn artist_fans(&self, _artist_id: &str) -> anyhow::Result<Option<u64>> {
+        Ok(None)
+    }
+
     /// The picture an artist is drawn with: their own, or what the service
     /// puts in its place for one it keeps no portrait of.
     async fn artist_picture(&self, _artist_id: &str) -> anyhow::Result<Option<String>> {
