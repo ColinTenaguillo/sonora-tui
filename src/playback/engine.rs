@@ -739,6 +739,7 @@ mod tests {
                 rate,
                 channels: 2,
                 normalisation: music::Normalisation::Off,
+                direct: false,
             },
         }
     }

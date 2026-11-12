@@ -4,7 +4,7 @@
 # through rustls-native-certs 0.7, rustls-pemfile), and librespot-core itself
 # holds quick-xml 0.38 and rsa 0.9. Then paste, a proc-macro under lofty
 # (`music`) and image's pulp and rav1e, all at their latest release. The last
-# is the SQLite that rusqlite 0.32 bundles for sonora's `music` and `storage`,
+# is the SQLite that rusqlite 0.40 bundles for sonora's `music` and `storage`,
 # fixed from rusqlite 0.41; it is reached only through a database and its
 # `-wal` file written by someone less trusted than the user.
 # Nothing here can move them; the fix is upstream, then a new `music` pin.
@@ -23,5 +23,5 @@ ignore = [
   "RUSTSEC-2023-0071", # rsa 0.9: Marvin timing attack, no fixed release
   "RUSTSEC-2025-0134", # rustls-pemfile 2: unmaintained, via hyper-proxy2
   "RUSTSEC-2024-0436", # paste 1: unmaintained, compile-time only
-  "RUSTSEC-2026-0459", # libsqlite3-sys 0.30: bundled SQLite < 3.54, WAL page-size mismatch
+  "RUSTSEC-2026-0459", # libsqlite3-sys 0.38: bundled SQLite < 3.54, WAL page-size mismatch
 ]
