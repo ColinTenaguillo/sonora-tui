@@ -390,7 +390,7 @@ fn every_key_the_help_lists_does_something_somewhere() {
         KeyCode::Char('t'),
         KeyCode::Char('s'),
         KeyCode::Char('1'),
-        KeyCode::Char('8'),
+        KeyCode::Char('7'),
         KeyCode::Char('['),
         KeyCode::Char(']'),
         KeyCode::Esc,
@@ -808,7 +808,7 @@ fn the_tracks_section_keeps_its_favourites_when_the_nav_is_used() {
         (0..5).map(track).collect(),
     ));
 
-    press(&mut app, KeyCode::Char('6'));
+    press(&mut app, KeyCode::Char('5'));
     assert_eq!(
         app.sidebar.section(),
         sonora_tui::shell::sidebar::Section::Tracks,
@@ -822,7 +822,7 @@ fn the_tracks_section_keeps_its_favourites_when_the_nav_is_used() {
 
     // Away and back again: still there, and still no request to make.
     press(&mut app, KeyCode::Char('1'));
-    press(&mut app, KeyCode::Char('6'));
+    press(&mut app, KeyCode::Char('5'));
     let again = screen(&mut app);
     assert!(
         again.contains("Fav 0"),
@@ -861,7 +861,7 @@ fn an_opened_collection_still_carries_its_tracks_onto_the_history() {
         artist_id: None,
     }];
 
-    press(&mut app, KeyCode::Char('6'));
+    press(&mut app, KeyCode::Char('5'));
     assert!(app.tracks.is_empty(), "the album's tracks left with it");
 
     press(&mut app, KeyCode::Char('['));
@@ -1209,7 +1209,7 @@ fn r_starts_the_radio_of_the_selected_track() {
         track(1, "First", "mix-first"),
         track(2, "Second", "mix-second"),
     ]));
-    press(&mut app, KeyCode::Char('6'));
+    press(&mut app, KeyCode::Char('5'));
 
     // Something else is playing: the key still follows the selection.
     app.now_playing.track = Some(track(9, "Playing", "mix-playing"));

@@ -2,8 +2,7 @@
 //!
 //! The engine itself is sonora's (`music::engine`): its threads, its output
 //! device, its queue ahead of the decoder. What lives here is the
-//! translation between the shell's vocabulary and the engine's, and the
-//! `Fetch` that teaches the engine TIDAL is in `fetch.rs`.
+//! translation between the shell's vocabulary and the engine's.
 
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
@@ -11,38 +10,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::domain::TrackId;
-use crate::playback::fetch::{Meta, TidalFetch};
 
-/// What the engine's events leave out and the badge wants: the bit depth,
-/// the rate and the tier of the stream that just started, and why a load
-/// failed. TIDAL's fetch records them; for another service the engine's
-/// own word on the stream is all there is.
-pub trait StreamMeta: Send + Sync {
-    fn take_meta(&self, _id: &str) -> Option<Meta> {
-        None
-    }
-    fn take_failure(&self, _id: &str) -> Option<String> {
-        None
-    }
-    /// What to ask for from now on. A service with one quality ignores it.
-    fn set_quality(&self, _wanted: crate::domain::Quality) {}
-}
-
-/// A service whose streams say nothing about themselves.
-pub struct NoMeta;
-
-impl StreamMeta for NoMeta {}
-
-impl StreamMeta for TidalFetch {
-    fn set_quality(&self, wanted: crate::domain::Quality) {
-        TidalFetch::set_quality(self, wanted);
-    }
-    fn take_meta(&self, id: &str) -> Option<Meta> {
-        TidalFetch::take_meta(self, id)
-    }
-    fn take_failure(&self, id: &str) -> Option<String> {
-        TidalFetch::take_failure(self, id)
-    }
+/// What a stream turned out to be, as the quality badge reads it: the
+/// depth and the tier from the encoding the service named, the rate from
+/// the decoder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Meta {
+    bit_depth: Option<u8>,
+    delivered: crate::domain::Quality,
+    sample_rate: u32,
 }
 
 /// What an engine is started with, from the user's settings. The
@@ -110,7 +86,6 @@ pub enum Cmd {
     /// playing. Sent once a session is in hand; nothing plays before it.
     Attach {
         factory: Arc<dyn music::PlaybackFactory>,
-        meta: Arc<dyn StreamMeta>,
         options: Options,
     },
     /// What to ask for from the next track on. An engine asks for one
@@ -118,8 +93,7 @@ pub enum Cmd {
     /// the same one does nothing. Sent before each `Play`, so the track
     /// being heard is left alone.
     Quality(crate::domain::Quality),
-    /// Fetch and play a track. What to ask for, and with which token, the
-    /// service's fetch already knows.
+    /// Fetch and play a track.
     Play(TrackId),
     /// The same, from a position into it: what a restarted engine picks
     /// the track back up with.
@@ -207,30 +181,6 @@ pub enum PlaybackEvent {
     Error(String),
 }
 
-/// Index of the segment containing `at`, clamped to the last segment.
-pub(crate) fn segment_for(durations: &[Duration], at: Duration) -> usize {
-    let mut acc = Duration::ZERO;
-    for (i, d) in durations.iter().enumerate() {
-        acc += *d;
-        if at < acc {
-            return i;
-        }
-    }
-    durations.len().saturating_sub(1)
-}
-
-/// Playback offset at which segment `index` begins.
-pub(crate) fn segment_start(durations: &[Duration], index: usize) -> Duration {
-    durations.iter().take(index).copied().sum()
-}
-
-/// Where a seek into a DASH stream restarts: the segment holding `at`,
-/// and how much of it to skip to land on `at` itself.
-pub(crate) fn restart_point(durations: &[Duration], at: Duration) -> (usize, Duration) {
-    let index = segment_for(durations, at);
-    (index, at.saturating_sub(segment_start(durations, index)))
-}
-
 /// Start the command thread. Commands in on a std channel (the shell
 /// sends from wherever it is); events out on a tokio channel (the shell
 /// awaits it). The engine itself starts on `Cmd::Attach`.
@@ -293,16 +243,8 @@ fn forward_commands(
     let mut attached: Option<Attached> = None;
     while let Ok(cmd) = cmds.recv() {
         match cmd {
-            Cmd::Attach {
-                factory,
-                meta,
-                options,
-            } => {
-                let fresh = Attached {
-                    factory,
-                    meta,
-                    options,
-                };
+            Cmd::Attach { factory, options } => {
+                let fresh = Attached { factory, options };
                 player = Some(fresh.start(volume, &segue, &events));
                 attached = Some(fresh);
             }
@@ -320,7 +262,6 @@ fn forward_commands(
 /// What an engine was started with.
 struct Attached {
     factory: Arc<dyn music::PlaybackFactory>,
-    meta: Arc<dyn StreamMeta>,
     options: Options,
 }
 
@@ -331,30 +272,19 @@ impl Attached {
         segue: &SharedSegue,
         events: &tokio::sync::mpsc::UnboundedSender<PlaybackEvent>,
     ) -> Box<dyn music::Player> {
-        attach(
-            &*self.factory,
-            self.meta.clone(),
-            &self.options,
-            volume,
-            segue,
-            events,
-        )
+        attach(&*self.factory, &self.options, volume, segue, events)
     }
 }
 
 /// A fresh engine at the kept level, its events on a thread of their own.
 fn attach(
     factory: &dyn music::PlaybackFactory,
-    meta: Arc<dyn StreamMeta>,
     options: &Options,
     volume: f32,
     segue: &SharedSegue,
     events: &tokio::sync::mpsc::UnboundedSender<PlaybackEvent>,
 ) -> Box<dyn music::Player> {
     *lock(segue) = Segue::default();
-    // An engine asks for one quality from its start, so a fetch of our own
-    // hears of it here too rather than at some later play.
-    meta.set_quality(options.quality);
     let (fresh, stream) = factory.start(config(options));
     fresh.set_gain(volume);
     if let Some(spectrum) = fresh.spectrum() {
@@ -363,7 +293,7 @@ fn attach(
     let (out, joins) = (events.clone(), segue.clone());
     if let Err(error) = std::thread::Builder::new()
         .name("sonora-tui-events".into())
-        .spawn(move || forward_events(stream, out, meta, joins))
+        .spawn(move || forward_events(stream, out, joins))
     {
         let _ = events.send(PlaybackEvent::Error(format!(
             "could not start the playback event thread: {error}"
@@ -429,7 +359,6 @@ fn command(
 fn forward_events(
     mut events: Box<dyn music::PlaybackEvents>,
     out: tokio::sync::mpsc::UnboundedSender<PlaybackEvent>,
-    meta: Arc<dyn StreamMeta>,
     segue: SharedSegue,
 ) {
     let runtime = match tokio::runtime::Builder::new_current_thread().build() {
@@ -449,7 +378,7 @@ fn forward_events(
             if matches!(event, music::PlaybackEvent::Ended { .. }) {
                 lock(&segue).ended();
             }
-            let Some(event) = translate(event, &mut starts, meta.as_ref()) else {
+            let Some(event) = translate(event, &mut starts) else {
                 continue;
             };
             if out.send(event).is_err() {
@@ -476,13 +405,10 @@ struct Starts {
 
 impl Starts {
     /// The `Started` of a track the shell has not been told of yet.
-    fn start(&mut self, id: String, meta: &dyn StreamMeta) -> PlaybackEvent {
-        let signal = self.signals.remove(&id);
-        // The fetch's own record first: TIDAL's answer names the tier,
-        // where the engine only knows what the decoder saw. A stream
-        // nobody described still started: the badge is left blank rather
-        // than the track left looking stopped.
-        let found = meta.take_meta(&id).or(signal).unwrap_or(Meta {
+    fn start(&mut self, id: String) -> PlaybackEvent {
+        // A stream nobody described still started: the badge is left
+        // blank rather than the track left looking stopped.
+        let found = self.signals.remove(&id).unwrap_or(Meta {
             bit_depth: None,
             delivered: crate::domain::Quality::Lossless,
             sample_rate: 0,
@@ -518,11 +444,7 @@ fn signal_meta(track: &music::TrackSignal) -> Option<Meta> {
     })
 }
 
-fn translate(
-    event: music::PlaybackEvent,
-    starts: &mut Starts,
-    meta: &dyn StreamMeta,
-) -> Option<PlaybackEvent> {
+fn translate(event: music::PlaybackEvent, starts: &mut Starts) -> Option<PlaybackEvent> {
     use music::PlaybackEvent as Engine;
     match event {
         Engine::Signal { id, track } => {
@@ -532,7 +454,7 @@ fn translate(
             None
         }
         Engine::Playing { id: Some(id), .. } if starts.announced.as_deref() != Some(&id) => {
-            Some(starts.start(id, meta))
+            Some(starts.start(id))
         }
         Engine::Position { at, .. } => Some(PlaybackEvent::Position(at)),
         Engine::Downloaded { id: Some(id) } => Some(PlaybackEvent::Downloaded(TrackId::from(id))),
@@ -541,14 +463,11 @@ fn translate(
             Some(PlaybackEvent::Finished)
         }
         Engine::Unavailable { id: Some(id) } => {
-            let message = meta
-                .take_failure(&id)
-                .unwrap_or_else(|| "track not available for playback".into());
-            Some(failed(&id, message))
+            Some(failed(&id, "track not available for playback".into()))
         }
         Engine::Throttled { id: Some(id) } => Some(failed(
             &id,
-            "TIDAL is rate limiting playback; try again shortly".into(),
+            "the service is rate limiting playback; try again shortly".into(),
         )),
         Engine::Gated => Some(PlaybackEvent::SessionExpired),
         // Only Spotify sends this, when its audio key is denied (0x0001).
@@ -594,7 +513,6 @@ mod tests {
                 duration: Duration::from_secs(90),
             },
             &mut Starts::default(),
-            &NoMeta,
         );
         assert!(matches!(got, Some(PlaybackEvent::Length(d)) if d == Duration::from_secs(90)));
     }
@@ -630,17 +548,12 @@ mod tests {
         let got = translate(
             music::PlaybackEvent::OutputChanged { heard },
             &mut Starts::default(),
-            &NoMeta,
         );
         assert!(
             matches!(&got, Some(PlaybackEvent::OutputChanged { heard: Some((id, at)) })
                 if *id == TrackId::from("t") && *at == Duration::from_secs(31)),
             "{got:?}"
         );
-    }
-
-    fn fetch() -> TidalFetch {
-        TidalFetch::new(crate::domain::Quality::Lossless).unwrap()
     }
 
     #[test]
@@ -676,22 +589,17 @@ mod tests {
         // `Started` resets the position and the badge. The engine says
         // `Playing` on every resume and after every seek, and a resume
         // that drew the bar back to zero would be a bug the user sees.
-        let fetch = fetch();
         let mut starts = Starts::default();
         let playing = |at| music::PlaybackEvent::Playing {
             id: Some("1".into()),
             at,
         };
-        // Stand in for `open`, which is what records the meta.
-        fetch.record_meta(
-            "1",
-            crate::playback::fetch::Meta {
-                bit_depth: Some(24),
-                delivered: Quality::HiResLossless,
-                sample_rate: 96_000,
-            },
-        );
-        match translate(playing(Duration::ZERO), &mut starts, &fetch) {
+        let flac = music::Encoding::Flac {
+            depth: 24,
+            rate: 96_000,
+        };
+        assert!(translate(signal("1", Some(flac), 96_000), &mut starts).is_none());
+        match translate(playing(Duration::ZERO), &mut starts) {
             Some(PlaybackEvent::Started {
                 bit_depth,
                 sample_rate,
@@ -699,7 +607,7 @@ mod tests {
             }) => {
                 assert_eq!(
                     (bit_depth, sample_rate, delivered),
-                    (Some(24), 96_000, Quality::HiResLossless)
+                    (Some(24), 96_000, Quality::Lossless)
                 );
             }
             other => panic!("expected Started, got {other:?}"),
@@ -707,14 +615,14 @@ mod tests {
         assert_eq!(starts.announced.as_deref(), Some("1"));
 
         // A resume, or the engine confirming a seek: same track, no badge reset.
-        assert!(translate(playing(Duration::from_secs(30)), &mut starts, &fetch).is_none());
-        assert!(translate(playing(Duration::ZERO), &mut starts, &fetch).is_none());
+        assert!(translate(playing(Duration::from_secs(30)), &mut starts).is_none());
+        assert!(translate(playing(Duration::ZERO), &mut starts).is_none());
     }
 
     #[test]
     fn a_stream_that_says_nothing_about_itself_is_still_announced() {
-        // Another service's fetch records no meta. The track started all
-        // the same, and a shell that never hears so draws it stopped.
+        // The track started all the same, and a shell that never hears so
+        // draws it stopped.
         let mut starts = Starts::default();
         let event = translate(
             music::PlaybackEvent::Playing {
@@ -722,7 +630,6 @@ mod tests {
                 at: Duration::ZERO,
             },
             &mut starts,
-            &NoMeta,
         );
         assert!(
             matches!(event, Some(PlaybackEvent::Started { sample_rate: 0, .. })),
@@ -746,20 +653,16 @@ mod tests {
 
     /// What the shell is told once `id` plays, after the engine's events
     /// before it.
-    fn started(
-        before: Vec<music::PlaybackEvent>,
-        id: &str,
-        meta: &dyn StreamMeta,
-    ) -> (Option<u8>, u32, Quality) {
+    fn started(before: Vec<music::PlaybackEvent>, id: &str) -> (Option<u8>, u32, Quality) {
         let mut starts = Starts::default();
         for event in before {
-            assert!(translate(event, &mut starts, meta).is_none());
+            assert!(translate(event, &mut starts).is_none());
         }
         let playing = music::PlaybackEvent::Playing {
             id: Some(id.into()),
             at: Duration::ZERO,
         };
-        match translate(playing, &mut starts, meta) {
+        match translate(playing, &mut starts) {
             Some(PlaybackEvent::Started {
                 bit_depth,
                 sample_rate,
@@ -776,18 +679,18 @@ mod tests {
             rate: 96_000,
         };
         assert_eq!(
-            started(vec![signal("a", Some(flac), 96_000)], "a", &NoMeta),
+            started(vec![signal("a", Some(flac), 96_000)], "a"),
             (Some(24), 96_000, Quality::Lossless)
         );
         let vorbis = music::Encoding::Vorbis { kbps: 320 };
         assert_eq!(
-            started(vec![signal("a", Some(vorbis), 44_100)], "a", &NoMeta),
+            started(vec![signal("a", Some(vorbis), 44_100)], "a"),
             (None, 44_100, Quality::High),
             "lossy, whatever its bit rate"
         );
         for unnamed in [None, Some(music::Encoding::Other)] {
             assert_eq!(
-                started(vec![signal("a", unnamed, 48_000)], "a", &NoMeta),
+                started(vec![signal("a", unnamed, 48_000)], "a"),
                 (None, 0, Quality::Lossless),
                 "an encoding nobody named is drawn as nothing, not guessed"
             );
@@ -805,7 +708,7 @@ mod tests {
         let play = |starts: &mut Starts, events: Vec<music::PlaybackEvent>| {
             events
                 .into_iter()
-                .filter_map(|event| translate(event, starts, &NoMeta))
+                .filter_map(|event| translate(event, starts))
                 .last()
         };
         let playing = |id: &str| music::PlaybackEvent::Playing {
@@ -839,37 +742,7 @@ mod tests {
     }
 
     #[test]
-    fn a_fetch_that_records_its_own_stream_is_believed_over_the_engine() {
-        // TIDAL's answer names the tier; the decoder only knows the rate.
-        let fetch = fetch();
-        fetch.record_meta(
-            "1",
-            Meta {
-                bit_depth: Some(24),
-                delivered: Quality::HiResLossless,
-                sample_rate: 96_000,
-            },
-        );
-        assert_eq!(
-            started(vec![signal("1", None, 96_000)], "1", &fetch),
-            (Some(24), 96_000, Quality::HiResLossless)
-        );
-    }
-
-    /// A service's fetch that writes down the quality it is told to ask for.
-    #[derive(Default)]
-    struct Asked(Mutex<Vec<Quality>>);
-
-    impl StreamMeta for Asked {
-        fn set_quality(&self, wanted: Quality) {
-            self.0.lock().unwrap().push(wanted);
-        }
-    }
-
-    #[test]
     fn an_engine_starts_at_the_quality_the_settings_ask_for() {
-        // Both who fetch hear of it: sonora's factory through its config,
-        // and a fetch of our own through its handle.
         let cases = [
             (Quality::HiResLossless, "hi-res"),
             (Quality::Lossless, "lossless"),
@@ -878,30 +751,26 @@ mod tests {
         ];
         for (quality, named) in cases {
             let engine = Recorder::default();
-            let asked = Arc::new(Asked::default());
             let (out, _events) = tokio::sync::mpsc::unbounded_channel();
             let options = Options {
                 quality,
                 ..Options::default()
             };
-            attach(&engine, asked.clone(), &options, 1.0, &Arc::default(), &out);
+            attach(&engine, &options, 1.0, &Arc::default(), &out);
             assert_eq!(
                 engine.0.lock().unwrap().first().map(String::as_str),
                 Some(format!("start {named}").as_str())
             );
-            assert_eq!(*asked.0.lock().unwrap(), [quality]);
         }
     }
 
     #[test]
     fn a_failed_load_names_the_track_and_the_reason() {
-        let fetch = fetch();
         let event = translate(
             music::PlaybackEvent::Unavailable {
                 id: Some("655911".into()),
             },
             &mut Starts::default(),
-            &fetch,
         );
         match event {
             Some(PlaybackEvent::Failed { id, message }) => {
@@ -914,7 +783,7 @@ mod tests {
 
     #[test]
     fn the_rest_of_what_the_engine_says_reaches_the_shell_in_its_own_words() {
-        let tell = |event| translate(event, &mut Starts::default(), &NoMeta);
+        let tell = |event| translate(event, &mut Starts::default());
         let id = || Some("7".to_owned());
         let at = Duration::from_secs(12);
         assert!(matches!(
@@ -946,10 +815,9 @@ mod tests {
 
     #[test]
     fn a_gated_load_expires_the_session() {
-        let fetch = fetch();
         let mut starts = playing_one();
         assert!(matches!(
-            translate(music::PlaybackEvent::Gated, &mut starts, &fetch),
+            translate(music::PlaybackEvent::Gated, &mut starts),
             Some(PlaybackEvent::SessionExpired)
         ));
     }
@@ -957,15 +825,13 @@ mod tests {
     #[test]
     fn the_end_of_a_track_clears_the_announcement() {
         // So the same track played twice in a row is announced twice.
-        let fetch = fetch();
         let mut starts = playing_one();
         assert!(matches!(
             translate(
                 music::PlaybackEvent::Ended {
                     id: Some("1".into())
                 },
-                &mut starts,
-                &fetch
+                &mut starts
             ),
             Some(PlaybackEvent::Finished)
         ));
@@ -974,7 +840,6 @@ mod tests {
 
     #[test]
     fn what_the_shell_already_knows_is_not_repeated() {
-        let fetch = fetch();
         let mut starts = playing_one();
         for event in [
             music::PlaybackEvent::Paused {
@@ -991,82 +856,10 @@ mod tests {
             },
         ] {
             assert!(
-                translate(event.clone(), &mut starts, &fetch).is_none(),
+                translate(event.clone(), &mut starts).is_none(),
                 "{event:?} reached the shell"
             );
         }
-    }
-
-    #[test]
-    fn segment_index_for_a_timestamp_is_found_from_durations() {
-        // 4s segments: t=0 -> 0, t=5 -> 1, t=9 -> 2.
-        let durs = vec![
-            Duration::from_secs(4),
-            Duration::from_secs(4),
-            Duration::from_secs(4),
-        ];
-        assert_eq!(segment_for(&durs, Duration::from_secs(0)), 0);
-        assert_eq!(segment_for(&durs, Duration::from_secs(5)), 1);
-        assert_eq!(segment_for(&durs, Duration::from_secs(9)), 2);
-
-        // The edges themselves. A segment covers [start, start + d): four
-        // seconds in is the first instant of the second segment, not the
-        // last of the first. Seeking to a segment boundary is what the
-        // player does every time it crosses one, so the off-by-one here
-        // would land a seek a whole segment early.
-        assert_eq!(
-            segment_for(&durs, Duration::from_secs(4)),
-            1,
-            "4s starts segment 1"
-        );
-        assert_eq!(
-            segment_for(&durs, Duration::from_secs(8)),
-            2,
-            "8s starts segment 2"
-        );
-    }
-
-    #[test]
-    fn a_timestamp_past_the_end_clamps_to_the_last_segment() {
-        let durs = vec![Duration::from_secs(4), Duration::from_secs(4)];
-        assert_eq!(segment_for(&durs, Duration::from_secs(999)), 1);
-    }
-
-    #[test]
-    fn an_empty_timeline_yields_the_first_segment() {
-        assert_eq!(segment_for(&[], Duration::from_secs(5)), 0);
-    }
-
-    #[test]
-    fn a_seek_restarts_at_its_segment_and_skips_the_rest_of_it() {
-        let durs = vec![Duration::from_secs(4); 3];
-        assert_eq!(restart_point(&durs, Duration::ZERO), (0, Duration::ZERO));
-        assert_eq!(
-            restart_point(&durs, Duration::from_millis(5500)),
-            (1, Duration::from_millis(1500)),
-            "the second segment, a second and a half in"
-        );
-        assert_eq!(
-            restart_point(&durs, Duration::from_secs(8)),
-            (2, Duration::ZERO),
-            "a boundary is the start of the segment after it"
-        );
-        assert_eq!(
-            restart_point(&durs, Duration::from_secs(40)),
-            (2, Duration::from_secs(32)),
-            "past the end: the last segment, and rodio skips to its end"
-        );
-    }
-
-    #[test]
-    fn segment_start_offset_accumulates_preceding_durations() {
-        let durs = vec![
-            Duration::from_secs(4),
-            Duration::from_secs(4),
-            Duration::from_secs(4),
-        ];
-        assert_eq!(segment_start(&durs, 0), Duration::ZERO);
-        assert_eq!(segment_start(&durs, 2), Duration::from_secs(8));
     }
 
     /// An engine that writes down what it was asked, and a stream that
@@ -1164,7 +957,6 @@ mod tests {
             Cmd::Pause,
             Cmd::Attach {
                 factory: Arc::new(engine.clone()),
-                meta: Arc::new(NoMeta),
                 options: Options::default(),
             },
             // The quality it runs at already: the same engine.

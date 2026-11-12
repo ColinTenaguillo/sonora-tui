@@ -161,9 +161,8 @@ Headers, the `Cookie` line); Enter on the empty box opens the window
 again. Cookies, passwords and tokens are kept
 by the provider's own credential store, never written to the config.
 
-What each view shows is what the service answers with. The feed and the
-mixes are TIDAL's; a Subsonic server has no Explore; the local library has
-no radio. The quality badge shows on any service that names how its stream
+What each view shows is what the service answers with. The mixes are
+TIDAL's; a Subsonic server has no Explore; the local library has no radio. The quality badge shows on any service that names how its stream
 is encoded. The audio quality in Settings is asked of every service that
 has levels to choose from, starting with the next track.
 
@@ -210,7 +209,7 @@ spent only while an Apple track is loaded.
 
 ### TIDAL
 
-TIDAL grants full playback only to its own applications, so this — like
+TIDAL grants full playback only to its own applications, so sonora — like
 every third-party TIDAL client — sends the `client_id` of one of them, and
 TIDAL believes it is talking to that application. That is a
 misrepresentation, and it is worth knowing before you run it. It is nothing
@@ -231,23 +230,13 @@ There is no legitimate way to replace them today:
   [unanswered](https://github.com/orgs/tidal-music/discussions/321).
 
 The sign-in goes through the device client, which since April 2026 is
-served AAC where it asks for CD-quality FLAC. So, like sonora and tidalapi,
-the session is then renewed as TIDAL's Android app client, which is served
-FLAC at every tier. If TIDAL refuses that, the session stays on the device
-client and plays what it is given.
+served AAC where it asks for CD-quality FLAC. So the session is then renewed
+as TIDAL's Android app client, which is served FLAC at every tier. If TIDAL
+refuses that, the session stays on the device client and plays what it is
+given.
 
-If TIDAL opens a path for third-party device clients this should change.
-The pairs are base64 in the source and never written to your config, so they
-stay out of code search and secret scanners. If playback fails with
-**"this client_id cannot stream"** or a `4005` status, the shipped pair has
-been rate-capped; until a release changes it, put working ones in the config,
-the same ones the other third-party clients carry:
-
-```toml
-[auth]
-client_id     = "..."
-client_secret = "..."
-```
+The pair is sonora's and cannot be set from the config: when TIDAL caps it,
+the fix comes with a newer sonora.
 
 ## Keys
 
@@ -259,7 +248,7 @@ Press `?` in the app for the full list.
 | `Ctrl-d` / `Ctrl-u` | Half a screen down / up |
 | `h` / `l`, `←` / `→` | Left / right along a row |
 | `J` / `K` | Move through the sidebar |
-| `1` – `8` | Straight to a nav entry — `1` is Music, `8` is Settings |
+| `1` – `7` | Straight to a nav entry — `1` is Music, `7` is Settings |
 | `Enter` | Open a playlist, album or artist, or play a track |
 | `Esc`, `[` | Back one view, or out of the filter or the bio; on the sign-in screen, out of the sign-in under way |
 | `]` | Forward again, through views and sections |
@@ -476,14 +465,18 @@ list_view = true    # Playlists and Albums as a list rather than covers; `v`
 | What | Linux | macOS | Windows |
 |---|---|---|---|
 | Config | `~/.config/sonora-tui/config.toml` | `~/Library/Application Support/sonora-tui/config.toml` | `%APPDATA%\sonora-tui\config\config.toml` |
-| TIDAL session token | alongside the config, mode `0600` | same | alongside the config, under your profile's own access rules |
-| Other services' sessions | the provider's credential store, under the config directory | same | same |
+| Service sessions | `~/.local/share/sonora/accounts`, mode `0600` | `~/Library/Application Support/sonora/accounts`, mode `0600` | `%LOCALAPPDATA%\sonora\accounts`, under your profile's own access rules |
 | Scrobbling accounts | `scrobble.json` alongside the config, mode `0600` | same | `scrobble.json` alongside the config, under your profile's own access rules |
 | Local-files index, Widevine module | under the cache directory | same | same |
 | Log | `~/.cache/sonora-tui/sonora-tui.log` | `~/Library/Caches/sonora-tui/sonora-tui.log` | `%LOCALAPPDATA%\sonora-tui\cache\sonora-tui.log` |
 
-A config, a session or a cache left by ratidal, this app's earlier name, is
-moved under the new name on the first start.
+The sessions are kept by sonora's own credential store, where the Sonora
+desktop app keeps its: signed in to a service in one, you are signed in to
+it in the other. A TIDAL session an earlier version kept beside the config
+is moved there on the first start.
+
+A config or a cache left by ratidal, this app's earlier name, is moved
+under the new name on the first start.
 
 ## Known limits
 
@@ -518,10 +511,6 @@ enforces: [CONTRIBUTING.md](CONTRIBUTING.md).
   network-backed ratatui app is put together.
 - **[rmpc](https://github.com/mierak/rmpc)** — the single-flight image-encoding
   pattern.
-- **[python-tidal](https://github.com/EbbLabs/python-tidal)**,
-  **[tidlers](https://codeberg.org/tomkoid/tidlers)** and
-  **[tiddl](https://github.com/oskvr37/tiddl)** — references for TIDAL's
-  endpoints, the DASH manifest shape, and the device flow.
 
 ## Licence
 

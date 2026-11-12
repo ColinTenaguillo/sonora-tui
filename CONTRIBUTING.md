@@ -38,11 +38,12 @@ Dependabot's weekly PR is built on CI for both platforms, which is the check.
 
 ## How the crate is laid out
 
-Organised by capability rather than by layer — `auth`, `library`, `browse`,
-`search` and `tidal` (TIDAL's API), `provider` (TIDAL as a sonora provider),
-`catalogue` (the signed-in session the shell holds), `playback`, `shell` — each
-exposing a facade with its internals crate-private. `domain` is the
-dependency-free core.
+Organised by capability rather than by layer — `library`, `browse` and
+`search` (the records, pages and results the shell draws), `catalogue` (the
+signed-in session the shell holds, over any of sonora's providers, and the
+`Extras` a service adds until sonora has them),
+`playback`, `shell` — each exposing a facade with its internals
+crate-private. `domain` is the dependency-free core.
 
 `tests/architecture.rs` enforces that, and fails the build if:
 
@@ -61,18 +62,10 @@ dependency-free core.
 | `tests/keyboard.rs` | Drives the app by keystrokes and reads the rendered buffer |
 | `tests/architecture.rs` | The layering rules above |
 | `tests/mpris.rs` | Registers on a real D-Bus session and sends media-key commands |
-| `tests/live_api.rs` | Checks the DTOs against the real API — `#[ignore]`d |
-| `tests/live_playback.rs` | Checks a seek lands on the right audio, against a straight decode — `#[ignore]`d |
 
 ```sh
 dbus-run-session -- cargo test --test mpris             # Linux only
-cargo test --test live_api -- --ignored --nocapture     # needs you signed in
-cargo test --test live_playback -- --ignored            # the same, and a download
 ```
-
-The live suite exists because every DTO field is `#[serde(default)]`, which
-makes a *wrong* field name silent: the parse succeeds and the view comes back
-empty. Only a real response catches that.
 
 ## Writing tests
 

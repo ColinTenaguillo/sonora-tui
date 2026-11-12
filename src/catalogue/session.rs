@@ -11,19 +11,19 @@ use music::{GenreItem, GenreSection, MusicApi, ProviderSession, ReleaseType};
 
 use super::Error;
 use crate::browse::{Home, HomeRow, RowKind};
-use crate::catalogue::{Favourable, Provider, Result};
+use crate::catalogue::{Extras, Favourable, Provider, Result};
 use crate::domain::{Card, Target};
-use crate::domain::{Quality, Track, TrackId};
+use crate::domain::{Track, TrackId};
 use crate::library::{Album, Artist, ArtistPage, FavouriteIds, PageKind, Playlist};
-use crate::playback::StreamMeta;
 use crate::search::Results;
 
 pub struct Session {
     name: &'static str,
     provider: Arc<dyn Provider>,
     api: Arc<dyn MusicApi>,
+    /// What the service has beyond `api`.
+    extras: Arc<dyn Extras>,
     playback: Arc<dyn music::PlaybackFactory>,
-    meta: Arc<dyn StreamMeta>,
     /// Whether the library is what the user starred, or everything the
     /// service has -- a folder of files -- with the stars drawn on top.
     shape: music::Shape,
@@ -37,13 +37,13 @@ impl std::fmt::Debug for Session {
 }
 
 impl Session {
-    /// What `provider` signed in to, with what it knows about its streams.
+    /// What `provider` signed in to.
     pub fn open(provider: Arc<dyn Provider>, session: ProviderSession) -> Self {
         Self {
-            name: provider.name(),
+            name: provider.label(),
+            extras: super::extras_for(provider.slug(), &session.api),
             api: session.api,
             playback: session.playback,
-            meta: provider.stream_meta(),
             shape: session.shape,
             provider,
         }
@@ -54,17 +54,12 @@ impl Session {
         self.shape.is_catalog()
     }
 
-    /// A TIDAL session with no token behind it, for tests and examples:
-    /// every request fails, and nothing touches the network until one is
-    /// awaited.
+    /// A session on a service with nothing behind it, for tests and
+    /// examples: every request fails, and nothing touches the network.
     #[doc(hidden)]
     pub fn sample() -> Arc<Self> {
-        let provider = crate::provider::TidalProvider::new(
-            crate::config::AuthConfig::default(),
-            Quality::Lossless,
-        )
-        .expect("an HTTP client");
-        Arc::new(Arc::new(provider).open_session())
+        use super::sample::Sample;
+        Arc::new(Self::open(Arc::new(Sample), Sample::session()))
     }
 
     /// What the service is called, for the log and the status line.
@@ -83,12 +78,6 @@ impl Session {
         self.playback.clone()
     }
 
-    /// What the engine's events leave out about a stream, where the
-    /// service's fetch records it. The badge reads it.
-    pub fn stream_meta(&self) -> Arc<dyn StreamMeta> {
-        self.meta.clone()
-    }
-
     /// The tracks a station built on `seed` plays, for the radio key and
     /// autoplay. Empty where the service has no stations.
     pub async fn track_radio(&self, seed: &TrackId) -> Result<Vec<Track>> {
@@ -96,24 +85,28 @@ impl Session {
         Ok(tracks.into_iter().map(track).collect())
     }
 
-    /// The playlist that station is, where the service keeps it as one.
-    pub async fn radio_playlist(&self, seed: &TrackId) -> Result<Option<String>> {
-        self.provider.radio_playlist(&seed.0).await.map_err(error)
+    /// The radio `R` opens on `seed`: its tracks and, where the service
+    /// keeps the station as a playlist, that playlist. Named, it is listed
+    /// as the playlist is, so what `F` saves is what is on screen; a name
+    /// that fails, or names nothing playable, leaves the plain station.
+    pub async fn radio(&self, seed: &TrackId) -> Result<(Vec<Track>, Option<String>)> {
+        match self.named_radio(seed).await {
+            Ok(Some((tracks, playlist))) => return Ok((tracks, Some(playlist))),
+            Ok(None) => {}
+            Err(error) => tracing::warn!("the radio has no playlist to save: {error:#}"),
+        }
+        Ok((self.track_radio(seed).await?, None))
     }
 }
 
 /// sonora reports with `anyhow`; the shell matches on `Error`. The one
 /// case it tells apart, a session the service no longer accepts, is what
-/// sonora calls a credentials failure -- and, from the TIDAL provider's
-/// own requests, a 401 anywhere in the chain.
+/// sonora calls a credentials failure.
 fn error(error: anyhow::Error) -> Error {
     let refused = error.chain().any(|cause| {
         matches!(
             cause.downcast_ref::<music::SignInFailure>(),
             Some(music::SignInFailure(music::SignInProblem::Credentials))
-        ) || matches!(
-            cause.downcast_ref::<crate::tidal::TidalError>(),
-            Some(crate::tidal::TidalError::Unauthorized)
         )
     });
     match refused {
@@ -271,6 +264,37 @@ fn pictured(
         .collect()
 }
 
+/// The artists a page shows with no picture of their own. TIDAL's home
+/// lists the ones played lately that way.
+fn faceless(sections: &[GenreSection]) -> Vec<String> {
+    let items = sections.iter().flat_map(|section| &section.items);
+    let mut ids: Vec<String> = items
+        .filter_map(|item| match item {
+            GenreItem::Artist(artist) if artist.cover.is_none() => Some(artist.id.clone()),
+            _ => None,
+        })
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// The page with each of those given the portrait found for it.
+fn portrayed(
+    mut sections: Vec<GenreSection>,
+    portraits: &std::collections::HashMap<String, String>,
+) -> Vec<GenreSection> {
+    for item in sections.iter_mut().flat_map(|section| &mut section.items) {
+        if let GenreItem::Artist(artist) = item {
+            artist.cover = artist
+                .cover
+                .take()
+                .or_else(|| portraits.get(&artist.id).cloned());
+        }
+    }
+    sections
+}
+
 /// The artists behind what a search found: each once, the most frequent
 /// first.
 fn artists_behind(tracks: &[music::Track], albums: &[music::Album]) -> Vec<ShownArtist> {
@@ -323,8 +347,9 @@ fn same_tracks(again: &[GenreItem], picks: &[GenreItem]) -> bool {
 }
 
 /// A shelf's title as text. The local provider names its shelves by the
-/// translation key sonora's own screens look up; this is the English of
-/// each, and any other title is already text.
+/// translation key sonora's own screens look up, and TIDAL the shelves of
+/// a genre; this is the English of each, and any other title is already
+/// text.
 fn heading(title: String) -> String {
     match title.as_str() {
         "home-recently-added" => "Recently added".into(),
@@ -332,6 +357,10 @@ fn heading(title: String) -> String {
         "home-favorite-albums" => "Favorite albums".into(),
         "home-artists" => "Artists".into(),
         "home-collection-albums" => "Albums from your collection".into(),
+        "home-recently-played" => "Recently played".into(),
+        "nav-playlists" => "Playlists".into(),
+        "nav-albums" => "Albums".into(),
+        "nav-songs" => "Songs".into(),
         _ => title,
     }
 }
@@ -685,26 +714,73 @@ impl Session {
                 },
             );
         }
-        Ok(rows(sections))
+        Ok(rows(self.with_portraits(sections).await))
     }
 
+    /// The station as the playlist the service keeps it as, when it keeps
+    /// one and it has tracks.
+    async fn named_radio(&self, seed: &TrackId) -> anyhow::Result<Option<(Vec<Track>, String)>> {
+        let Some(playlist) = self.extras.radio_playlist(&seed.0).await? else {
+            return Ok(None);
+        };
+        let tracks = self.api.playlist_tracks(&playlist).await?;
+        let tracks: Vec<Track> = tracks.into_iter().map(track).collect();
+        Ok((!tracks.is_empty()).then_some((tracks, playlist)))
+    }
+
+    /// The page with a portrait for each artist it shows without one,
+    /// where the service has it. Asked for only when one is missing, and
+    /// a page is drawn without them rather than not at all.
+    async fn with_portraits(&self, sections: Vec<GenreSection>) -> Vec<GenreSection> {
+        let ids = faceless(&sections);
+        if ids.is_empty() {
+            return sections;
+        }
+        // The service's own word first, where it has one: it knows what
+        // stands in for an artist it keeps no portrait of, and sonora's
+        // lookup is then only for the artists it left out.
+        let asked = ids.iter().map(|id| async move {
+            let picture = self.extras.artist_picture(id).await;
+            let picture = picture.inspect_err(|error| tracing::warn!("no picture: {error:#}"));
+            Some((id.clone(), picture.ok()??))
+        });
+        let mut portraits: std::collections::HashMap<String, String> =
+            futures::future::join_all(asked)
+                .await
+                .into_iter()
+                .flatten()
+                .collect();
+        let left: Vec<String> = ids
+            .into_iter()
+            .filter(|id| !portraits.contains_key(id))
+            .collect();
+        if !left.is_empty() {
+            let found = self.api.artist_images(left).await;
+            let found = found.inspect_err(|error| tracing::warn!("no portraits: {error:#}"));
+            portraits.extend(found.unwrap_or_default());
+        }
+        portrayed(sections, &portraits)
+    }
+
+    /// The page a card of Explore or of such a page opens: the service's
+    /// own when the path is one of its, else sonora's page of the genre.
     pub async fn page_of_rows(&self, path: &str) -> Result<Home> {
+        if let Some(page) = self.extras.page(path).await.map_err(error)? {
+            return Ok(page);
+        }
         let genre = self.api.genre(path).await.map_err(error)?;
-        Ok(rows(genre.sections))
+        Ok(rows(self.with_portraits(genre.sections).await))
     }
 
-    /// What the account played lately, as a row of track cards.
-    /// What the service has that is new for this account, from the
-    /// provider itself: `MusicApi` has no feed.
-    pub async fn feed(&self) -> Result<Vec<Card>> {
-        self.provider.feed().await.map_err(error)
-    }
-
-    pub fn has_feed(&self) -> bool {
-        self.provider.has_feed()
-    }
-
+    /// Explore: the service's own page where it has one, else sonora's
+    /// genres. A page that fails is not the end of Explore: the genres
+    /// are still there to show.
     pub async fn explore(&self) -> Result<Home> {
+        match self.extras.explore().await {
+            Ok(Some(page)) => return Ok(page),
+            Ok(None) => {}
+            Err(error) => tracing::warn!("no Explore page of the service's own: {error:#}"),
+        }
         let genres = self.api.genres().await.map_err(error)?;
         Ok(rows(vec![GenreSection {
             title: "Genres".into(),
@@ -715,14 +791,169 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
+    /// A service whose own pages are these, or that fails to give them.
+    struct Pages(Option<&'static str>);
+
+    #[async_trait::async_trait]
+    impl crate::catalogue::Extras for Pages {
+        async fn explore(&self) -> anyhow::Result<Option<crate::browse::Home>> {
+            match self.0 {
+                Some(heading) => Ok(Some(one_row(heading))),
+                None => anyhow::bail!("down"),
+            }
+        }
+        async fn page(&self, path: &str) -> anyhow::Result<Option<crate::browse::Home>> {
+            Ok(path.starts_with("pages/").then(|| one_row("Its own page")))
+        }
+        async fn artist_picture(&self, id: &str) -> anyhow::Result<Option<String>> {
+            Ok((id == "a").then(|| "https://x/a.jpg".into()))
+        }
+        async fn radio_playlist(&self, _: &str) -> anyhow::Result<Option<String>> {
+            Ok(Some("mix:1".into()))
+        }
+    }
+
+    fn one_row(heading: &str) -> crate::browse::Home {
+        crate::browse::Home {
+            rows: vec![crate::browse::HomeRow {
+                heading: heading.into(),
+                kind: crate::browse::RowKind::Links,
+                cards: vec![crate::domain::Card::default()],
+                more: None,
+            }],
+        }
+    }
+
+    fn session_with(extras: Pages) -> super::Session {
+        use crate::catalogue::sample::Sample;
+        let signed_in = Sample::session();
+        super::Session {
+            name: "Sample",
+            provider: std::sync::Arc::new(Sample),
+            api: signed_in.api,
+            extras: std::sync::Arc::new(extras),
+            playback: signed_in.playback,
+            shape: signed_in.shape,
+        }
+    }
+
+    fn wait<T>(what: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("a runtime")
+            .block_on(what)
+    }
+
+    #[test]
+    fn an_artist_shown_without_a_picture_is_given_the_portrait_found() {
+        let artist = |id: &str, cover: Option<&str>| {
+            super::GenreItem::Artist(music::SavedArtist {
+                id: id.into(),
+                name: id.to_uppercase(),
+                cover: cover.map(Into::into),
+                added_at: None,
+            })
+        };
+        let page = vec![super::GenreSection {
+            title: "Recently played".into(),
+            items: vec![
+                artist("a", None),
+                artist("b", Some("https://x/own.jpg")),
+                artist("a", None),
+                super::GenreItem::Track(music::Track::default()),
+            ],
+        }];
+        assert_eq!(super::faceless(&page), ["a"], "each once, and only those");
+
+        let found = [("a".to_owned(), "https://x/a.jpg".to_owned())].into();
+        let page = super::portrayed(page, &found);
+        let covers: Vec<_> = page[0]
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                super::GenreItem::Artist(artist) => Some(artist.cover.as_deref()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            covers,
+            [
+                Some("https://x/a.jpg"),
+                Some("https://x/own.jpg"),
+                Some("https://x/a.jpg")
+            ],
+            "its own picture is kept"
+        );
+    }
+
+    #[test]
+    fn a_page_is_drawn_with_the_pictures_found_and_without_the_others() {
+        // "a" from the service's own word; "b" is left to sonora, which for
+        // the sample service fails: the page comes back all the same.
+        let artist = |id: &str| {
+            super::GenreItem::Artist(music::SavedArtist {
+                id: id.into(),
+                ..Default::default()
+            })
+        };
+        let page = vec![super::GenreSection {
+            title: "Recently played".into(),
+            items: vec![artist("a"), artist("b")],
+        }];
+        let page = wait(session_with(Pages(None)).with_portraits(page));
+        let covers: Vec<_> = page[0]
+            .items
+            .iter()
+            .map(|item| match item {
+                super::GenreItem::Artist(artist) => artist.cover.as_deref(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(covers, [Some("https://x/a.jpg"), None]);
+    }
+
+    #[test]
+    fn explore_is_the_services_own_page_where_it_has_one() {
+        let explore = wait(session_with(Pages(Some("Moods"))).explore()).expect("a page");
+        assert_eq!(explore.rows[0].heading, "Moods");
+    }
+
+    #[test]
+    fn an_explore_page_that_fails_leaves_sonoras_genres() {
+        // Not an error: sonora is asked instead, and for the sample service
+        // that is a page with nothing on it.
+        let explore = wait(session_with(Pages(None)).explore()).expect("sonora's answer");
+        assert!(explore.rows.is_empty());
+    }
+
+    #[test]
+    fn a_page_of_the_services_own_is_asked_of_it_and_a_genre_of_sonora() {
+        let session = session_with(Pages(Some("Moods")));
+        let page = wait(session.page_of_rows("pages/m_party")).expect("its page");
+        assert_eq!(page.rows[0].heading, "Its own page");
+        // The sample service has no page for any genre: this one was
+        // sonora's to answer.
+        let genre = wait(session.page_of_rows("genre_pop")).expect("sonora's");
+        assert!(genre.rows.is_empty());
+    }
+
+    #[test]
+    fn a_radio_whose_playlist_cannot_be_listed_is_the_plain_station() {
+        // The sample service lists no playlist and plays no station: the
+        // name is dropped with the list it could not give, and what comes
+        // back is the station's own answer, here its failure.
+        let seed = crate::domain::TrackId::from(1);
+        let named = wait(session_with(Pages(None)).radio(&seed));
+        assert!(matches!(named, Err(super::Error::Other(_))), "{named:?}");
+    }
+
     #[test]
     fn a_listen_again_row_that_repeats_the_quick_picks_is_recognised() {
         let track = |id: &str| {
-            crate::provider::map::item(crate::domain::Card {
-                target: Some(crate::domain::Target::Track(id.into())),
+            super::GenreItem::Track(music::Track {
+                id: Some(id.into()),
                 ..Default::default()
             })
-            .expect("a track card")
         };
         let picks = vec![track("a"), track("b"), track("c")];
         assert!(super::same_tracks(&[track("a"), track("b")], &picks));
@@ -828,7 +1059,7 @@ mod tests {
             super::found_artists(Err(anyhow::anyhow!("rate limited"))),
             Ok(found) if found.is_empty()
         ));
-        let refused = anyhow::Error::from(crate::tidal::TidalError::Unauthorized);
+        let refused = anyhow::Error::from(music::SignInFailure(music::SignInProblem::Credentials));
         assert!(matches!(
             super::found_artists(Err(refused)),
             Err(super::Error::Unauthorized)
@@ -846,13 +1077,9 @@ mod tests {
     #[test]
     fn the_artists_behind_a_search_come_once_each_most_frequent_first() {
         let track = |artists: &[(&str, Option<&str>)]| {
-            let item = crate::provider::map::item(crate::domain::Card {
-                target: Some(crate::domain::Target::Track("t".into())),
+            let mut t = music::Track {
+                id: Some("t".into()),
                 ..Default::default()
-            })
-            .expect("a track card");
-            let super::GenreItem::Track(mut t) = item else {
-                unreachable!()
             };
             t.artist_refs = artists
                 .iter()
@@ -886,7 +1113,23 @@ mod tests {
             super::heading("home-recently-added".into()),
             "Recently added"
         );
+        assert_eq!(super::heading("nav-songs".into()), "Songs");
         assert_eq!(super::heading("Quick picks".into()), "Quick picks");
+        // Every key sonora's providers title a shelf with: a new one shows
+        // on screen as the key itself until it is given its English here.
+        for key in [
+            "home-recently-added",
+            "home-recently-played",
+            "home-playlists",
+            "home-favorite-albums",
+            "home-artists",
+            "home-collection-albums",
+            "nav-playlists",
+            "nav-albums",
+            "nav-songs",
+        ] {
+            assert_ne!(super::heading(key.into()), key, "{key} has no English");
+        }
     }
 
     use std::time::Duration;
@@ -1081,9 +1324,10 @@ mod tests {
     fn a_refused_session_is_the_one_error_the_shell_tells_apart() {
         let refused = anyhow::Error::from(music::SignInFailure(music::SignInProblem::Credentials));
         assert!(matches!(error(refused), Error::Unauthorized));
-        // A TIDAL 401 under a context is the same thing.
-        let tidal = anyhow::Error::from(crate::tidal::TidalError::Unauthorized).context("loading");
-        assert!(matches!(error(tidal), Error::Unauthorized));
+        // Under a context it is the same thing.
+        let wrapped = anyhow::Error::from(music::SignInFailure(music::SignInProblem::Credentials))
+            .context("loading");
+        assert!(matches!(error(wrapped), Error::Unauthorized));
         assert!(matches!(error(anyhow::anyhow!("down")), Error::Other(m) if m == "down"));
     }
 }

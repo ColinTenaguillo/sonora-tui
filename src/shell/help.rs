@@ -40,7 +40,7 @@ const BINDINGS: &[Binding] = &[
         what: "move through the sidebar",
     },
     Binding {
-        keys: "1 - 8",
+        keys: "1 - 7",
         what: "straight to a nav entry, 1 is Music",
     },
     Binding {
@@ -502,7 +502,7 @@ mod tests {
                     "esc" => source.contains("KeyCode::Esc"),
                     "space" => source.contains("KeyCode::Char(' ')"),
                     // A run of keys bound as one pattern: the nav numbers
-                    // are `'1'..='8'`, not eight separate arms.
+                    // are `'1'..='7'`, not seven separate arms.
                     "-" => true,
                     // With ctrl held: the arm is on the letter, under a
                     // check of the modifier.

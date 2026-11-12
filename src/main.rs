@@ -65,6 +65,9 @@ fn app() -> anyhow::Result<()> {
         sonora_tui::config::log::to(appender).init();
     }
 
+    // After the log is up, so what it does is written down.
+    sonora_tui::catalogue::carry_tidal_sign_in_over();
+
     // On macOS a runtime is already running on this thread -- `main` handed
     // the app to one so the run loop could keep the main thread -- and
     // nesting a second would panic on `block_on`.

@@ -51,14 +51,6 @@ fn notice(
     );
 }
 
-/// What the Feed page says on a service that has none.
-pub(super) fn feed_notice(service: &str) -> Vec<ratatui::text::Line<'static>> {
-    vec![
-        ratatui::text::Line::from(format!("{service} has no feed.")),
-        ratatui::text::Line::from("TIDAL's lists new releases from the artists you follow."),
-    ]
-}
-
 /// Public so `examples/screenshot.rs` renders what the app actually renders.
 /// A preview that assembles the layout itself drifts from the real one, and
 /// then it is checking its own copy rather than the UI.
@@ -240,7 +232,6 @@ fn draw_section(
         section @ (sidebar::Section::Music | sidebar::Section::Explore) => {
             draw_rows(frame, app, section, area)
         }
-        sidebar::Section::Feed => draw_feed(frame, app, area),
         sidebar::Section::Settings => {
             let linked: Vec<(String, String, bool)> = app
                 .scrobblers
@@ -310,52 +301,6 @@ fn draw_rows(
             area,
             &palette,
             state,
-            MAIN_FOCUSED,
-            trackgrid::Marks {
-                favourites: &app.favourites.tracks,
-                playing: app.now_playing.track.as_ref().map(|t| &t.id),
-                tier: app.now_playing.tier,
-                liked: &liked,
-            },
-            cover_drawer(&mut art),
-        );
-        app.artwork = art;
-    }
-}
-
-fn draw_feed(frame: &mut ratatui::Frame, app: &mut App, area: ratatui::layout::Rect) {
-    let palette = app.palette;
-    // The Feed is a page of rows like the home page, but headed and
-    // filtered like a grid: its chrome is drawn here and what is
-    // left of the pane goes to the row renderer. The heading rows
-    // come from the grid's own count so the two cannot drift.
-    let header = inputbox::render_headed(
-        frame,
-        scrollbar::reserve(area),
-        &palette,
-        "Feed",
-        None,
-        "Filter releases",
-        &app.feed.filter,
-        app.filtering,
-    );
-    let body = ratatui::layout::Rect {
-        y: area.y + header,
-        height: area.height.saturating_sub(header),
-        ..area
-    };
-    // Only TIDAL has one. Blank, the page read as broken; it
-    // says what it would show and where it is shown.
-    if !app.session.as_ref().is_some_and(|s| s.has_feed()) {
-        notice(frame, body, &palette, feed_notice(app.service_name()));
-    } else {
-        let liked = liked(&app.favourites);
-        let mut art = app.artwork.take();
-        home::render(
-            frame,
-            body,
-            &palette,
-            &app.feed,
             MAIN_FOCUSED,
             trackgrid::Marks {
                 favourites: &app.favourites.tracks,

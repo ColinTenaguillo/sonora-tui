@@ -6,7 +6,6 @@
 pub enum Section {
     Music,
     Explore,
-    Feed,
     Playlists,
     Albums,
     Tracks,
@@ -15,10 +14,9 @@ pub enum Section {
 }
 
 impl Section {
-    pub const ALL: [Section; 8] = [
+    pub const ALL: [Section; 7] = [
         Section::Music,
         Section::Explore,
-        Section::Feed,
         Section::Playlists,
         Section::Albums,
         Section::Tracks,
@@ -26,10 +24,7 @@ impl Section {
         Section::Settings,
     ];
 
-    /// The key that reaches this entry: 1 for Music, 8 for Settings.
-    ///
-    /// There are exactly eight, so every one of them has a number and no
-    /// number is spare.
+    /// The key that reaches this entry: 1 for Music, 7 for Settings.
     pub fn number(&self) -> usize {
         Self::ALL.iter().position(|s| s == self).unwrap_or(0) + 1
     }

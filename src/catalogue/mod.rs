@@ -2,23 +2,24 @@
 //!
 //! Every service comes through sonora's `music` crate: a `MusicProvider`
 //! signs in and hands back a `ProviderSession`, whose `MusicApi` the
-//! `Session` here reads into the shell's types. TIDAL is one such provider
-//! (`crate::provider`), with a `Fetch` of its own behind the engine. The
-//! shell holds a `Session` and does not know which service answers.
+//! `Session` here reads into the shell's types. The shell holds a `Session`
+//! and does not know which service answers.
 //!
 //! The error is the catalogue's own: the one thing the shell tells apart
 //! is a session the service no longer accepts, and everything else is
 //! words for the status line.
 
+mod carried;
+mod sample;
 pub(crate) mod session;
+mod tidal_extras;
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use music::MusicProvider;
 
 use crate::config::{Config, ProviderKind};
-use crate::playback::{NoMeta, StreamMeta};
+pub use carried::tidal_sign_in as carry_tidal_sign_in_over;
 pub use session::Session;
 
 /// What a request to the service can fail with, as the shell tells them
@@ -43,42 +44,66 @@ pub enum Favourable {
     Playlist(String),
 }
 
-/// A service the shell can sign in to: sonora's trait, plus the two things
-/// the shell shows that `MusicApi` has no word for. Both default to
-/// nothing, so a service answers only what it has.
-#[async_trait]
-pub trait Provider: MusicProvider {
-    /// What the engine's events leave out about a stream, where the
-    /// service's own fetch records it. The quality badge reads that.
-    fn stream_meta(&self) -> Arc<dyn StreamMeta> {
-        Arc::new(NoMeta)
+/// A service the shell can sign in to: sonora's own trait, under a name
+/// of ours so the shell's state, which derives `Debug`, can print one.
+pub trait Provider: MusicProvider {}
+
+impl<P: MusicProvider> Provider for P {}
+
+/// What a service has that sonora's `MusicApi` has no word for yet. Each
+/// answers nothing by default, and the session then makes do with what
+/// sonora gives: an adapter says only what its service adds, and goes the
+/// day sonora says it itself.
+#[async_trait::async_trait]
+pub trait Extras: Send + Sync {
+    /// The service's own Explore page, where it has more on it than its
+    /// genres.
+    async fn explore(&self) -> anyhow::Result<Option<crate::browse::Home>> {
+        Ok(None)
     }
 
-    /// The Feed: what is new for this account, dated. Releases from the
-    /// artists followed, on TIDAL.
-    async fn feed(&self) -> anyhow::Result<Vec<crate::domain::Card>> {
-        Ok(Vec::new())
+    /// The page of rows a card of such a page opens, when `path` is one
+    /// of the service's own rather than a genre of sonora's.
+    async fn page(&self, _path: &str) -> anyhow::Result<Option<crate::browse::Home>> {
+        Ok(None)
     }
 
-    /// Whether `feed` ever has anything: the page says so rather than
-    /// staying blank.
-    fn has_feed(&self) -> bool {
-        false
+    /// The picture an artist is drawn with: their own, or what the service
+    /// puts in its place for one it keeps no portrait of.
+    async fn artist_picture(&self, _artist_id: &str) -> anyhow::Result<Option<String>> {
+        Ok(None)
     }
 
-    /// The playlist id of the station built on a track, where the service
-    /// keeps stations as playlists: what `F` saves on an open radio.
+    /// The playlist a track's radio is, where the service keeps stations
+    /// as playlists: what `F` saves on an open radio.
     async fn radio_playlist(&self, _track_id: &str) -> anyhow::Result<Option<String>> {
         Ok(None)
     }
 }
 
-impl Provider for music::subsonic::SubsonicProvider {}
-impl Provider for music::spotify::SpotifyProvider {}
-impl Provider for music::apple::AppleProvider {}
-impl Provider for music::deezer::DeezerProvider {}
-impl Provider for music::youtube::YouTubeProvider {}
-impl Provider for music::local::LocalProvider {}
+/// A service that adds nothing.
+struct NoExtras;
+
+impl Extras for NoExtras {}
+
+/// What the service with this slug adds, over its signed-in `api`.
+fn extras_for(slug: &str, api: &Arc<dyn music::MusicApi>) -> Arc<dyn Extras> {
+    match slug {
+        "tidal" => Arc::new(tidal_extras::TidalExtras::new(Arc::clone(api))),
+        _ => Arc::new(NoExtras),
+    }
+}
+
+impl dyn Provider {
+    /// What the screen calls the service: its own name, but for TIDAL,
+    /// which writes itself in capitals and sonora does not.
+    pub fn label(&self) -> &'static str {
+        match self.slug() {
+            "tidal" => "TIDAL",
+            _ => self.name(),
+        }
+    }
+}
 
 /// The shell's state derives `Debug`; a provider prints as its name.
 impl std::fmt::Debug for dyn Provider {
@@ -90,10 +115,7 @@ impl std::fmt::Debug for dyn Provider {
 /// The service the config names, signed out.
 pub fn provider_for(config: &Config) -> anyhow::Result<Arc<dyn Provider>> {
     Ok(match config.provider.kind {
-        ProviderKind::Tidal => Arc::new(crate::provider::TidalProvider::new(
-            config.auth.clone(),
-            config.audio.quality(),
-        )?),
+        ProviderKind::Tidal => Arc::new(music::tidal::TidalProvider::new()),
         ProviderKind::Subsonic => Arc::new(music::subsonic::SubsonicProvider::new()),
         ProviderKind::Spotify => Arc::new(music::spotify::SpotifyProvider::from_env()),
         ProviderKind::Apple => Arc::new(music::apple::AppleProvider::new()),

@@ -6,8 +6,10 @@ use tracing::Subscriber;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::EnvFilter;
 
-/// What is logged when `RUST_LOG` does not say.
-const DEFAULT_FILTER: &str = "sonora_tui=info,rodio=warn";
+/// What is logged when `RUST_LOG` does not say. sonora's crates are in it
+/// at `warn`: the engine tells the shell only that a track could not play,
+/// and writes why here.
+const DEFAULT_FILTER: &str = "sonora_tui=info,music=warn,storage=warn,webview=warn,rodio=warn";
 
 /// The subscriber that writes the log to `file`, to be installed by `main`.
 pub fn to<M>(file: M) -> impl Subscriber + Send + Sync

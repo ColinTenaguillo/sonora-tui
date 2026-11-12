@@ -194,6 +194,22 @@ fn home_with_a_carousel_row() -> App {
     app
 }
 
+/// A home page of one row with more cards than a pane shows across.
+fn home_with_a_long_row() -> App {
+    let mut app = signed_in(sidebar::Section::Music);
+    app.home.rows = vec![home::Row {
+        kind: crate::browse::RowKind::Carousel,
+        heading: "New releases".into(),
+        cards: (0..12)
+            .map(|i| carousel::Card::new(format!("Release {i}"), "An Artist"))
+            .collect(),
+        state: carousel::CarouselState::default(),
+    }];
+    app.last_main_width = 100;
+    app.last_main_height = 40;
+    app
+}
+
 fn explore_rows() -> crate::browse::Home {
     crate::browse::Home {
         rows: vec![crate::browse::HomeRow {

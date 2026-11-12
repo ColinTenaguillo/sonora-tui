@@ -102,55 +102,6 @@ fn centred(area: Rect, width: u16, height: u16) -> Rect {
     }
 }
 
-/// Hand the verification link to the system browser.
-///
-/// Best effort by design: the link stays on screen either way, so a failure
-/// here costs nothing — the user copies it as before. Anything that spawns a
-/// browser can fail (a headless box, a locked-down desktop, no handler
-/// registered), and none of that should interrupt the login.
-///
-/// `Stdio::null()` on all three streams matters: a helper that writes to the
-/// terminal would scribble over the TUI, which is in raw mode on the
-/// alternate screen.
-pub fn open_in_browser(url: &str) {
-    use std::process::{Command, Stdio};
-
-    // Refuse anything that is not plainly an https URL. The value comes from a
-    // network response, and handing an arbitrary string to a shell-adjacent
-    // launcher is not something to do on trust.
-    if !url.starts_with("https://") || url.contains(char::is_whitespace) {
-        tracing::warn!("refusing to open a verification link that is not a plain https URL");
-        return;
-    }
-
-    let mut command = if cfg!(target_os = "macos") {
-        let mut c = Command::new("open");
-        c.arg(url);
-        c
-    } else if cfg!(target_os = "windows") {
-        // Not `cmd /C start`: cmd reads `&`, `|` and `^` in the URL as its
-        // own, so a link's second query parameter would run as a command.
-        // url.dll hands the link to the registered browser with no shell.
-        let mut c = Command::new("rundll32");
-        c.args(["url.dll,FileProtocolHandler", url]);
-        c
-    } else {
-        let mut c = Command::new("xdg-open");
-        c.arg(url);
-        c
-    };
-
-    match command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(_) => tracing::info!("opened the verification link in the browser"),
-        Err(e) => tracing::info!("could not open a browser ({e}); the link is on screen"),
-    }
-}
-
 /// `service` names what is being signed in to, and `guest` whether it can
 /// be used without an account -- YouTube Music can.
 /// The link the browser was sent to, kept on screen: opening it is best

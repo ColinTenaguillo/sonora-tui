@@ -205,7 +205,7 @@ fn a_number_leaves_an_opened_view_and_can_be_come_back_from() {
     app.update(Action::ActivateSelection);
     let title = app.open.as_ref().expect("open").title.clone();
 
-    let action = key(&mut app, KeyCode::Char('8')).expect("bound");
+    let action = key(&mut app, KeyCode::Char('7')).expect("bound");
     app.update(action);
     assert_eq!(app.sidebar.section(), sidebar::Section::Settings);
     assert!(app.open.is_none(), "the album closed");
@@ -691,161 +691,18 @@ fn every_overlay_asks_for_a_repaint_when_it_closes() {
 }
 
 #[test]
-fn the_feed_is_cut_into_four_dated_sections() {
-    // A flat grid of releases said nothing about when any of them
-    // landed. The windows are the last seven days, the seven before
-    // that, the rest of the month and everything behind it.
-    let today = 20_000;
-    let card = |title: &str, age: i64| carousel::Card {
-        day: Some(today - age),
-        ..carousel::Card::new(title, "An Artist")
-    };
-    let rows = feed_rows(
-        &[
-            card("Today", 0),
-            card("Six days", 6),
-            card("Eight days", 8),
-            card("Twenty days", 20),
-            card("A year", 365),
-        ],
-        today,
-    );
-
-    let headings: Vec<&str> = rows.iter().map(|r| r.heading.as_str()).collect();
-    assert_eq!(
-        headings,
-        ["This week", "Last week", "Last month", "Older"],
-        "the four windows, newest first"
-    );
-    assert_eq!(
-        rows[0].cards.len(),
-        2,
-        "today and six days ago are this week"
-    );
-    assert_eq!(rows[1].cards[0].title, "Eight days");
-    assert_eq!(rows[2].cards[0].title, "Twenty days");
-    assert_eq!(rows[3].cards[0].title, "A year");
-}
-
-#[test]
-fn a_section_with_nothing_in_it_is_not_drawn_at_all() {
-    // A heading over no cards reads as a fault. The sections are built
-    // from what is there rather than drawn and then filled.
-    let today = 20_000;
-    let rows = feed_rows(
-        &[carousel::Card {
-            day: Some(today),
-            ..carousel::Card::new("Today", "An Artist")
-        }],
-        today,
-    );
-    assert_eq!(
-        rows.len(),
-        1,
-        "only the week that has something in it: {:?}",
-        rows.iter().map(|r| &r.heading).collect::<Vec<_>>()
-    );
-}
-
-#[test]
-fn a_release_with_no_date_is_shown_under_the_oldest_heading() {
-    // The card is still a release by someone the user follows, so it
-    // belongs on the page rather than being dropped for want of a
-    // stamp.
-    let rows = feed_rows(&[carousel::Card::new("Undated", "An Artist")], 20_000);
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].heading, "Older");
-    assert_eq!(rows[0].cards[0].title, "Undated");
-}
-
-#[test]
-fn see_all_on_a_feed_section_opens_what_is_already_held() {
-    // The four sections are cut from one reply, so there is no path to
-    // fetch: `o` opens the cards in hand. Without this the key did
-    // nothing at all, the rows having no `more`.
-    let mut app = signed_in(sidebar::Section::Feed);
-    let today = today();
-    app.update(Action::FeedLoaded(
-        (0..12)
-            .map(|i| carousel::Card {
-                day: Some(today),
-                ..carousel::Card::new(format!("Release {i}"), "An Artist")
-            })
-            .collect(),
-    ));
-    app.last_main_width = 100;
-    app.last_main_height = 40;
+fn see_all_on_a_home_row_opens_what_is_already_held() {
+    // A row is whole in hand, so there is no path to fetch: `o` opens the
+    // cards held. Without this the key did nothing at all.
+    let mut app = home_with_a_long_row();
 
     app.update(Action::SeeAll);
-    let open = app.open.as_ref().expect("the section opened");
-    assert_eq!(open.title, "This week", "under its own heading");
+    let open = app.open.as_ref().expect("the row opened");
+    assert_eq!(open.title, "New releases", "under its own heading");
     assert_eq!(
         app.open_cards.len(),
         12,
-        "with the whole of what the section holds"
-    );
-}
-
-#[test]
-fn the_feed_is_its_own_view_rather_than_the_favourites_list() {
-    // It fell through to the arm that draws the track list, so the
-    // section showed the same thing as Tracks and said nothing about
-    // what the followed artists had released.
-    let mut app = signed_in(sidebar::Section::Feed);
-    app.update(Action::FeedLoaded(vec![
-        carousel::Card::new("Discovery", "Daft Punk"),
-        carousel::Card::new("Homework", "Daft Punk"),
-    ]));
-
-    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
-    terminal.draw(|f| draw(f, &mut app)).unwrap();
-    let text = geometry::text(&terminal.backend().buffer().clone());
-
-    assert!(text.contains("Discovery"), "the feed's own cards:\n{text}");
-    assert!(!text.contains("TITLE"), "not the track list:\n{text}");
-}
-
-#[test]
-fn reaching_the_feed_asks_for_it_once() {
-    let mut app = signed_in(sidebar::Section::Music);
-    let mut asked = 0;
-    for _ in 0..sidebar::Section::ALL.len() * 2 {
-        if matches!(app.update(Action::SidebarNext), Some(Action::LoadFeed)) {
-            asked += 1;
-            // The reply it would have got.
-            app.update(Action::FeedLoaded(vec![carousel::Card::new("A", "B")]));
-        }
-    }
-    assert_eq!(asked, 1, "asked for once, not on every pass");
-}
-
-#[test]
-fn the_movement_keys_drive_the_feeds_own_rows() {
-    // `rows_on_screen_mut` routes by section, so without the feed in it
-    // the keys would move the home page's rows behind — the fault that
-    // has come back five times, in the grid's version of this routing.
-    let mut app = signed_in(sidebar::Section::Feed);
-    let today = today();
-    app.update(Action::FeedLoaded(
-        (0..6)
-            .map(|i| carousel::Card {
-                day: Some(today - i64::from(i)),
-                ..carousel::Card::new(format!("Release {i}"), "An Artist")
-            })
-            .collect(),
-    ));
-    app.last_main_width = 100;
-    app.last_main_height = 30;
-
-    assert!(app.on_home(), "the feed moves like a page of rows");
-    app.update(Action::CarouselNext);
-    assert_eq!(
-        app.feed.rows[0].state.selected, 1,
-        "the feed's own selection moved"
-    );
-    assert!(
-        app.home.rows.is_empty(),
-        "and the home page's rows were left alone"
+        "with the whole of what the row holds"
     );
 }
 

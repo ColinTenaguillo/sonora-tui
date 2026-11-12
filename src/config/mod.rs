@@ -56,7 +56,6 @@ pub mod paths {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct Config {
-    pub auth: AuthConfig,
     pub audio: AudioConfig,
     pub ui: UiConfig,
     pub playback: PlaybackConfig,
@@ -296,85 +295,6 @@ pub struct UiConfig {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct AuthConfig {
-    /// Not written when it is the shipped value, so a fresh config does not
-    /// pin today's credentials: when a release changes them, every file that
-    /// never set its own follows.
-    #[serde(skip_serializing_if = "AuthConfig::is_shipped")]
-    pub client_id: String,
-    #[serde(skip_serializing_if = "AuthConfig::is_shipped")]
-    pub client_secret: String,
-}
-
-/// The credential pairs this app has shipped, newest first, each half in
-/// base64 and cut in two. Not a secret from the user -- the README says what
-/// these are -- but kept out of code search and secret scanners: every
-/// third-party client sends this same pair, and the first copy of it that
-/// turns up in a grep is the one that gets capped for all of them.
-///
-/// A file naming a retired pair is not a user's choice, it is what an
-/// earlier builds wrote out (see `AuthConfig::normalize`), so a pair that
-/// stops working is retired here rather than deleted.
-const SHIPPED: &[[&str; 4]] = &[[
-    "ZlgySnhkbW50",
-    "WldLMGl4VA==",
-    "R1o5b3Y1UGpQWnJtekRiUnhJck5B",
-    "Slo3Rm5rbDVLbTNyRWJVZEJFQw==",
-]];
-
-/// TIDAL's Android app client, in the same form. A refresh token the device
-/// flow hands out can be renewed as it, and it is served FLAC where the
-/// device client gets AAC. Not overridable: it is not the sign-in's client.
-const APP: [&str; 4] = [
-    "NkJEU1JkcEs5",
-    "aHFFQlRnVQ==",
-    "eGV1UG1ZN25icFo5SUliTEFjUTkzc2",
-    "hrYTFWTmhlVUFxTjZJY3N6alRHOD0=",
-];
-
-fn decode(halves: &[&str]) -> String {
-    use base64::Engine as _;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(halves.concat())
-        .expect("SHIPPED is valid base64");
-    String::from_utf8(bytes).expect("SHIPPED decodes to ASCII")
-}
-
-impl AuthConfig {
-    fn shipped() -> (String, String) {
-        let [a, b, c, d] = SHIPPED[0];
-        (decode(&[a, b]), decode(&[c, d]))
-    }
-
-    /// TIDAL's Android app client, which sessions renew as for FLAC.
-    pub fn app() -> Self {
-        let [a, b, c, d] = APP;
-        Self {
-            client_id: decode(&[a, b]),
-            client_secret: decode(&[c, d]),
-        }
-    }
-
-    fn is_shipped(value: &String) -> bool {
-        let (id, secret) = Self::shipped();
-        *value == id || *value == secret
-    }
-
-    /// Map any pair this app ever shipped onto the current one. Older
-    /// releases wrote the defaults into the file in clear, so without this
-    /// a change of default would reach nobody who had run one.
-    fn normalize(&mut self) {
-        let retired = SHIPPED[1..]
-            .iter()
-            .any(|[a, b, _, _]| self.client_id == decode(&[a, b]));
-        if retired {
-            *self = Self::default();
-        }
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
 pub struct AudioConfig {
     pub quality: String,
     /// Output level, 0.0 to 1.0. Applied to the sink rather than to the
@@ -397,30 +317,6 @@ pub struct AudioConfig {
     /// On a direct output, run the device at each track's own sample rate,
     /// so nothing resamples it on the way to the DAC.
     pub match_rate: bool,
-}
-
-impl Default for AuthConfig {
-    fn default() -> Self {
-        // These belong to one of TIDAL's own applications, not to this one:
-        // full playback is granted only to their first-party clients, so
-        // every third-party client sends a first-party `client_id` and TIDAL
-        // believes it is talking to that application. It is a
-        // misrepresentation, and it is here because there is no alternative
-        // that works — a client registered on TIDAL's developer portal is
-        // refused for the device flow ("Client is not a Limited Input Device
-        // client") and capped at 30-second previews besides. The README says
-        // so plainly; if TIDAL ever opens a path for third-party device
-        // clients, this should be the first thing to go.
-        //
-        // Overridable because TIDAL caps client_ids that attract traffic --
-        // when that happens the user edits this field rather than waiting for
-        // a release.
-        let (client_id, client_secret) = Self::shipped();
-        Self {
-            client_id,
-            client_secret,
-        }
-    }
 }
 
 impl AudioConfig {
@@ -447,8 +343,8 @@ impl AudioConfig {
 
 impl Default for AudioConfig {
     fn default() -> Self {
-        // Never lower this. Requesting LOSSLESS on the default client_id
-        // returns HIGH (AAC), not FLAC.
+        // The best there is: each service serves what the account holds
+        // at or below it.
         Self {
             quality: "HI_RES_LOSSLESS".into(),
             volume: 1.0,
@@ -508,10 +404,7 @@ impl Config {
             path: path.clone(),
             source,
         })?;
-        let mut config: Self =
-            toml::from_str(&text).map_err(|source| ConfigError::Parse { path, source })?;
-        config.auth.normalize();
-        Ok(config)
+        toml::from_str(&text).map_err(|source| ConfigError::Parse { path, source })
     }
 
     /// Write the config back, so a setting changed in the app is still set
@@ -581,49 +474,28 @@ mod tests {
         let c = Config::default();
         let text = toml::to_string_pretty(&c).unwrap();
         let back: Config = toml::from_str(&text).unwrap();
-        assert_eq!(back.auth.client_id, c.auth.client_id);
         assert_eq!(back.audio.quality, c.audio.quality);
     }
 
     #[test]
-    fn shipped_credentials_stay_out_of_the_file() {
-        // A fresh config must not pin today's pair, or a change of default
-        // in a release would reach nobody.
-        let text = toml::to_string_pretty(&Config::default()).unwrap();
-        assert!(!text.contains("client_id"), "{text}");
-        let back: Config = toml::from_str(&text).unwrap();
-        assert_eq!(back.auth.client_id, Config::default().auth.client_id);
-        assert_eq!(back.auth.client_id.len(), 16);
-    }
-
-    #[test]
-    fn a_users_own_credentials_are_written_and_kept() {
-        let mut c = Config::default();
-        c.auth.client_id = "mine".into();
-        c.auth.client_secret = "my-secret".into();
-        c.auth.normalize();
-        let text = toml::to_string_pretty(&c).unwrap();
-        assert!(text.contains("client_id = \"mine\""), "{text}");
-        assert!(text.contains("client_secret = \"my-secret\""), "{text}");
-    }
-
-    #[test]
     fn default_quality_is_hires() {
-        // Requesting anything lower silently yields AAC on the shipped
-        // client_id — see the spec's §2.1.
         assert_eq!(Config::default().audio.quality, "HI_RES_LOSSLESS");
     }
 
     #[test]
     fn partial_config_fills_missing_fields_from_defaults() {
-        // A user editing only client_id must not have to restate everything.
+        // A user editing one key must not have to restate everything. The
+        // `[auth]` table is one earlier versions read, for TIDAL's client
+        // id: a file that still has it loads all the same.
         let text = r#"
             [auth]
             client_id = "replaced"
-            client_secret = "also-replaced"
+
+            [audio]
+            volume = 0.5
         "#;
         let c: Config = toml::from_str(text).unwrap();
-        assert_eq!(c.auth.client_id, "replaced");
+        assert_eq!(c.audio.volume, 0.5);
         assert_eq!(c.audio.quality, "HI_RES_LOSSLESS");
     }
 }

@@ -2554,7 +2554,7 @@ dependencies = [
  "priority-queue",
  "protobuf",
  "protobuf-json-mapping",
- "quick-xml 0.38.4",
+ "quick-xml",
  "rand 0.9.5",
  "rand_distr",
  "rsa",
@@ -3979,15 +3979,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quick-xml"
-version = "0.42.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41b1177fdf999d2321d3fb46ff47159d9c1fb9ad66a4879f8c50a0b504615e9b"
-dependencies = [
- "memchr",
-]
-
-[[package]]
 name = "quinn"
 version = "0.11.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5277,7 +5268,6 @@ dependencies = [
  "anyhow",
  "apple-cf",
  "async-trait",
- "base64 0.23.1",
  "crossterm",
  "directories",
  "discord-rich-presence",
@@ -5291,7 +5281,6 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-web-kit",
- "quick-xml 0.42.0",
  "ratatui",
  "ratatui-image",
  "reqwest 0.13.5",
