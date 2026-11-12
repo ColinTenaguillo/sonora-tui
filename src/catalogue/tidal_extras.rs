@@ -1,12 +1,14 @@
 //! What TIDAL has that sonora's `MusicApi` has no word for yet: its own
 //! Explore page, with the moods and decades beside the genres, the pages
-//! those open, and the mix a track's radio is.
+//! those open, the mix a track's radio is, and of an artist the picture
+//! that stands in for a missing portrait and how many follow them.
 //!
 //! sonora's TIDAL client is private to its crate, so these few requests
 //! are made here, with the session sonora keeps: read from its file each
-//! time, never written. Asked upstream (sonorahq/sonora#1351); when sonora
-//! answers these itself, this file and its line in `extras_for` go, and
-//! nothing else changes.
+//! time, never written. Each is asked upstream (sonorahq/sonora#1351 for
+//! the pages, #1359 for the radio, #1358 for the picture); as sonora
+//! answers one itself its part here goes, and with the last of them this
+//! file and its line in `extras_for`.
 
 use std::sync::Arc;
 
@@ -18,7 +20,11 @@ use super::Extras;
 use crate::browse::{Home, HomeRow, RowKind};
 use crate::domain::Card;
 
-const API: &str = "https://api.tidal.com/v1";
+const API: &str = "https://api.tidal.com";
+
+/// What the web player says it is. TIDAL's v2 pages answer 400 without
+/// it, and stop answering a version it has retired.
+const CLIENT_VERSION: &str = "2026.9.15";
 
 /// The prefix a mix wears as a playlist id, which is sonora's own: it
 /// opens and saves one under that name.
@@ -63,11 +69,19 @@ impl TidalExtras {
             std::fs::read_to_string(super::carried::sonoras_file().context("no home folder")?)
                 .context("sonora keeps no TIDAL sign-in")?;
         let (token, country) = session(&held).context("sonora's TIDAL sign-in cannot be read")?;
-        let mut url = reqwest::Url::parse(&format!("{API}/{}", path.trim_start_matches('/')))?;
+        let path = path.trim_start_matches('/');
+        // A path names its API when it is not the first one's.
+        let path = match path.starts_with("v2/") {
+            true => path.to_owned(),
+            false => format!("v1/{path}"),
+        };
+        let mut url = reqwest::Url::parse(&format!("{API}/{path}"))?;
         url.query_pairs_mut()
             .append_pair("countryCode", &country)
             .extend_pairs(query);
-        Ok(self.http.get(url).bearer_auth(token).send().await?)
+        let request = self.http.get(url).bearer_auth(token);
+        let request = request.header("x-tidal-client-version", CLIENT_VERSION);
+        Ok(request.send().await?)
     }
 }
 
@@ -101,6 +115,12 @@ impl Extras for TidalExtras {
         Ok(Some(page(&self.get(path, &AS_THE_WEB).await?)))
     }
 
+    async fn artist_fans(&self, artist_id: &str) -> anyhow::Result<Option<u64>> {
+        let query = [AS_THE_WEB[0], AS_THE_WEB[1], ("platform", "WEB")];
+        let body = self.get(&format!("v2/artist/{artist_id}"), &query).await?;
+        Ok(followers(&body))
+    }
+
     async fn artist_picture(&self, artist_id: &str) -> anyhow::Result<Option<String>> {
         let body = self.get(&format!("artists/{artist_id}"), &[]).await?;
         Ok(artist_picture(&body))
@@ -117,6 +137,13 @@ fn track_mix(track: &str) -> Option<String> {
     let track: serde_json::Value = serde_json::from_str(track).ok()?;
     let mix = track.get("mixes")?.get("TRACK_MIX")?.as_str()?;
     Some(format!("{MIX}{mix}"))
+}
+
+/// The followers the web's artist page puts under the name. sonora reads
+/// the artist from an endpoint that does not count them.
+fn followers(page: &str) -> Option<u64> {
+    let page: serde_json::Value = serde_json::from_str(page).ok()?;
+    page["header"]["followersAmount"].as_u64()
 }
 
 /// An artist's portrait, or the album cover TIDAL names in its place for
@@ -554,6 +581,14 @@ mod tests {
         assert_eq!(artist_picture(none), Some(at("cc/dd")));
         assert_eq!(artist_picture(r#"{"id":1,"picture":""}"#), None);
         assert_eq!(artist_picture("not json"), None);
+    }
+
+    #[test]
+    fn an_artists_page_gives_how_many_follow_them() {
+        let page = r#"{"header":{"followersAmount":3701,"biography":null}}"#;
+        assert_eq!(followers(page), Some(3701));
+        assert_eq!(followers(r#"{"header":{"followersAmount":null}}"#), None);
+        assert_eq!(followers("not json"), None);
     }
 
     #[test]
