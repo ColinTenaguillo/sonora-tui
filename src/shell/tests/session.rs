@@ -213,18 +213,6 @@ fn a_text_setting_is_typed_in_its_box_and_written_on_enter() {
 }
 
 #[test]
-fn a_service_without_a_feed_says_so_instead_of_a_blank_page() {
-    assert!(sample_session().has_feed(), "TIDAL has one");
-    let text: String = crate::shell::draw::feed_notice("Deezer")
-        .iter()
-        .map(|l| l.to_string())
-        .collect::<Vec<_>>()
-        .join(" ");
-    assert!(text.contains("Deezer has no feed"), "{text}");
-    assert!(text.contains("TIDAL"), "and says where one is:\n{text}");
-}
-
-#[test]
 fn session_expired_clears_the_session_and_tracks_and_shows_the_login_modal() {
     let mut app = App {
         session: Some(sample_session()),

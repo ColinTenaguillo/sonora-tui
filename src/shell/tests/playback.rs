@@ -52,12 +52,6 @@ fn no_view_paints_under_the_now_playing_bar() {
                     picture: None,
                 })
                 .collect();
-            app.update(Action::FeedLoaded(
-                (0..20)
-                    .map(|i| carousel::Card::new(format!("Release {i}"), "An Artist"))
-                    .collect(),
-            ));
-
             assert_clear_of_the_bar(&mut app, height, &format!("{section:?}"));
         }
 

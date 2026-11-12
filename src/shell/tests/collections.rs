@@ -115,7 +115,7 @@ fn v_shows_the_albums_and_playlists_as_a_list_and_back() {
         owned: false,
     };
     app.playlists = vec![playlist("Road trip", 12), playlist("Focus", 30)];
-    press(&mut app, '4');
+    press(&mut app, '3');
     assert!(app.config.ui.list_view);
     let text = shown(&mut app);
     let row = text

@@ -11,8 +11,7 @@ file only lists what goes wrong when it is skipped.
     cargo clippy --locked --all-targets -- -D warnings
 
 Start with the narrowest test (`cargo test --lib <name>`, `cargo test --test
-keyboard`). `tests/live_*` are `#[ignore]`d and need a signed-in account;
-`tests/mpris` runs on Linux only. A failing test or clippy warning is yours
+keyboard`). `tests/mpris` runs on Linux only. A failing test or clippy warning is yours
 until shown otherwise: none are known to be broken on `main`. Run `cargo fmt`
 before committing; the tree is rustfmt's and CI checks it.
 
@@ -27,8 +26,15 @@ before committing; the tree is rustfmt's and CI checks it.
   another's internals: `tests/architecture.rs` fails the build on either.
 - On macOS `main` is not `#[tokio::main]`: the main thread runs the media
   keys' run loop.
-- DTO fields are `#[serde(default)]`, so a misspelt field parses to nothing.
-  A new field gets a check in `tests/live_api.rs`.
+- Every service, TIDAL included, is sonora's provider. What one has that
+  sonora's `MusicApi` lacks goes behind `catalogue::Extras`, in one adapter
+  file per service (`tidal_extras.rs`), written to be deleted the day
+  sonora covers it: nothing else may speak to a service's API. Its DTO
+  fields are `#[serde(default)]`, so a misspelt one parses to nothing: a
+  new field is tested on a body copied from a real answer.
+- `cargo test` must never touch the user's own files;
+  `catalogue::carry_tidal_sign_in_over` moves one and is called from `main`
+  alone.
 - A new key goes in `src/shell/help.rs` (tests check it) and in the README's
   key table (nothing checks it). A new config key goes in the README too.
 

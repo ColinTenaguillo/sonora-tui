@@ -18,7 +18,6 @@ impl Section {
         match self {
             Section::Music => "Music",
             Section::Explore => "Explore",
-            Section::Feed => "Feed",
             Section::Playlists => "Playlists",
             Section::Albums => "Albums",
             Section::Tracks => "Tracks",
@@ -33,7 +32,6 @@ impl Section {
         match self {
             Section::Music => icons::music(),
             Section::Explore => icons::explore(),
-            Section::Feed => icons::feed(),
             Section::Playlists => icons::playlists(),
             Section::Albums => icons::albums(),
             Section::Tracks => icons::tracks(),
@@ -47,10 +45,7 @@ impl Section {
     /// Settings sits below the collection rather than in it: it is not a
     /// shelf of the user's music, it is where the app is configured.
     fn in_collection(&self) -> bool {
-        !matches!(
-            self,
-            Section::Music | Section::Explore | Section::Feed | Section::Settings
-        )
+        !matches!(self, Section::Music | Section::Explore | Section::Settings)
     }
 }
 
@@ -186,7 +181,6 @@ mod tests {
         // must land where the web client puts it.
         assert!(!Section::Music.in_collection());
         assert!(!Section::Explore.in_collection());
-        assert!(!Section::Feed.in_collection());
         assert!(Section::Playlists.in_collection());
         assert!(Section::Profiles.in_collection());
     }

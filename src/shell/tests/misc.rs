@@ -19,18 +19,7 @@ fn h_does_not_shut_a_see_all_that_is_still_arriving() {
     // Opened by the key rather than by hand: what `o` builds is the
     // thing under test, and a view assembled here would not have caught
     // this.
-    let mut app = signed_in(sidebar::Section::Feed);
-    let today = today();
-    app.update(Action::FeedLoaded(
-        (0..12)
-            .map(|i| carousel::Card {
-                day: Some(today),
-                ..carousel::Card::new(format!("Release {i}"), "An Artist")
-            })
-            .collect(),
-    ));
-    app.last_main_width = 100;
-    app.last_main_height = 40;
+    let mut app = home_with_a_long_row();
     if let Some(action) = app.on_key(crossterm::event::KeyEvent::from(KeyCode::Char('o'))) {
         app.update(action);
     }

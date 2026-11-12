@@ -31,10 +31,6 @@ pub struct HomeState {
     pub row: usize,
     /// Rows scrolled past the top of the pane.
     pub scroll: usize,
-    /// What the filter box holds. Only the Feed uses it -- the home page
-    /// and Explore have no filter box -- and it lives here so the rows can
-    /// be rebuilt from it when it changes.
-    pub filter: String,
 }
 
 impl HomeState {
@@ -1357,7 +1353,6 @@ mod tests {
     fn sample() -> HomeState {
         HomeState {
             heading: None,
-            filter: String::new(),
             rows: vec![
                 Row {
                     kind: crate::browse::RowKind::Carousel,

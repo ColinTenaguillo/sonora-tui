@@ -35,9 +35,9 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-# `music::engine::Fetch` is an async-trait trait, so implementing it is too.
+# sonora's provider traits are async-trait traits, so the sample service
+# the tests sign in to is one too.
 async-trait = "0.1"
-base64 = "0.23"
 # Needed for EventStream, which ratatui's crossterm re-export does not expose.
 # MUST track ratatui's crossterm version, or KeyEvent becomes two distinct types.
 crossterm = { version = "0.29", features = ["event-stream"] }
@@ -47,7 +47,6 @@ directories = "6.0.0"
 discord-rich-presence = "1.1"
 futures = "0.3"
 image = "0.25"
-quick-xml = "0.42.0"
 # `unstable-rendered-line-info` is for Paragraph::line_count, which is how
 # far an open biography can scroll. Unstable in name; pinned here.
 ratatui = { version = "0.30.2", features = ["unstable-rendered-line-info"] }
@@ -57,16 +56,14 @@ ratatui-image = { version = "11", default-features = false, features = ["crosste
 # in). With both in the tree rustls cannot pick a process default and the
 # first TLS handshake that asks for one panics -- Spotify's did. `main`
 # installs ring before anything, which settles it whatever the tree holds.
-# `blocking` is required: SegmentReader runs on the audio thread, not the runtime.
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls-no-provider", "blocking", "form", "query"] }
+# The covers, and the few pages `catalogue::tidal_extras` asks TIDAL for
+# itself; every other request to a service is sonora's.
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-# Pinned EXACTLY: 0.22.0/0.22.1 ship a buffer-size regression that produces
-# silence. Do not relax this pin without testing that audio still comes out.
-# 0.22 also renamed the public API (Sink->Player, OutputStream->MixerDeviceSink),
-# so every example you find online will fail to compile.
-# `tracing`: without it rodio reports with eprintln!, which lands in the
-# middle of the TUI.
-rodio = { version = "=0.22.2", features = ["symphonia-flac", "symphonia-isomp4", "tracing"] }
+# Not used from here: the engine is sonora's. Named for its `tracing`
+# feature alone, without which rodio reports with eprintln!, which lands in
+# the middle of the TUI. Kept on the version sonora's patch below reports.
+rodio = { version = "=0.22.2", features = ["tracing"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

@@ -72,17 +72,15 @@ fn open_collection(
                 }
                 Err(e) => Err(e),
             },
-            // Named alongside, best-effort: a radio that cannot be saved
-            // still plays.
-            Collection::Radio(seed) => {
-                let (tracks, playlist) =
-                    tokio::join!(client.track_radio(seed), client.radio_playlist(seed));
-                if let Ok(Some(playlist)) = playlist {
+            // Named where the service keeps it as a playlist, which is
+            // what `F` then saves; a radio with no name still plays.
+            Collection::Radio(seed) => client.radio(seed).await.map(|(tracks, playlist)| {
+                if let Some(playlist) = playlist {
                     let seed = seed.clone();
                     let _ = tx.send(Action::RadioNamed { seed, playlist });
                 }
                 tracks
-            }
+            }),
             // A genre, a mood or a decade is a page of rows, not a list of
             // tracks — the same shape Explore itself is, so it comes back
             // as its own reply and takes the pane.
@@ -245,7 +243,7 @@ async fn resume_session(app: &mut App, config: &crate::config::Config) {
         Ok(provider) => {
             match provider.restore().await {
                 Ok(Some(session)) => {
-                    tracing::info!("resuming the stored {} session", provider.name());
+                    tracing::info!("resuming the stored {} session", provider.label());
                     let session =
                         crate::catalogue::Session::open(std::sync::Arc::clone(&provider), session);
                     app.session = Some(std::sync::Arc::new(session));
@@ -253,7 +251,7 @@ async fn resume_session(app: &mut App, config: &crate::config::Config) {
                 Ok(None) => {
                     tracing::info!(
                         "no stored {} session; showing the login screen",
-                        provider.name()
+                        provider.label()
                     );
                     app.login = app.login_prompt();
                 }
@@ -262,7 +260,7 @@ async fn resume_session(app: &mut App, config: &crate::config::Config) {
                 Err(e) => {
                     tracing::warn!(
                         "the stored {} session could not be resumed: {e:#}",
-                        provider.name()
+                        provider.label()
                     );
                     app.login = login::LoginState::Failed(format!("{e:#}"));
                 }
@@ -611,7 +609,6 @@ fn side_effects(app: &mut App, action: &Action, out: &Outlets) {
                 load_collection(std::sync::Arc::clone(session), action_tx.clone());
             }
         }
-        Action::LoadFeed => load_feed(app, action_tx),
         Action::LoadExplore => load_explore(app, action_tx),
         Action::TogglePause => toggle_pause(app, cmd_tx),
         Action::SetVolume(v) => {
@@ -691,7 +688,7 @@ fn sign_in_window(
 )> {
     let provider = app.provider.as_ref()?;
     let input = app.login_input.clone()?;
-    let outcome = super::signin_window::open(&provider.web_sign_in()?, provider.name())?;
+    let outcome = super::signin_window::open(&provider.web_sign_in()?, provider.label())?;
     Some((outcome, input))
 }
 
@@ -736,7 +733,6 @@ fn session_ready(app: &App, out: &Outlets) {
     if let Some(session) = &app.session {
         let _ = out.cmd_tx.send(crate::playback::Cmd::Attach {
             factory: session.playback(),
-            meta: session.stream_meta(),
             options: app.playback_options(),
         });
         load_collection(std::sync::Arc::clone(session), out.action_tx.clone());
@@ -1044,24 +1040,6 @@ fn load_home(app: &App, action_tx: &tokio::sync::mpsc::UnboundedSender<Action>) 
     }
 }
 
-fn load_feed(app: &App, action_tx: &tokio::sync::mpsc::UnboundedSender<Action>) {
-    if let Some(session) = &app.session {
-        let (client, t) = (std::sync::Arc::clone(session), action_tx.clone());
-        tokio::spawn(async move {
-            match client.feed().await {
-                Ok(cards) => {
-                    tracing::info!("loaded {} feed cards", cards.len());
-                    let _ = t.send(Action::FeedLoaded(cards));
-                }
-                Err(e) => {
-                    tracing::warn!("could not load the feed: {e}");
-                    let _ = t.send(Action::Error(e.to_string()));
-                }
-            }
-        });
-    }
-}
-
 fn load_explore(app: &App, action_tx: &tokio::sync::mpsc::UnboundedSender<Action>) {
     if let Some(session) = &app.session {
         let (client, t) = (std::sync::Arc::clone(session), action_tx.clone());
@@ -1220,7 +1198,6 @@ fn restart_engine(app: &App, cmd_tx: &std::sync::mpsc::Sender<crate::playback::C
     if let Some(session) = &app.session {
         let _ = cmd_tx.send(crate::playback::Cmd::Attach {
             factory: session.playback(),
-            meta: session.stream_meta(),
             options: app.playback_options(),
         });
         if let Some(track) = &app.now_playing.track {
@@ -1379,7 +1356,7 @@ async fn sign_in(
     input: music::InputSource,
     tx: tokio::sync::mpsc::UnboundedSender<Action>,
 ) {
-    let name = provider.name();
+    let name = provider.label();
     if provider.stored() {
         if let Ok(Some(session)) = provider.restore().await {
             tracing::info!("resumed the stored {name} session");
@@ -1392,13 +1369,8 @@ async fn sign_in(
     let prompt: music::PromptSink = {
         let tx = tx.clone();
         std::sync::Arc::new(move |prompt| {
-            // Save the user copying a URL out of a TUI. Best effort: the
-            // link stays on screen, so a failure here costs nothing. A
-            // `Url` prompt is not opened here: the provider opens it
-            // itself, and listens for the browser to come back.
-            if let music::SignInPrompt::Code { url, .. } = &prompt {
-                login::open_in_browser(url);
-            }
+            // Nothing is opened from here: the provider opens its own
+            // link in the browser, and the screen shows it either way.
             let _ = tx.send(Action::LoginPrompt(prompt));
         })
     };

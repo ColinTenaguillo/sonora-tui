@@ -46,9 +46,6 @@ pub fn music() -> &'static str {
 pub fn explore() -> &'static str {
     pick("⊕", "\u{f002}")
 }
-pub fn feed() -> &'static str {
-    pick("◔", "\u{f09e}")
-}
 pub fn playlists() -> &'static str {
     // `md-playlist_music_outline`: a list with a note on it, rather than
     // the numbered list the Font Awesome block offers -- which is a list
@@ -213,7 +210,6 @@ mod tests {
         for icon in [
             music(),
             explore(),
-            feed(),
             playlists(),
             albums(),
             tracks(),
@@ -229,12 +225,11 @@ mod tests {
         }
     }
 
-    /// The eight sidebar entries, in the order they are drawn.
+    /// The seven sidebar entries, in the order they are drawn.
     fn sidebar_icons() -> Vec<&'static str> {
         vec![
             music(),
             explore(),
-            feed(),
             playlists(),
             albums(),
             tracks(),
@@ -294,7 +289,6 @@ mod tests {
         const CHECKED: &[u32] = &[
             0xf015,  // md/fa home
             0xf002,  // search
-            0xf09e,  // feed
             0xf0e7,  // mixes
             0xf0cb9, // md-playlist_music_outline
             0xf0025, // md-album

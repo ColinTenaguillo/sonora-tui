@@ -254,8 +254,6 @@ pub enum Action {
     ArtistRight,
     /// Fetch the Explore page. Its own request, since nothing else needs it.
     LoadExplore,
-    /// Fetch the activity feed.
-    LoadFeed,
     /// Fetch the favourite tracks, playlists and albums again.
     ///
     /// They are loaded once at sign-in, but the reply only lands in the
@@ -264,7 +262,6 @@ pub enum Action {
     /// would otherwise replace an open album's contents. A section left
     /// empty by that is refetched when the user walks into it.
     LoadFavourites,
-    FeedLoaded(Vec<carousel::Card>),
     /// The home page's rows. Boxed: it is by far the largest payload an
     /// Action carries, and every other variant would otherwise grow to
     /// match it.
@@ -812,9 +809,9 @@ pub struct Favourites {
     pub artists: std::collections::HashSet<String>,
     pub albums: std::collections::HashSet<String>,
     pub playlists: std::collections::HashSet<String>,
-    /// The playlist each station opened is, by seed. A radio's view is
-    /// keyed by its seed, and the service only names the playlist once
-    /// asked.
+    /// The playlist each station opened is, by seed, on a service that
+    /// keeps stations as playlists. A radio's view is keyed by its seed,
+    /// and the service only names the playlist once asked.
     pub radios: std::collections::HashMap<crate::domain::TrackId, String>,
 }
 
@@ -1109,13 +1106,6 @@ pub struct App {
     /// then an empty page is loading, after it the service had nothing.
     pub home_loaded: bool,
     pub explore_loaded: bool,
-    /// The activity feed as it came back: releases from the artists the
-    /// user follows, newest first and ungrouped. Kept beside the rows so a
-    /// filter can be applied without asking for the feed again.
-    pub feed_cards: Vec<carousel::Card>,
-    /// The same releases in four dated sections, drawn as the home page's
-    /// rows are.
-    pub feed: home::HomeState,
     /// The artist page that is open, if one is, and where the user is on it.
     pub artist: artistview::Open,
     /// Where the history is kept between runs. Set by `run` alone, so a
@@ -1220,11 +1210,7 @@ impl App {
 
     /// The filter text of whichever view is showing.
     pub fn filter_text(&self) -> &str {
-        // The Feed keeps its own: it is a page of rows rather than a grid,
-        // so neither of the two below is where its filter lives.
-        if self.on_feed() {
-            &self.feed.filter
-        } else if self.on_grid() {
+        if self.on_grid() {
             &self.grid_state(self.sidebar.section()).filter
         } else if self.on_page_tracks() {
             &self.artist.tracks.filter
@@ -1233,20 +1219,10 @@ impl App {
         }
     }
 
-    /// Whether the Feed is what the pane is drawing.
-    fn on_feed(&self) -> bool {
-        matches!(self.showing(), Showing::Section(sidebar::Section::Feed))
-    }
-
     /// Set it, and pull the selection back into what is left — a filter that
     /// shrinks the list under a stale index selects nothing at all.
     pub fn set_filter(&mut self, text: String) {
-        // Rebuilt rather than clamped: the Feed's sections are built from
-        // what survives the filter, so the rows themselves change.
-        if self.on_feed() {
-            self.feed.filter = text;
-            self.rebuild_feed();
-        } else if self.on_grid() {
+        if self.on_grid() {
             let section = self.sidebar.section();
             let len = grid::filter(&self.grid_cards(section), &text).len();
             let state = self.grid_state_mut(section);
@@ -1998,8 +1974,8 @@ impl App {
         Some((self.open_favourable()?, open.title.clone()))
     }
 
-    /// What the open view is as a favourite. A radio is the playlist its
-    /// station is, once the service has named it.
+    /// What the open view is as a favourite, when it is one. A radio is
+    /// the playlist its station is, once the service has named it.
     fn open_favourable(&self) -> Option<Favourable> {
         match self.open.as_ref()?.target.clone()? {
             Collection::Radio(seed) => Some(Favourable::Playlist(
@@ -2550,7 +2526,6 @@ impl App {
         match section {
             // Three: the artist or the creator, then the year or the count.
             sidebar::Section::Playlists | sidebar::Section::Albums => 3,
-            sidebar::Section::Feed => 2,
             _ => 1,
         }
     }
@@ -2697,7 +2672,6 @@ impl App {
             | Action::AlbumsLoaded(..)
             | Action::ArtistsLoaded(..)
             | Action::HomeLoaded(..)
-            | Action::FeedLoaded(..)
             | Action::FavouriteIdsLoaded(..)) => self.on_collection_action(a),
             a @ (Action::TrackNext
             | Action::TrackPrevious
@@ -2762,7 +2736,6 @@ impl App {
             | Action::DownloadCdm
             | Action::LoadHome
             | Action::LoadExplore
-            | Action::LoadFeed
             | Action::LoadFavourites
             | Action::SetVolume(_)
             | Action::Preload(_)
@@ -2966,11 +2939,6 @@ impl App {
                 self.refresh_collection_home();
                 None
             }
-            Action::FeedLoaded(cards) => {
-                self.feed_cards = cards;
-                self.rebuild_feed();
-                None
-            }
             Action::FavouriteIdsLoaded(ids) => {
                 self.favourites.artists.extend(ids.artists);
                 self.favourites.albums = ids.albums.into_iter().collect();
@@ -3051,15 +3019,11 @@ impl App {
             // opening is: the loop's copy could only be exercised by running
             // the whole app.
             Action::SeeAll if self.on_artist() => self.see_all_on_artist(),
-            // A Feed section is whole in hand -- the four are cut from one
-            // reply -- so this opens what is held rather than asking for a
-            // page that was never fetched.
-            Action::SeeAll if self.on_feed() => self.see_all_of_row(),
             // A Top results row offers "See all" when its cards run past the
             // edge; the whole of what was found is on the kind's own tab.
             Action::SeeAll if self.on_search() => self.see_all_on_search(),
             // A home row, or one of a page opened from Explore: whole in
-            // hand, like the Feed's, so it opens from what is held.
+            // hand, so it opens from what is held.
             Action::SeeAll if self.on_home() => self.see_all_of_row(),
             Action::SeeAll => None,
             other => unreachable!("{other:?} is routed elsewhere by update"),
@@ -3863,8 +3827,8 @@ impl App {
         None
     }
 
-    /// The Feed's section, or a row of the home page or of a page opened
-    /// from Explore, opened whole from what is held.
+    /// A row of the home page, or of a page opened from Explore, opened
+    /// whole from what is held.
     fn see_all_of_row(&mut self) -> Option<Action> {
         let row = self.rows_on_screen().current_row()?;
         let (heading, cards) = (row.heading.clone(), row.cards.clone());
@@ -4327,7 +4291,7 @@ impl App {
 
     /// What the login screen calls the service.
     fn service_name(&self) -> &'static str {
-        self.provider.as_ref().map(|p| p.name()).unwrap_or("TIDAL")
+        self.provider.as_ref().map(|p| p.label()).unwrap_or("TIDAL")
     }
 
     /// The login screen's key for going in without an account. Named
@@ -4373,14 +4337,9 @@ impl App {
         // renderer as the home page, so they move the same way.
         match self.showing() {
             Showing::Rows => true,
-            Showing::Section(section) => matches!(
-                section,
-                sidebar::Section::Music
-                    | sidebar::Section::Explore
-                    // Four dated sections of covers, which is the same
-                    // shape as a page of rows and moves the same way.
-                    | sidebar::Section::Feed
-            ),
+            Showing::Section(section) => {
+                matches!(section, sidebar::Section::Music | sidebar::Section::Explore)
+            }
             _ => false,
         }
     }
@@ -4472,12 +4431,6 @@ impl App {
     fn load_if_needed(&mut self) -> Option<Action> {
         match self.sidebar.section() {
             sidebar::Section::Explore if self.explore.rows.is_empty() => Some(Action::LoadExplore),
-            sidebar::Section::Feed
-                if self.feed_cards.is_empty()
-                    && self.session.as_ref().is_some_and(|s| s.has_feed()) =>
-            {
-                Some(Action::LoadFeed)
-            }
             // The three that arrive together at sign-in. Any of them can be
             // dropped on the way in -- the reply is only taken when nothing
             // is open over the pane -- and nothing asked for them a second
@@ -4493,29 +4446,10 @@ impl App {
         }
     }
 
-    /// Group the feed into its four dated sections.
-    ///
-    /// Filtered first and grouped after, so a filter that empties a bucket
-    /// leaves no heading behind rather than a heading over nothing: a
-    /// section that has no cards is never built.
-    fn rebuild_feed(&mut self) {
-        let filter = std::mem::take(&mut self.feed.filter);
-        let cards: Vec<carousel::Card> = grid::filter(&self.feed_cards, &filter)
-            .into_iter()
-            .cloned()
-            .collect();
-        self.feed = home::HomeState {
-            rows: feed_rows(&cards, today()),
-            filter,
-            ..Default::default()
-        };
-    }
-
     /// The page of rows on screen, whichever it is.
     fn rows_on_screen(&self) -> &home::HomeState {
         match self.sidebar.section() {
             sidebar::Section::Explore => &self.explore,
-            sidebar::Section::Feed => &self.feed,
             _ => &self.home,
         }
     }
@@ -4523,7 +4457,6 @@ impl App {
     fn rows_on_screen_mut(&mut self) -> &mut home::HomeState {
         match self.sidebar.section() {
             sidebar::Section::Explore => &mut self.explore,
-            sidebar::Section::Feed => &mut self.feed,
             _ => &mut self.home,
         }
     }
@@ -5263,10 +5196,10 @@ impl App {
                 self.history_list = Default::default();
                 None
             }
-            // The nav by number, 1 through 8: there are exactly eight
+            // The nav by number, 1 through 7: there are exactly seven
             // entries, Music first and Settings last, and reaching the far
-            // end with J took seven presses.
-            KeyCode::Char(c @ '1'..='8') => {
+            // end with J took six presses.
+            KeyCode::Char(c @ '1'..='7') => {
                 let at = c as usize - '1' as usize;
                 sidebar::Section::ALL
                     .get(at)
@@ -5439,62 +5372,6 @@ fn track_from_card(card: &carousel::Card) -> Option<crate::domain::Track> {
         cover: card.cover_url.clone(),
         ..crate::domain::Track::sample("", "", card.duration)
     })
-}
-
-/// Today, counted in days from 1970-01-01.
-///
-/// The feed's stamps are date-only UTC, so the comparison is between whole
-/// days and the time of day never enters into it.
-fn today() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| (d.as_secs() / 86_400) as i64)
-        .unwrap_or_default()
-}
-
-/// The four sections the Feed is drawn in, newest first.
-///
-/// Fixed windows rather than calendar weeks: "this week" is the last seven
-/// days, which is what a feed of releases means by it. A card whose date
-/// the API left out falls under the oldest heading rather than being
-/// dropped -- it is still a release the user follows.
-///
-/// `more` is left empty: the whole bucket is already in hand, so `o` opens
-/// what is held rather than asking for a page that does not exist.
-fn feed_rows(cards: &[carousel::Card], today: i64) -> Vec<home::Row> {
-    const SECTIONS: [(&str, i64); 4] = [
-        ("This week", 7),
-        ("Last week", 14),
-        ("Last month", 30),
-        ("Older", i64::MAX),
-    ];
-    let mut rows = Vec::new();
-    let mut from = 0;
-    for (heading, until) in SECTIONS {
-        let mine: Vec<carousel::Card> = cards
-            .iter()
-            .filter(|c| {
-                // No date is as old as it gets: the card is still a release
-                // the user follows, so it is shown rather than dropped.
-                let age = c.day.map_or(i64::MAX, |d| today - d);
-                // Inclusive at the top so the oldest section, whose bound is
-                // the largest number there is, holds those as well.
-                age >= from && (age < until || until == i64::MAX)
-            })
-            .cloned()
-            .collect();
-        // No cards, no heading: an empty section is not drawn at all.
-        if !mine.is_empty() {
-            rows.push(home::Row {
-                heading: heading.to_string(),
-                kind: crate::browse::RowKind::Carousel,
-                cards: mine,
-                state: carousel::CarouselState::default(),
-            });
-        }
-        from = until;
-    }
-    rows
 }
 
 #[cfg(test)]

@@ -218,16 +218,13 @@ fn components_never_import_the_shell() {
     // Dependencies point inward. The shell knows the components; a component
     // that knows the shell has inverted the arrow.
     for dir in [
-        "src/auth",
         "src/browse",
         "src/catalogue",
         "src/library",
         "src/playback",
         "src/presence",
-        "src/provider",
         "src/scrobble",
         "src/search",
-        "src/tidal",
         "src/domain",
     ] {
         for (path, text) in sources_in(dir) {
@@ -258,8 +255,6 @@ fn the_domain_depends_on_nothing_of_ours() {
     for (path, text) in sources_in("src/domain") {
         let body = without_tests(&text);
         for forbidden in [
-            "crate::tidal",
-            "crate::auth",
             "crate::playback",
             "crate::library",
             "crate::shell",
@@ -279,14 +274,9 @@ fn component_internals_stay_crate_private() {
     // The design's whole argument for the facade is that internals are
     // `pub(crate)`, so nothing outside can couple to them. Without this test
     // that claim was decorative: every submodule was `pub mod`, and an example
-    // was importing `SegmentReader` from outside the crate — the exact
-    // coupling the facade exists to prevent.
-    //
-    // `store` is deliberately exempt: the shell persists and clears tokens
-    // through it, so it is part of `auth`'s public surface.
-    let exempt = [("src/auth/mod.rs", "store")];
-
-    for facade in ["src/auth/mod.rs", "src/playback/mod.rs", "src/tidal/mod.rs"] {
+    // was importing one from outside the crate — the exact coupling the
+    // facade exists to prevent.
+    for facade in ["src/catalogue/mod.rs", "src/playback/mod.rs"] {
         let Ok(text) = std::fs::read_to_string(facade) else {
             panic!("{facade} is missing — did a module move?");
         };
@@ -294,9 +284,6 @@ fn component_internals_stay_crate_private() {
             let code = line.split("//").next().unwrap_or("").trim();
             if let Some(rest) = code.strip_prefix("pub mod ") {
                 let name = rest.trim_end_matches(';');
-                if exempt.contains(&(facade, name)) {
-                    continue;
-                }
                 panic!(
                     "{facade}:{} declares `pub mod {name};` — a component's \
                      submodules must be `pub(crate)` so only the facade's \
@@ -312,12 +299,11 @@ fn component_internals_stay_crate_private() {
 fn no_unwrap_outside_tests_and_main() {
     // A panic in raw mode wrecks the user's shell.
     for dir in [
-        "src/auth",
+        "src/catalogue",
         "src/library",
         "src/playback",
         "src/presence",
         "src/scrobble",
-        "src/tidal",
         "src/domain",
         "src/shell",
         "src/config",
