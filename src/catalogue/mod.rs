@@ -74,12 +74,6 @@ pub trait Extras: Send + Sync {
         Ok(None)
     }
 
-    /// The picture an artist is drawn with: their own, or what the service
-    /// puts in its place for one it keeps no portrait of.
-    async fn artist_picture(&self, _artist_id: &str) -> anyhow::Result<Option<String>> {
-        Ok(None)
-    }
-
     /// The playlist a track's radio is, where the service keeps stations
     /// as playlists: what `F` saves on an open radio.
     async fn radio_playlist(&self, _track_id: &str) -> anyhow::Result<Option<String>> {
