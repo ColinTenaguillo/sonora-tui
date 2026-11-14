@@ -2906,8 +2906,8 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "music"
-version = "0.48.1"
-source = "git+https://github.com/sonorahq/sonora?rev=6c1fb890598094b93f6a5c06aa3100ac75f45d17#6c1fb890598094b93f6a5c06aa3100ac75f45d17"
+version = "0.49.1"
+source = "git+https://github.com/sonorahq/sonora?rev=5ee03cb01d25c9d48c398e4c89303e2632b28bde#5ee03cb01d25c9d48c398e4c89303e2632b28bde"
 dependencies = [
  "alsa",
  "anyhow",
@@ -5363,8 +5363,8 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "storage"
-version = "0.48.1"
-source = "git+https://github.com/sonorahq/sonora?rev=6c1fb890598094b93f6a5c06aa3100ac75f45d17#6c1fb890598094b93f6a5c06aa3100ac75f45d17"
+version = "0.49.1"
+source = "git+https://github.com/sonorahq/sonora?rev=5ee03cb01d25c9d48c398e4c89303e2632b28bde#5ee03cb01d25c9d48c398e4c89303e2632b28bde"
 dependencies = [
  "anyhow",
  "dirs",
@@ -6615,8 +6615,8 @@ dependencies = [
 
 [[package]]
 name = "webview"
-version = "0.48.1"
-source = "git+https://github.com/sonorahq/sonora?rev=6c1fb890598094b93f6a5c06aa3100ac75f45d17#6c1fb890598094b93f6a5c06aa3100ac75f45d17"
+version = "0.49.1"
+source = "git+https://github.com/sonorahq/sonora?rev=5ee03cb01d25c9d48c398e4c89303e2632b28bde#5ee03cb01d25c9d48c398e4c89303e2632b28bde"
 dependencies = [
  "anyhow",
  "block2",
@@ -6767,8 +6767,8 @@ dependencies = [
 
 [[package]]
 name = "widevine"
-version = "0.48.1"
-source = "git+https://github.com/sonorahq/sonora?rev=6c1fb890598094b93f6a5c06aa3100ac75f45d17#6c1fb890598094b93f6a5c06aa3100ac75f45d17"
+version = "0.49.1"
+source = "git+https://github.com/sonorahq/sonora?rev=5ee03cb01d25c9d48c398e4c89303e2632b28bde#5ee03cb01d25c9d48c398e4c89303e2632b28bde"
 dependencies = [
  "anyhow",
  "cc",
@@ -7253,7 +7253,7 @@ dependencies = [
 [[package]]
 name = "ytmusic"
 version = "0.1.0"
-source = "git+https://github.com/sonorahq/ytmusic-rs?rev=db4ab87#db4ab872cabd1648a2fb32626471427f2deb07ea"
+source = "git+https://github.com/sonorahq/ytmusic-rs?rev=99f7d14#99f7d141a7b35050ae69322822b72126a807b906"
 dependencies = [
  "anyhow",
  "async-trait",
