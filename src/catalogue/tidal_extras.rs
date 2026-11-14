@@ -1,12 +1,11 @@
 //! What TIDAL has that sonora's `MusicApi` has no word for yet: its own
 //! Explore page, with the moods and decades beside the genres, the pages
-//! those open, the mix a track's radio is, and of an artist the picture
-//! that stands in for a missing portrait and how many follow them.
+//! those open, the mix a track's radio is, and how many follow an artist.
 //!
 //! sonora's TIDAL client is private to its crate, so these few requests
 //! are made here, with the session sonora keeps: read from its file each
 //! time, never written. Each is asked upstream (sonorahq/sonora#1351 for
-//! the pages, #1359 for the radio, #1358 for the picture); as sonora
+//! the pages, #1359 for the radio, #1360 for the followers); as sonora
 //! answers one itself its part here goes, and with the last of them this
 //! file and its line in `extras_for`.
 
@@ -121,11 +120,6 @@ impl Extras for TidalExtras {
         Ok(followers(&body))
     }
 
-    async fn artist_picture(&self, artist_id: &str) -> anyhow::Result<Option<String>> {
-        let body = self.get(&format!("artists/{artist_id}"), &[]).await?;
-        Ok(artist_picture(&body))
-    }
-
     async fn radio_playlist(&self, track_id: &str) -> anyhow::Result<Option<String>> {
         let body = self.get(&format!("tracks/{track_id}"), &[]).await?;
         Ok(track_mix(&body))
@@ -144,16 +138,6 @@ fn track_mix(track: &str) -> Option<String> {
 fn followers(page: &str) -> Option<u64> {
     let page: serde_json::Value = serde_json::from_str(page).ok()?;
     page["header"]["followersAmount"].as_u64()
-}
-
-/// An artist's portrait, or the album cover TIDAL names in its place for
-/// one with none: sonora reads the first alone, and draws no picture
-/// without it.
-fn artist_picture(artist: &str) -> Option<String> {
-    let artist: serde_json::Value = serde_json::from_str(artist).ok()?;
-    let image = |field: &str| artist.get(field)?.as_str().filter(|uuid| !uuid.is_empty());
-    let uuid = image("picture").or_else(|| image("selectedAlbumCoverFallback"))?;
-    Some(cover_url(uuid, 320))
 }
 
 /// Cover art URL. TIDAL stores a dashed uuid but serves it slash-separated.
@@ -570,17 +554,6 @@ mod tests {
         assert_eq!(track_mix(track), Some("mix:0017abc".into()));
         assert_eq!(track_mix(r#"{"id":1,"mixes":{}}"#), None, "no station kept");
         assert_eq!(track_mix("not json"), None);
-    }
-
-    #[test]
-    fn an_artist_with_no_portrait_is_drawn_with_the_cover_tidal_names() {
-        let at = |path: &str| format!("https://resources.tidal.com/images/{path}/320x320.jpg");
-        let both = r#"{"id":1,"picture":"aa-bb","selectedAlbumCoverFallback":"cc-dd"}"#;
-        assert_eq!(artist_picture(both), Some(at("aa/bb")), "their own first");
-        let none = r#"{"id":1,"picture":null,"selectedAlbumCoverFallback":"cc-dd"}"#;
-        assert_eq!(artist_picture(none), Some(at("cc/dd")));
-        assert_eq!(artist_picture(r#"{"id":1,"picture":""}"#), None);
-        assert_eq!(artist_picture("not json"), None);
     }
 
     #[test]

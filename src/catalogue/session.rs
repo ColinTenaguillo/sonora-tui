@@ -264,8 +264,7 @@ fn pictured(
         .collect()
 }
 
-/// The artists a page shows with no picture of their own. TIDAL's home
-/// lists the ones played lately that way.
+/// The artists a page shows with no picture of their own.
 fn faceless(sections: &[GenreSection]) -> Vec<String> {
     let items = sections.iter().flat_map(|section| &section.items);
     let mut ids: Vec<String> = items
@@ -654,20 +653,7 @@ impl Session {
             }
             page.appears_on = more.appears_on.into_iter().map(album).collect();
         }
-        if page.picture.is_none() {
-            page.picture = self.picture_of(id).await;
-        }
         Ok(page)
-    }
-
-    /// What the service draws an artist with when sonora found no portrait
-    /// of them, where it has a word on that. The page is drawn without
-    /// one rather than not at all.
-    async fn picture_of(&self, artist_id: &str) -> Option<String> {
-        let picture = self.extras.artist_picture(artist_id).await;
-        picture
-            .inspect_err(|error| tracing::warn!("no picture for the artist: {error:#}"))
-            .ok()?
     }
 
     pub async fn track(&self, id: &TrackId) -> Result<Track> {
@@ -675,12 +661,15 @@ impl Session {
     }
 
     /// Portraits for the artists shown without a picture: no request at all
-    /// when none lacks one.
+    /// when none lacks one, and none at all when the lookup fails.
     async fn portraits(&self, wanted: Vec<String>) -> std::collections::HashMap<String, String> {
         if wanted.is_empty() {
             return Default::default();
         }
-        self.api.artist_images(wanted).await.unwrap_or_default()
+        let found = self.api.artist_images(wanted).await;
+        found
+            .inspect_err(|error| tracing::warn!("no portraits: {error:#}"))
+            .unwrap_or_default()
     }
 
     /// Tracks, albums, playlists, and artists: the ones the service found by
@@ -755,31 +744,7 @@ impl Session {
     /// where the service has it. Asked for only when one is missing, and
     /// a page is drawn without them rather than not at all.
     async fn with_portraits(&self, sections: Vec<GenreSection>) -> Vec<GenreSection> {
-        let ids = faceless(&sections);
-        if ids.is_empty() {
-            return sections;
-        }
-        // The service's own word first, where it has one: it knows what
-        // stands in for an artist it keeps no portrait of, and sonora's
-        // lookup is then only for the artists it left out.
-        let asked = ids
-            .iter()
-            .map(|id| async move { Some((id.clone(), self.picture_of(id).await?)) });
-        let mut portraits: std::collections::HashMap<String, String> =
-            futures::future::join_all(asked)
-                .await
-                .into_iter()
-                .flatten()
-                .collect();
-        let left: Vec<String> = ids
-            .into_iter()
-            .filter(|id| !portraits.contains_key(id))
-            .collect();
-        if !left.is_empty() {
-            let found = self.api.artist_images(left).await;
-            let found = found.inspect_err(|error| tracing::warn!("no portraits: {error:#}"));
-            portraits.extend(found.unwrap_or_default());
-        }
+        let portraits = self.portraits(faceless(&sections)).await;
         portrayed(sections, &portraits)
     }
 
@@ -825,9 +790,6 @@ mod tests {
         }
         async fn page(&self, path: &str) -> anyhow::Result<Option<crate::browse::Home>> {
             Ok(path.starts_with("pages/").then(|| one_row("Its own page")))
-        }
-        async fn artist_picture(&self, id: &str) -> anyhow::Result<Option<String>> {
-            Ok((id == "a").then(|| "https://x/a.jpg".into()))
         }
         async fn radio_playlist(&self, _: &str) -> anyhow::Result<Option<String>> {
             Ok(Some("mix:1".into()))
@@ -904,52 +866,6 @@ mod tests {
                 Some("https://x/a.jpg")
             ],
             "its own picture is kept"
-        );
-    }
-
-    #[test]
-    fn a_page_is_drawn_with_the_pictures_found_and_without_the_others() {
-        // "a" from the service's own word; "b" is left to sonora, which for
-        // the sample service fails: the page comes back all the same.
-        let artist = |id: &str| {
-            super::GenreItem::Artist(music::SavedArtist {
-                id: id.into(),
-                ..Default::default()
-            })
-        };
-        let page = vec![super::GenreSection {
-            title: "Recently played".into(),
-            items: vec![artist("a"), artist("b")],
-        }];
-        let page = wait(session_with(Pages(None)).with_portraits(page));
-        let covers: Vec<_> = page[0]
-            .items
-            .iter()
-            .map(|item| match item {
-                super::GenreItem::Artist(artist) => artist.cover.as_deref(),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(covers, [Some("https://x/a.jpg"), None]);
-    }
-
-    #[test]
-    fn an_artist_sonora_has_no_portrait_of_is_asked_of_the_service() {
-        let session = session_with(Pages(None));
-        assert_eq!(
-            wait(session.picture_of("a")).as_deref(),
-            Some("https://x/a.jpg")
-        );
-        assert_eq!(
-            wait(session.picture_of("b")),
-            None,
-            "the service has none either"
-        );
-        let plain = super::Session::sample();
-        assert_eq!(
-            wait(plain.picture_of("a")),
-            None,
-            "a service with no word on it"
         );
     }
 
