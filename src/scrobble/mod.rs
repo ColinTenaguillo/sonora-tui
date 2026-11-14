@@ -64,7 +64,11 @@ pub fn secret_for(config: &ScrobbleConfig, id: &str) -> Option<Secret> {
             .listenbrainz
             .as_ref()
             .filter(|t| !t.trim().is_empty())
-            .map(|t| Secret::Token(t.clone())),
+            .map(|t| Secret::Token {
+                token: t.clone(),
+                // Empty is listenbrainz.org; the config names no other.
+                server: String::new(),
+            }),
         "maloja" => config.maloja.as_ref().map(|m| Secret::Server {
             url: m.url.clone(),
             key: m.key.clone(),

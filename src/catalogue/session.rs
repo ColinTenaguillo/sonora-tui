@@ -296,7 +296,7 @@ fn portrayed(
 }
 
 /// The artists behind what a search found: each once, the most frequent
-/// first.
+/// first. A video channel credited in an artist's place is not one.
 fn artists_behind(tracks: &[music::Track], albums: &[music::Album]) -> Vec<ShownArtist> {
     let mut seen: Vec<(ShownArtist, usize)> = Vec::new();
     let refs = tracks
@@ -307,7 +307,7 @@ fn artists_behind(tracks: &[music::Track], albums: &[music::Album]) -> Vec<Shown
                 .iter()
                 .flat_map(|al| al.artist_refs.iter().map(move |a| (a, &al.cover))),
         );
-    for (artist, cover) in refs {
+    for (artist, cover) in refs.filter(|(artist, _)| !artist.channel) {
         let Some(id) = &artist.id else { continue };
         match seen.iter_mut().find(|(b, _)| &b.id == id) {
             Some(entry) => {
@@ -1127,6 +1127,7 @@ mod tests {
                 .map(|(name, id)| music::ArtistRef {
                     name: (*name).into(),
                     id: id.map(Into::into),
+                    ..Default::default()
                 })
                 .collect();
             t
@@ -1137,6 +1138,11 @@ mod tests {
             track(&[("Unknown", None)]),
         ];
         tracks[1].cover = Some("https://x/sch.jpg".into());
+        // A fan upload on YouTube credits a plain video channel, which has
+        // no artist page to open.
+        let mut upload = track(&[("Fan uploads", Some("c"))]);
+        upload.artist_refs[0].channel = true;
+        tracks.push(upload);
         let found = super::artists_behind(&tracks, &[]);
         let names: Vec<(&str, &str)> = found
             .iter()
@@ -1194,6 +1200,7 @@ mod tests {
             artist_refs: vec![music::ArtistRef {
                 name: "Miles Davis".into(),
                 id: Some("ar-1".into()),
+                ..Default::default()
             }],
             album: "Kind of Blue".into(),
             album_id: Some("al-1".into()),
@@ -1209,6 +1216,7 @@ mod tests {
             tags: Vec::new(),
             languages: Vec::new(),
             credits: Vec::new(),
+            ..Default::default()
         }
     }
 
