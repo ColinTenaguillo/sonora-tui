@@ -1,13 +1,13 @@
 //! What TIDAL has that sonora's `MusicApi` has no word for yet: its own
 //! Explore page, with the moods and decades beside the genres, the pages
-//! those open, the mix a track's radio is, and how many follow an artist.
+//! those open, and the mix a track's radio is.
 //!
 //! sonora's TIDAL client is private to its crate, so these few requests
 //! are made here, with the session sonora keeps: read from its file each
 //! time, never written. Each is asked upstream (sonorahq/sonora#1351 for
-//! the pages, #1359 for the radio, #1360 for the followers); as sonora
-//! answers one itself its part here goes, and with the last of them this
-//! file and its line in `extras_for`.
+//! the pages, #1359 for the radio); as sonora answers one itself its part
+//! here goes, and with the last of them this file and its line in
+//! `extras_for`.
 
 use std::sync::Arc;
 
@@ -114,12 +114,6 @@ impl Extras for TidalExtras {
         Ok(Some(page(&self.get(path, &AS_THE_WEB).await?)))
     }
 
-    async fn artist_fans(&self, artist_id: &str) -> anyhow::Result<Option<u64>> {
-        let query = [AS_THE_WEB[0], AS_THE_WEB[1], ("platform", "WEB")];
-        let body = self.get(&format!("v2/artist/{artist_id}"), &query).await?;
-        Ok(followers(&body))
-    }
-
     async fn radio_playlist(&self, track_id: &str) -> anyhow::Result<Option<String>> {
         let body = self.get(&format!("tracks/{track_id}"), &[]).await?;
         Ok(track_mix(&body))
@@ -131,13 +125,6 @@ fn track_mix(track: &str) -> Option<String> {
     let track: serde_json::Value = serde_json::from_str(track).ok()?;
     let mix = track.get("mixes")?.get("TRACK_MIX")?.as_str()?;
     Some(format!("{MIX}{mix}"))
-}
-
-/// The followers the web's artist page puts under the name. sonora reads
-/// the artist from an endpoint that does not count them.
-fn followers(page: &str) -> Option<u64> {
-    let page: serde_json::Value = serde_json::from_str(page).ok()?;
-    page["header"]["followersAmount"].as_u64()
 }
 
 /// Cover art URL. TIDAL stores a dashed uuid but serves it slash-separated.
@@ -554,14 +541,6 @@ mod tests {
         assert_eq!(track_mix(track), Some("mix:0017abc".into()));
         assert_eq!(track_mix(r#"{"id":1,"mixes":{}}"#), None, "no station kept");
         assert_eq!(track_mix("not json"), None);
-    }
-
-    #[test]
-    fn an_artists_page_gives_how_many_follow_them() {
-        let page = r#"{"header":{"followersAmount":3701,"biography":null}}"#;
-        assert_eq!(followers(page), Some(3701));
-        assert_eq!(followers(r#"{"header":{"followersAmount":null}}"#), None);
-        assert_eq!(followers("not json"), None);
     }
 
     #[test]

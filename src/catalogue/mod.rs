@@ -68,12 +68,6 @@ pub trait Extras: Send + Sync {
         Ok(None)
     }
 
-    /// How many follow an artist, where sonora reads no such count for
-    /// the service.
-    async fn artist_fans(&self, _artist_id: &str) -> anyhow::Result<Option<u64>> {
-        Ok(None)
-    }
-
     /// The playlist a track's radio is, where the service keeps stations
     /// as playlists: what `F` saves on an open radio.
     async fn radio_playlist(&self, _track_id: &str) -> anyhow::Result<Option<String>> {

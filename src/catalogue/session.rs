@@ -468,7 +468,7 @@ fn page(id: &str, a: music::Artist) -> ArtistPage {
         kind: PageKind::Artist,
         id: id.to_owned(),
         name: a.name,
-        fans: a.monthly_listeners,
+        fans: a.followers.or(a.monthly_listeners),
         picture: a.cover_large,
         bio: a.biography,
         top_tracks: a
@@ -630,18 +630,8 @@ impl Session {
     /// the top tracks where the page carried fewer than are shown, and
     /// what the artist appears on.
     pub async fn artist_page(&self, id: &str) -> Result<ArtistPage> {
-        let (artist, more, fans) = tokio::join!(
-            self.api.artist(id),
-            self.api.artist_catalogue(id, &[]),
-            self.extras.artist_fans(id)
-        );
+        let (artist, more) = tokio::join!(self.api.artist(id), self.api.artist_catalogue(id, &[]));
         let mut page = page(id, artist.map_err(error)?);
-        // Where sonora counted none: the page is drawn without the count
-        // rather than not at all.
-        match fans {
-            Ok(fans) => page.fans = page.fans.or(fans),
-            Err(error) => tracing::warn!("no count of the artist's followers: {error:#}"),
-        }
         if let Ok(more) = more {
             if !more.top_tracks.is_empty() {
                 page.top_tracks = more
@@ -1266,7 +1256,7 @@ mod tests {
                 banner: None,
                 biography: None,
                 monthly_listeners: Some(7),
-                followers: None,
+                followers: Some(9),
                 top_tracks: (0..30).map(|i| a_track(&format!("t{i}"))).collect(),
                 albums: vec![
                     release("Kind of Blue", ReleaseType::Album),
@@ -1275,7 +1265,16 @@ mod tests {
             },
         );
         assert_eq!(p.id, "ar-1");
-        assert_eq!(p.fans, Some(7));
+        assert_eq!(
+            p.fans,
+            Some(9),
+            "the followers, where the service counts them"
+        );
+        let listened = music::Artist {
+            monthly_listeners: Some(7),
+            ..Default::default()
+        };
+        assert_eq!(page("ar-1", listened).fans, Some(7), "the listeners, else");
         assert_eq!(p.albums.len(), 1);
         assert_eq!(p.singles[0].title, "Blue Haze");
         assert_eq!(p.albums[0].year.as_deref(), Some("1959"));
