@@ -1266,6 +1266,7 @@ mod tests {
                 banner: None,
                 biography: None,
                 monthly_listeners: Some(7),
+                followers: None,
                 top_tracks: (0..30).map(|i| a_track(&format!("t{i}"))).collect(),
                 albums: vec![
                     release("Kind of Blue", ReleaseType::Album),
