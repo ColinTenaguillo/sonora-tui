@@ -32,6 +32,7 @@ fn no_view_paints_under_the_now_playing_bar() {
                     creator: "TIDAL".into(),
                     cover: None,
                     owned: false,
+                    public: Some(true),
                 })
                 .collect();
             app.albums = (0..20)

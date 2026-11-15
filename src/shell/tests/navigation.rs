@@ -723,6 +723,7 @@ fn an_empty_home_is_built_from_the_collection_as_it_loads() {
         creator: "me".into(),
         cover: None,
         owned: false,
+        public: Some(true),
     }]));
     app.update(Action::AlbumsLoaded(vec![crate::library::Album {
         id: "a1".into(),

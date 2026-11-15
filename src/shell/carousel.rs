@@ -138,7 +138,7 @@ pub fn artist_card(a: &crate::library::Artist) -> Card {
 pub fn playlist_card(p: &crate::library::Playlist) -> Card {
     Card {
         title: p.title.clone(),
-        subtitle: p.creator.clone(),
+        subtitle: playlist_byline(p),
         detail: collection_detail(p.track_count, p.duration),
         cover_url: p.cover.clone(),
         round: false,
@@ -165,7 +165,31 @@ pub fn playlist_row(p: &crate::library::Playlist) -> crate::domain::Track {
         id: crate::domain::TrackId::from(p.uuid.as_str()),
         album: collection_detail(p.track_count, None),
         cover: p.cover.clone(),
-        ..crate::domain::Track::sample(&p.title, &p.creator, p.duration.unwrap_or_default())
+        ..crate::domain::Track::sample(
+            &p.title,
+            &playlist_byline(p),
+            p.duration.unwrap_or_default(),
+        )
+    }
+}
+
+/// Who made a playlist, and that it is private when it is the user's own:
+/// someone else's is theirs to keep private.
+fn playlist_byline(p: &crate::library::Playlist) -> String {
+    if !p.owned || p.public != Some(false) {
+        p.creator.clone()
+    } else if p.creator.is_empty() {
+        "private".into()
+    } else {
+        format!("{} · private", p.creator)
+    }
+}
+
+/// A playlist's visibility in words.
+pub fn visibility(public: bool) -> &'static str {
+    match public {
+        true => "public",
+        false => "private",
     }
 }
 
@@ -1475,6 +1499,7 @@ mod tests {
             creator: "Someone".into(),
             cover: None,
             owned: false,
+            public: Some(true),
         };
         let card = playlist_card(&playlist);
         assert!(

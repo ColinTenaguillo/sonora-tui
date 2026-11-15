@@ -16,6 +16,9 @@ pub struct Playlist {
     pub cover: Option<String>,
     /// The account's own, so it can be edited: the service says.
     pub owned: bool,
+    /// Whether others can find it, which only the owner can change, with
+    /// `V`. `None` where there is nothing to change: a playlist on disk.
+    pub public: Option<bool>,
 }
 
 impl Playlist {
@@ -30,6 +33,7 @@ impl Playlist {
             creator: "Coco".into(),
             cover: None,
             owned: true,
+            public: Some(true),
         }
     }
 }

@@ -150,6 +150,10 @@ const BINDINGS: &[Binding] = &[
         keys: "D",
         what: "delete it, after a y",
     },
+    Binding {
+        keys: "V",
+        what: "make it private, or public again",
+    },
     Binding { keys: "", what: "" },
     Binding {
         keys: "",

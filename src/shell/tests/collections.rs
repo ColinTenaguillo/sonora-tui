@@ -113,6 +113,7 @@ fn v_shows_the_albums_and_playlists_as_a_list_and_back() {
         creator: "TIDAL".into(),
         cover: None,
         owned: false,
+        public: Some(true),
     };
     app.playlists = vec![playlist("Road trip", 12), playlist("Focus", 30)];
     press(&mut app, '3');
@@ -258,6 +259,7 @@ fn a_selected_cards_shade_stays_out_of_the_sidebar() {
             creator: "TIDAL".into(),
             cover: None,
             owned: false,
+            public: Some(true),
         })
         .collect();
 
@@ -893,4 +895,77 @@ fn a_reaches_the_favourite_toggle() {
         ),
         "A toggles the favourite"
     );
+}
+
+#[test]
+fn v_makes_your_playlist_private_or_public_and_the_list_says_which() {
+    let mut app = signed_in(sidebar::Section::Playlists);
+    let private = |uuid: &str, title: &str, owned: bool| {
+        let mut p = owned_playlist(uuid, title, owned);
+        p.public = Some(false);
+        p
+    };
+    let mut on_disk = owned_playlist("disk", "On disk", true);
+    on_disk.public = None;
+    // A service that names no maker: no separator hanging before it.
+    let mut nameless = private("nameless", "Nameless", true);
+    nameless.creator.clear();
+    app.playlists = vec![
+        owned_playlist("mine", "Mine", true),
+        private("hidden", "Hidden", true),
+        nameless,
+        // Someone else's, followed by a link: private is theirs to know.
+        private("shared", "Shared", false),
+        on_disk,
+    ];
+    app.config.ui.list_view = true;
+    let text = drawn(&mut app);
+    let row = |name: &str| {
+        text.lines()
+            .find(|l| l.contains(name))
+            .unwrap_or_else(|| panic!("{text}"))
+            .to_owned()
+    };
+    assert!(row("Hidden").contains("Coco · private"), "{text}");
+    assert!(!row("Nameless").contains("· private"), "{text}");
+    assert!(row("Nameless").contains("private"), "{text}");
+    for public in ["Mine", "Shared", "On disk"] {
+        assert!(!row(public).contains("private"), "{text}");
+    }
+
+    // Only on yours, and without a question: it is undone the same way.
+    app.playlists
+        .push(owned_playlist("theirs", "Theirs", false));
+    with_open_playlist(&mut app, "theirs");
+    assert!(key(&mut app, KeyCode::Char('V')).is_none());
+    assert_eq!(app.status.as_deref(), Some("not one of your playlists"));
+    with_open_playlist(&mut app, "disk");
+    assert!(key(&mut app, KeyCode::Char('V')).is_none());
+    assert_eq!(
+        app.status.as_deref(),
+        Some("a playlist on disk is neither public nor private")
+    );
+    with_open_playlist(&mut app, "mine");
+    let Some(Action::Edit(edit)) = key(&mut app, KeyCode::Char('V')) else {
+        panic!("V asks for no edit");
+    };
+    assert!(
+        matches!(&edit, playlistedit::Edit::Visibility { uuid, public: false } if uuid == "mine"),
+        "{edit:?}"
+    );
+    app.update(Action::Edit(edit));
+    assert_eq!(app.status.as_deref(), Some("making the playlist private…"));
+
+    // The service took it: the open playlist's banner says so under its
+    // name, without reopening it.
+    app.update(Action::PlaylistsLoaded(vec![private("mine", "Mine", true)]));
+    app.update(Action::PlaylistEdited {
+        message: "done".into(),
+        uuid: "mine".into(),
+        deleted: false,
+        count_delta: 0,
+    });
+    let text = drawn(&mut app);
+    let byline = text.lines().nth(1).unwrap_or_default();
+    assert!(byline.contains("Coco · private"), "{text}");
 }

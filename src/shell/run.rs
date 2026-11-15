@@ -893,6 +893,13 @@ async fn apply_edit(
             .delete_playlist(&uuid)
             .await
             .map(|()| ("playlist deleted".to_string(), uuid, true, 0)),
+        Edit::Visibility { uuid, public } => {
+            let now = super::carousel::visibility(public);
+            client
+                .set_playlist_public(&uuid, public)
+                .await
+                .map(|()| (format!("the playlist is {now} now"), uuid, false, 0))
+        }
     }
 }
 

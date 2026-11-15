@@ -1,8 +1,9 @@
 //! Editing playlists: a track into one (`P`), a new one (`N`), a rename
 //! (`m`), a deletion (`D`). Each asks something first -- which playlist,
 //! what name, are you sure -- and the question is a small modal over the
-//! view that takes the keys while it is up. Taking a track out (`x`) asks
-//! nothing and lives with the other keys.
+//! view that takes the keys while it is up. Taking a track out (`x`) and
+//! making one private or public (`V`) ask nothing, as each is undone as
+//! easily, and live with the other keys.
 //!
 //! Only the account's own playlists are offered or touched: the service
 //! says which those are, and a followed playlist or a mix is read-only.
@@ -82,6 +83,10 @@ pub enum Edit {
     },
     Delete {
         uuid: String,
+    },
+    Visibility {
+        uuid: String,
+        public: bool,
     },
 }
 
