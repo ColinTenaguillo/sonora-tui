@@ -183,18 +183,39 @@ struct ShownArtist {
     cover: Option<String>,
 }
 
-/// The artists a service's own search found. A failed artist search is
-/// none -- the search still answers with the tracks and albums it found,
-/// and the artists behind them stand in -- unless the session was refused,
-/// which sends the listener back to sign in as any other search would.
-fn found_artists(found: anyhow::Result<Vec<music::SavedArtist>>) -> Result<Vec<Artist>> {
+/// What a search keeps of what the service found, kind by kind.
+struct Kept {
+    tracks: Vec<music::Track>,
+    albums: Vec<music::Album>,
+    playlists: Vec<music::Playlist>,
+    artists: Vec<music::SavedArtist>,
+}
+
+/// A kind the search failed for is none, and the others still show: for
+/// artists, the ones behind the tracks and albums found stand in. The
+/// search fails only when every kind did, or when the session was refused,
+/// which sends the listener back to sign in as any other request would.
+fn kept(found: music::Found) -> Result<Kept> {
+    let failed = found.is_failed();
+    let tracks = match found.tracks {
+        Err(why) if failed => return Err(error(why)),
+        tracks => salvaged(tracks, "track")?,
+    };
+    Ok(Kept {
+        tracks,
+        albums: salvaged(found.albums, "album")?,
+        playlists: salvaged(found.playlists, "playlist")?,
+        artists: salvaged(found.artists, "artist")?,
+    })
+}
+
+fn salvaged<T>(found: anyhow::Result<Vec<T>>, kind: &str) -> Result<Vec<T>> {
     match found.map_err(error) {
-        Ok(found) => Ok(found.into_iter().map(artist).collect()),
-        Err(Error::Unauthorized) => Err(Error::Unauthorized),
         Err(Error::Other(why)) => {
-            tracing::warn!("the artist search failed: {why}");
+            tracing::warn!("the {kind} search failed: {why}");
             Ok(Vec::new())
         }
+        found => found,
     }
 }
 
@@ -664,23 +685,18 @@ impl Session {
 
     /// Tracks, albums, playlists, and artists: the ones the service found by
     /// name first, then the ones behind the tracks and albums it found.
+    /// Asked in one go, which a service that can answers in one request.
     pub async fn search(&self, query: &str) -> Result<Results> {
-        let (tracks, albums, playlists, artists) = tokio::join!(
-            self.api.search(query),
-            self.api.search_albums(query),
-            self.api.search_playlists(query),
-            self.api.search_artists(query)
-        );
-        let (tracks, albums) = (tracks.map_err(error)?, albums.map_err(error)?);
-        let playlists = playlists.map_err(error)?;
-        let shown = merge_artists(found_artists(artists)?, artists_behind(&tracks, &albums));
+        let found = kept(self.api.search_all(query).await)?;
+        let named = found.artists.into_iter().map(artist).collect();
+        let shown = merge_artists(named, artists_behind(&found.tracks, &found.albums));
         let portraits = self.portraits(unpictured(&shown)).await;
         Ok(Results {
             query: query.to_owned(),
-            tracks: tracks.into_iter().map(track).collect(),
-            albums: albums.into_iter().map(album).collect(),
+            tracks: found.tracks.into_iter().map(track).collect(),
+            albums: found.albums.into_iter().map(album).collect(),
             artists: pictured(shown, &portraits),
-            playlists: playlists.into_iter().map(playlist).collect(),
+            playlists: found.playlists.into_iter().map(playlist).collect(),
         })
     }
 
@@ -1000,25 +1016,42 @@ mod tests {
         .is_empty());
     }
 
+    fn found(
+        tracks: anyhow::Result<Vec<music::Track>>,
+        artists: anyhow::Result<Vec<music::SavedArtist>>,
+    ) -> music::Found {
+        music::Found {
+            tracks,
+            albums: Err(anyhow::anyhow!("rate limited")),
+            playlists: Ok(Vec::new()),
+            artists,
+        }
+    }
+
+    fn refused() -> anyhow::Error {
+        anyhow::Error::from(music::SignInFailure(music::SignInProblem::Credentials))
+    }
+
     #[test]
-    fn a_failed_artist_search_is_none_but_a_refused_session_is_still_refused() {
+    fn a_kind_a_search_failed_for_is_none_and_the_others_still_show() {
+        let one = music::Track {
+            id: Some("t".into()),
+            ..Default::default()
+        };
+        let kept = super::kept(found(Ok(vec![one]), Err(anyhow::anyhow!("down"))))
+            .expect("the tracks still show");
+        assert_eq!(kept.tracks.len(), 1);
+        assert!(kept.albums.is_empty() && kept.artists.is_empty());
+    }
+
+    #[test]
+    fn a_search_fails_when_every_kind_did_or_the_session_was_refused() {
+        let all = music::Found::failed(anyhow::anyhow!("offline"));
+        assert!(matches!(super::kept(all), Err(super::Error::Other(why)) if why == "offline"));
         assert!(matches!(
-            super::found_artists(Err(anyhow::anyhow!("rate limited"))),
-            Ok(found) if found.is_empty()
-        ));
-        let refused = anyhow::Error::from(music::SignInFailure(music::SignInProblem::Credentials));
-        assert!(matches!(
-            super::found_artists(Err(refused)),
+            super::kept(found(Ok(Vec::new()), Err(refused()))),
             Err(super::Error::Unauthorized)
         ));
-        let one = music::SavedArtist {
-            id: "a".into(),
-            name: "A".into(),
-            cover: Some("https://x/a".into()),
-            added_at: None,
-        };
-        let kept = super::found_artists(Ok(vec![one])).unwrap();
-        assert_eq!(kept[0].picture.as_deref(), Some("https://x/a"));
     }
 
     #[test]
