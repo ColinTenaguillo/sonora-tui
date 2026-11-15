@@ -650,7 +650,7 @@ fn back_leaves_a_row_opened_with_see_all() {
     let mut app = app();
     app.home.rows.push(sonora_tui::shell::home::Row {
         heading: "New Tracks".into(),
-        kind: sonora_tui::browse::RowKind::Compact,
+        kind: sonora_tui::browse::RowKind::Carousel,
         cards: (0..9)
             .map(|i| sonora_tui::shell::carousel::Card::new(format!("Track {i}"), "Artist"))
             .collect(),
@@ -1341,7 +1341,7 @@ fn r_on_a_home_track_card_opens_its_radio() {
     card.target = Some(sonora_tui::shell::carousel::Target::Track("42".into()));
     app.home.rows.push(sonora_tui::shell::home::Row {
         heading: "New Tracks".into(),
-        kind: sonora_tui::browse::RowKind::Compact,
+        kind: sonora_tui::browse::RowKind::Carousel,
         cards: vec![card],
         state: sonora_tui::shell::carousel::CarouselState::default(),
     });

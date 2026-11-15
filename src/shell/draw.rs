@@ -302,12 +302,7 @@ fn draw_rows(
             &palette,
             state,
             MAIN_FOCUSED,
-            trackgrid::Marks {
-                favourites: &app.favourites.tracks,
-                playing: app.now_playing.track.as_ref().map(|t| &t.id),
-                tier: app.now_playing.tier,
-                liked: &liked,
-            },
+            &liked,
             cover_drawer(&mut art),
         );
         app.artwork = art;
@@ -504,12 +499,10 @@ fn draw_list(
     showing: Showing,
     area: ratatui::layout::Rect,
 ) {
-    let liked = liked(&app.favourites);
-    let marks = trackgrid::Marks {
+    let marks = queueview::Marks {
         favourites: &app.favourites.tracks,
         playing: app.now_playing.track.as_ref().map(|t| &t.id),
         tier: app.now_playing.tier,
-        liked: &liked,
     };
     let entries = app.queue.entries();
     // The heading says whether the queue has an end: what follows the

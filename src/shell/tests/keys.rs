@@ -233,7 +233,7 @@ fn the_keys_act_on_what_is_drawn_not_on_the_hidden_track_list() {
     card.target = Some(carousel::Target::Track("42".into()));
     app.home.rows = vec![home::Row {
         heading: "Songs".into(),
-        kind: crate::browse::RowKind::Compact,
+        kind: crate::browse::RowKind::Carousel,
         cards: vec![card],
         state: Default::default(),
     }];

@@ -56,18 +56,6 @@ impl<P: MusicProvider> Provider for P {}
 /// day sonora says it itself.
 #[async_trait::async_trait]
 pub trait Extras: Send + Sync {
-    /// The service's own Explore page, where it has more on it than its
-    /// genres.
-    async fn explore(&self) -> anyhow::Result<Option<crate::browse::Home>> {
-        Ok(None)
-    }
-
-    /// The page of rows a card of such a page opens, when `path` is one
-    /// of the service's own rather than a genre of sonora's.
-    async fn page(&self, _path: &str) -> anyhow::Result<Option<crate::browse::Home>> {
-        Ok(None)
-    }
-
     /// The playlist a track's radio is, where the service keeps stations
     /// as playlists: what `F` saves on an open radio.
     async fn radio_playlist(&self, _track_id: &str) -> anyhow::Result<Option<String>> {

@@ -52,7 +52,6 @@ pub mod settings;
 pub mod sidebar;
 pub mod signin_window;
 pub mod theme;
-pub mod trackgrid;
 pub mod tracklist;
 pub mod waiting;
 
@@ -2101,11 +2100,6 @@ impl App {
         carousel::cards_to_land_in(scrollbar::content_width(self.last_main_width))
     }
 
-    /// The columns a home page's track grid draws, counted the same way.
-    fn home_grid_columns(&self) -> usize {
-        trackgrid::columns(scrollbar::content_width(self.last_main_width))
-    }
-
     /// As [`list_len`], for the grid of the section showing.
     fn grid_len(&self) -> usize {
         let section = self.sidebar.section();
@@ -2970,17 +2964,17 @@ impl App {
                 self.load_if_needed()
             }
             Action::RowNext => {
-                // A track row is a grid, so down has somewhere to go inside
-                // it before leaving for the next row.
-                let (visible, cols) = (self.home_rows_to_land_in(), self.home_grid_columns());
+                // A block of links has lines to go down before leaving for
+                // the next row.
+                let visible = self.home_rows_to_land_in();
                 let width = scrollbar::content_width(self.last_main_width);
-                self.rows_on_screen_mut().down(visible, cols, width);
+                self.rows_on_screen_mut().down(visible, width);
                 None
             }
             Action::RowPrevious => {
-                let (visible, cols) = (self.home_rows_to_land_in(), self.home_grid_columns());
+                let visible = self.home_rows_to_land_in();
                 let width = scrollbar::content_width(self.last_main_width);
-                self.rows_on_screen_mut().up(visible, cols, width);
+                self.rows_on_screen_mut().up(visible, width);
                 None
             }
             Action::HalfPage { down } => self.on_half_page(down),

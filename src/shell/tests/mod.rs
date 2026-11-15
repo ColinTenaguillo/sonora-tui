@@ -163,7 +163,7 @@ fn some_results() -> crate::search::Results {
 fn home_with_a_track_row() -> App {
     let mut app = signed_in(sidebar::Section::Music);
     app.home.rows = vec![home::Row {
-        kind: crate::browse::RowKind::Compact,
+        kind: crate::browse::RowKind::Carousel,
         heading: "New Tracks".into(),
         cards: (0..6)
             .map(|i| carousel::Card {
