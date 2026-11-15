@@ -103,16 +103,19 @@ impl Session {
 /// case it tells apart, a session the service no longer accepts, is what
 /// sonora calls a credentials failure.
 fn error(error: anyhow::Error) -> Error {
-    let refused = error.chain().any(|cause| {
+    match refused(&error) {
+        true => Error::Unauthorized,
+        false => Error::Other(format!("{error:#}")),
+    }
+}
+
+fn refused(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
         matches!(
             cause.downcast_ref::<music::SignInFailure>(),
             Some(music::SignInFailure(music::SignInProblem::Credentials))
         )
-    });
-    match refused {
-        true => Error::Unauthorized,
-        false => Error::Other(format!("{error:#}")),
-    }
+    })
 }
 
 fn track(t: music::Track) -> Track {
@@ -189,34 +192,43 @@ struct Kept {
     albums: Vec<music::Album>,
     playlists: Vec<music::Playlist>,
     artists: Vec<music::SavedArtist>,
+    /// What the first kind that failed said.
+    trouble: Option<String>,
 }
 
-/// A kind the search failed for is none, and the others still show: for
-/// artists, the ones behind the tracks and albums found stand in. The
-/// search fails only when every kind did, or when the session was refused,
-/// which sends the listener back to sign in as any other request would.
+/// A kind the search failed for is none, and the others still show, with
+/// the first failure said: an empty kind is otherwise taken for nothing
+/// found. For artists, the ones behind the tracks and albums found stand
+/// in. The search fails only when every kind did, or when any was refused
+/// the session, which sends the listener back to sign in as any other
+/// request would.
 fn kept(found: music::Found) -> Result<Kept> {
-    let failed = found.is_failed();
-    let tracks = match found.tracks {
-        Err(why) if failed => return Err(error(why)),
-        tracks => salvaged(tracks, "track")?,
-    };
-    Ok(Kept {
-        tracks,
-        albums: salvaged(found.albums, "album")?,
-        playlists: salvaged(found.playlists, "playlist")?,
-        artists: salvaged(found.artists, "artist")?,
-    })
-}
-
-fn salvaged<T>(found: anyhow::Result<Vec<T>>, kind: &str) -> Result<Vec<T>> {
-    match found.map_err(error) {
-        Err(Error::Other(why)) => {
-            tracing::warn!("the {kind} search failed: {why}");
-            Ok(Vec::new())
-        }
-        found => found,
+    let failures = [
+        ("track", found.tracks.as_ref().err()),
+        ("album", found.albums.as_ref().err()),
+        ("playlist", found.playlists.as_ref().err()),
+        ("artist", found.artists.as_ref().err()),
+    ];
+    let failures: Vec<(&str, &anyhow::Error)> = failures
+        .into_iter()
+        .filter_map(|(kind, error)| Some((kind, error?)))
+        .collect();
+    if failures.iter().any(|(_, error)| refused(error)) {
+        return Err(Error::Unauthorized);
     }
+    if let (true, Some((_, error))) = (found.is_failed(), failures.first()) {
+        return Err(Error::Other(format!("{error:#}")));
+    }
+    let trouble = failures
+        .first()
+        .map(|(kind, error)| format!("the {kind} search failed: {error:#}"));
+    Ok(Kept {
+        tracks: found.tracks.unwrap_or_default(),
+        albums: found.albums.unwrap_or_default(),
+        playlists: found.playlists.unwrap_or_default(),
+        artists: found.artists.unwrap_or_default(),
+        trouble,
+    })
 }
 
 /// The artists a search shows: the service's own first, as it ranked
@@ -686,18 +698,20 @@ impl Session {
     /// Tracks, albums, playlists, and artists: the ones the service found by
     /// name first, then the ones behind the tracks and albums it found.
     /// Asked in one go, which a service that can answers in one request.
-    pub async fn search(&self, query: &str) -> Result<Results> {
+    /// With the results comes what a kind that failed said, if one did.
+    pub async fn search(&self, query: &str) -> Result<(Results, Option<String>)> {
         let found = kept(self.api.search_all(query).await)?;
         let named = found.artists.into_iter().map(artist).collect();
         let shown = merge_artists(named, artists_behind(&found.tracks, &found.albums));
         let portraits = self.portraits(unpictured(&shown)).await;
-        Ok(Results {
+        let results = Results {
             query: query.to_owned(),
             tracks: found.tracks.into_iter().map(track).collect(),
             albums: found.albums.into_iter().map(album).collect(),
             artists: pictured(shown, &portraits),
             playlists: found.playlists.into_iter().map(playlist).collect(),
-        })
+        };
+        Ok((results, found.trouble))
     }
 
     /// The home page: the service's feed, with what it played lately and
@@ -1042,6 +1056,14 @@ mod tests {
             .expect("the tracks still show");
         assert_eq!(kept.tracks.len(), 1);
         assert!(kept.albums.is_empty() && kept.artists.is_empty());
+        assert_eq!(
+            kept.trouble.as_deref(),
+            Some("the album search failed: rate limited"),
+            "said, so an empty kind is not taken for nothing found"
+        );
+        let mut whole = found(Ok(Vec::new()), Ok(Vec::new()));
+        whole.albums = Ok(Vec::new());
+        assert_eq!(super::kept(whole).expect("found").trouble, None);
     }
 
     #[test]
@@ -1052,6 +1074,12 @@ mod tests {
             super::kept(found(Ok(Vec::new()), Err(refused()))),
             Err(super::Error::Unauthorized)
         ));
+        let mut down = music::Found::failed(anyhow::anyhow!("timed out"));
+        down.artists = Err(refused());
+        assert!(
+            matches!(super::kept(down), Err(super::Error::Unauthorized)),
+            "refused on any kind, whatever the tracks said"
+        );
     }
 
     #[test]
