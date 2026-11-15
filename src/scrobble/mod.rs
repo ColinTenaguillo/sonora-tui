@@ -66,8 +66,8 @@ pub fn secret_for(config: &ScrobbleConfig, id: &str) -> Option<Secret> {
             .filter(|t| !t.trim().is_empty())
             .map(|t| Secret::Token {
                 token: t.clone(),
-                // Empty is listenbrainz.org; the config names no other.
-                server: String::new(),
+                // Empty is listenbrainz.org.
+                server: config.listenbrainz_server.clone().unwrap_or_default(),
             }),
         "maloja" => config.maloja.as_ref().map(|m| Secret::Server {
             url: m.url.clone(),
@@ -283,6 +283,23 @@ mod tests {
     use crate::config::{ApiKeys, MalojaConfig};
 
     #[test]
+    fn a_listenbrainz_server_goes_with_the_token_and_none_is_listenbrainz_org() {
+        let mut config = ScrobbleConfig {
+            listenbrainz: Some("t".into()),
+            ..Default::default()
+        };
+        assert!(matches!(
+            secret_for(&config, "listenbrainz"),
+            Some(Secret::Token { token, server }) if token == "t" && server.is_empty()
+        ));
+        config.listenbrainz_server = Some("https://lb.example.org".into());
+        assert!(matches!(
+            secret_for(&config, "listenbrainz"),
+            Some(Secret::Token { server, .. }) if server == "https://lb.example.org"
+        ));
+    }
+
+    #[test]
     fn the_config_gives_each_service_what_it_links_with() {
         let config = ScrobbleConfig {
             lastfm: Some(ApiKeys {
@@ -291,6 +308,7 @@ mod tests {
             }),
             librefm: true,
             listenbrainz: Some("  ".into()),
+            listenbrainz_server: None,
             maloja: Some(MalojaConfig {
                 url: "https://m".into(),
                 key: "mk".into(),

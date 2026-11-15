@@ -33,6 +33,7 @@ pub enum Setting {
     LastfmLink,
     Librefm,
     ListenbrainzToken,
+    ListenbrainzServer,
     MalojaUrl,
     MalojaKey,
     Discord,
@@ -58,7 +59,7 @@ pub enum Kind {
 }
 
 impl Setting {
-    pub const ALL: [Setting; 24] = [
+    pub const ALL: [Setting; 25] = [
         Setting::Service,
         Setting::Quality,
         Setting::Volume,
@@ -77,6 +78,7 @@ impl Setting {
         Setting::LastfmLink,
         Setting::Librefm,
         Setting::ListenbrainzToken,
+        Setting::ListenbrainzServer,
         Setting::MalojaUrl,
         Setting::MalojaKey,
         Setting::Discord,
@@ -102,6 +104,7 @@ impl Setting {
             | Setting::NerdFont
             | Setting::Librefm => Kind::Toggle,
             Setting::LastfmKey
+            | Setting::ListenbrainzServer
             | Setting::MalojaUrl
             | Setting::Discord
             | Setting::SubsonicServer
@@ -134,6 +137,7 @@ impl Setting {
             | Setting::LastfmLink
             | Setting::Librefm
             | Setting::ListenbrainzToken
+            | Setting::ListenbrainzServer
             | Setting::MalojaUrl
             | Setting::MalojaKey => "Scrobbling",
             Setting::Discord => "Discord",
@@ -154,7 +158,7 @@ impl Setting {
         match self {
             Setting::LastfmKey | Setting::LastfmSecret | Setting::LastfmLink => Some("lastfm"),
             Setting::Librefm => Some("librefm"),
-            Setting::ListenbrainzToken => Some("listenbrainz"),
+            Setting::ListenbrainzToken | Setting::ListenbrainzServer => Some("listenbrainz"),
             Setting::MalojaUrl | Setting::MalojaKey => Some("maloja"),
             _ => None,
         }
@@ -180,6 +184,7 @@ impl Setting {
             Setting::LastfmLink => "Last.fm account",
             Setting::Librefm => "Libre.fm",
             Setting::ListenbrainzToken => "ListenBrainz token",
+            Setting::ListenbrainzServer => "ListenBrainz server",
             Setting::MalojaUrl => "Maloja server",
             Setting::MalojaKey => "Maloja API key",
             Setting::Discord => "Discord application id",
@@ -212,6 +217,7 @@ impl Setting {
             Setting::LastfmLink => "Enter to approve the account in the browser, once the key and secret are set. Linked, Enter switches it off and on.",
             Setting::Librefm => "On, the account is approved in the browser at the next link.",
             Setting::ListenbrainzToken => "The user token from listenbrainz.org/settings. Enter to type it.",
+            Setting::ListenbrainzServer => "Your own server or multi-scrobbler, with its scheme. Enter to type it.",
             Setting::MalojaUrl => "Your Maloja server, with its scheme. Enter to type it.",
             Setting::MalojaKey => "Its API key. Enter to type it; shown as dots.",
             Setting::Discord => "From discord.com/developers; empty turns the presence off. Enter to type it.",
@@ -238,6 +244,11 @@ pub fn text_of(config: &crate::config::Config, setting: Setting) -> String {
             .map(|k| k.secret.clone())
             .unwrap_or_default(),
         Setting::ListenbrainzToken => config.scrobble.listenbrainz.clone().unwrap_or_default(),
+        Setting::ListenbrainzServer => config
+            .scrobble
+            .listenbrainz_server
+            .clone()
+            .unwrap_or_default(),
         Setting::MalojaUrl => config
             .scrobble
             .maloja
@@ -275,6 +286,9 @@ pub fn set_text(config: &mut crate::config::Config, setting: Setting, text: &str
         }
         Setting::ListenbrainzToken => {
             config.scrobble.listenbrainz = (!text.is_empty()).then(|| text.to_owned());
+        }
+        Setting::ListenbrainzServer => {
+            config.scrobble.listenbrainz_server = (!text.is_empty()).then(|| text.to_owned());
         }
         Setting::MalojaUrl | Setting::MalojaKey => {
             let mut maloja = config.scrobble.maloja.take().unwrap_or_default();
@@ -478,6 +492,7 @@ pub fn cycle(config: &mut crate::config::Config, setting: Setting, forward: bool
         | Setting::LastfmSecret
         | Setting::LastfmLink
         | Setting::ListenbrainzToken
+        | Setting::ListenbrainzServer
         | Setting::MalojaUrl
         | Setting::MalojaKey
         | Setting::Discord
@@ -621,6 +636,10 @@ fn value_of(
         Setting::LastfmSecret | Setting::ListenbrainzToken | Setting::MalojaKey => {
             set_or_not(&text_of(config, setting))
         }
+        Setting::ListenbrainzServer => match text_of(config, setting) {
+            server if server.is_empty() => "listenbrainz.org".to_string(),
+            server => server,
+        },
         Setting::LastfmLink => match config.scrobble.lastfm.is_some() {
             false => "set the key and secret first".to_string(),
             true => linked_as("lastfm").unwrap_or_else(|| "not linked".to_string()),
@@ -983,6 +1002,22 @@ mod tests {
         assert_eq!(config.ui.theme, super::super::theme::THEMES[1]);
         cycle(&mut config, Setting::Theme, false);
         assert_eq!(config.ui.theme, super::super::theme::THEMES[0]);
+    }
+
+    #[test]
+    fn the_listenbrainz_server_row_is_listenbrainz_org_until_one_is_typed() {
+        let mut config = crate::config::Config::default();
+        let row = Setting::ListenbrainzServer;
+        assert_eq!(value_of(&config, row, &[]), "listenbrainz.org");
+        set_text(&mut config, row, " https://lb.example.org ");
+        assert_eq!(
+            config.scrobble.listenbrainz_server.as_deref(),
+            Some("https://lb.example.org")
+        );
+        assert_eq!(value_of(&config, row, &[]), "https://lb.example.org");
+        assert_eq!(row.scrobbler(), Some("listenbrainz"), "relinks the account");
+        set_text(&mut config, row, "");
+        assert_eq!(config.scrobble.listenbrainz_server, None);
     }
 
     #[test]
