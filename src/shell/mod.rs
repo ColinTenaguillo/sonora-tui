@@ -3859,6 +3859,9 @@ impl App {
             Edit::Create { name, .. } => format!("creating {name}…"),
             Edit::Rename { name, .. } => format!("renaming to {name}…"),
             Edit::Delete { .. } => "deleting the playlist…".to_string(),
+            Edit::Visibility { public, .. } => {
+                format!("making the playlist {}…", carousel::visibility(public))
+            }
         });
         None
     }
@@ -3884,26 +3887,27 @@ impl App {
             Some(Collection::Playlist(open)) if *open == uuid
         );
         // The playlists arrived just before this; the open view's
-        // heading takes the name they now carry, so a rename shows
-        // without reopening.
+        // heading takes what they now say, so a rename or a change of
+        // visibility shows without reopening.
         if open_is_it && !deleted {
-            self.rename_open_playlist(&uuid);
+            self.refresh_open_playlist(&uuid);
         }
         (deleted && open_is_it).then_some(Action::CloseCollection)
     }
 
-    fn rename_open_playlist(&mut self, uuid: &str) {
-        let name = self
+    fn refresh_open_playlist(&mut self, uuid: &str) {
+        let card = self
             .playlists
             .iter()
             .find(|p| p.uuid == uuid)
-            .map(|p| p.title.clone());
+            .map(carousel::playlist_card);
         // A fresh request: its tracks are fetched again, so
         // the edit shows.
         let request = self.next_request();
         if let Some(open) = self.open.as_mut() {
-            if let Some(name) = name {
-                open.title = name;
+            if let Some(card) = card {
+                open.title = card.title;
+                open.subtitle = card.subtitle;
             }
             open.request = request;
         }
@@ -5237,6 +5241,7 @@ impl App {
                 None
             }
             KeyCode::Char('m') | KeyCode::Char('D') => self.playlist_prompt(code),
+            KeyCode::Char('V') => self.toggle_visibility(),
             KeyCode::Char('A') => Some(Action::ToggleFavourite),
             // The web client's "See all": the page hands back six items per
             // row, and this opens the rest of them.
@@ -5283,20 +5288,44 @@ impl App {
     }
 
     /// `m` renames the playlist in hand and `D` deletes it, each behind
-    /// its question; only one of the user's own.
+    /// its question.
     fn playlist_prompt(&mut self, code: KeyCode) -> Option<Action> {
-        match self.playlist_in_hand() {
-            Some(p) if p.owned => {
-                let (uuid, title) = (p.uuid.clone(), p.title.clone());
-                self.prompt = Some(match code {
-                    KeyCode::Char('m') => playlistedit::Prompt::Rename { uuid, name: title },
-                    _ => playlistedit::Prompt::Delete { uuid, title },
-                });
-            }
-            Some(_) => self.say("not one of your playlists"),
-            None => {}
+        if let Some(p) = self.own_playlist_in_hand() {
+            let (uuid, title) = (p.uuid, p.title);
+            self.prompt = Some(match code {
+                KeyCode::Char('m') => playlistedit::Prompt::Rename { uuid, name: title },
+                _ => playlistedit::Prompt::Delete { uuid, title },
+            });
         }
         None
+    }
+
+    /// `V` makes the playlist in hand private, or public again.
+    fn toggle_visibility(&mut self) -> Option<Action> {
+        let p = self.own_playlist_in_hand()?;
+        match p.public {
+            Some(public) => Some(Action::Edit(playlistedit::Edit::Visibility {
+                uuid: p.uuid,
+                public: !public,
+            })),
+            None => {
+                self.say("a playlist on disk is neither public nor private");
+                None
+            }
+        }
+    }
+
+    /// The playlist in hand when it is the user's own, the only kind they
+    /// can edit; saying so of any other.
+    fn own_playlist_in_hand(&mut self) -> Option<crate::library::Playlist> {
+        match self.playlist_in_hand() {
+            Some(p) if p.owned => Some(p.clone()),
+            Some(_) => {
+                self.say("not one of your playlists");
+                None
+            }
+            None => None,
+        }
     }
 }
 

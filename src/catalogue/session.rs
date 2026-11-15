@@ -158,6 +158,9 @@ fn artist(a: music::SavedArtist) -> Artist {
 }
 
 fn playlist(p: music::Playlist) -> Playlist {
+    // Sonora offers no visibility for a playlist imported from disk, and
+    // its local library calls every one private.
+    let public = (!music::is_local_id(&p.id)).then_some(p.public);
     Playlist {
         uuid: p.id,
         title: p.name,
@@ -166,6 +169,7 @@ fn playlist(p: music::Playlist) -> Playlist {
         creator: p.owner,
         cover: p.cover,
         owned: p.owned,
+        public,
     }
 }
 
@@ -546,6 +550,13 @@ impl Session {
 
     pub async fn delete_playlist(&self, uuid: &str) -> Result<()> {
         self.api.delete_playlist(uuid).await.map_err(error)
+    }
+
+    pub async fn set_playlist_public(&self, uuid: &str, public: bool) -> Result<()> {
+        self.api
+            .set_playlist_public(uuid, public)
+            .await
+            .map_err(error)
     }
 
     pub async fn add_track_to_playlist(&self, uuid: &str, id: &TrackId) -> Result<()> {
@@ -1208,6 +1219,30 @@ mod tests {
             cover: None,
         }));
         assert_eq!(g.target, Some(Target::Page("rock".into())));
+    }
+
+    #[test]
+    fn a_playlist_on_disk_has_no_visibility_and_one_on_a_service_keeps_its_own() {
+        let listed = |id: &str, public: bool| {
+            playlist(music::Playlist {
+                id: id.into(),
+                name: "Mine".into(),
+                owner: "Me".into(),
+                owner_id: String::new(),
+                owned: true,
+                collaborative: false,
+                blend: false,
+                public,
+                cover: None,
+                track_count: 1,
+                modified_at: None,
+            })
+            .public
+        };
+        assert_eq!(listed("pl-1", false), Some(false));
+        assert_eq!(listed("pl-1", true), Some(true));
+        let on_disk = format!("{}mix.m3u", music::LOCAL_PLAYLIST_PREFIX);
+        assert_eq!(listed(&on_disk, false), None);
     }
 
     #[test]

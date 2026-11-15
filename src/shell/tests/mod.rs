@@ -155,6 +155,7 @@ fn some_results() -> crate::search::Results {
                 creator: "TIDAL".into(),
                 cover: None,
                 owned: false,
+                public: Some(true),
             })
             .collect(),
     }

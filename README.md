@@ -267,6 +267,7 @@ Press `?` in the app for the full list.
 | `P` | Add the selected track to one of your playlists — a list with covers and sizes, `/` to search it — or to a new one named on the spot |
 | `N` | New playlist |
 | `m` / `D` | Rename, or delete after a `y`, the playlist open or under the cursor — yours only |
+| `V` | Make the playlist open or under the cursor private, or public again — yours only, where the service allows it (Deezer does not); a private one says so beside its maker |
 | `x` | In a playlist of yours: take the highlighted track out |
 | `n` / `p` | Next / previous in the queue |
 | `.` / `,` | Ten seconds forward / back in the track |
