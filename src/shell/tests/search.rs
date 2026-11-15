@@ -1004,3 +1004,22 @@ fn a_kept_tab_the_new_search_left_empty_says_so() {
     let screen = drawn(&mut app);
     assert!(screen.contains("Nothing found"), "{screen}");
 }
+
+#[test]
+fn a_kind_a_search_failed_for_is_said_beside_the_results_it_still_shows() {
+    let mut app = signed_in(sidebar::Section::Music);
+    app.update(Action::BeginSearch);
+    for c in "daft punk".chars() {
+        key(&mut app, KeyCode::Char(c));
+    }
+    app.update(Action::SearchLoaded(Box::new(some_results())));
+    app.update(Action::Error(
+        "the playlist search failed: rate limited".into(),
+    ));
+    let screen = drawn(&mut app);
+    assert!(screen.contains("Artist 0"), "the results stay:\n{screen}");
+    assert!(
+        screen.contains("the playlist search failed: rate limited"),
+        "and the failure is said:\n{screen}"
+    );
+}

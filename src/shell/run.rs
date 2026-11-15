@@ -1006,9 +1006,13 @@ fn run_search(app: &App, query: &str, action_tx: &tokio::sync::mpsc::UnboundedSe
         let (client, t) = (std::sync::Arc::clone(session), action_tx.clone());
         tokio::spawn(async move {
             match client.search(&query).await {
-                Ok(results) => {
+                Ok((results, trouble)) => {
                     tracing::info!("search {query:?}: {} results", results.total());
                     let _ = t.send(Action::SearchLoaded(Box::new(results)));
+                    if let Some(trouble) = trouble {
+                        tracing::warn!("search {query:?}: {trouble}");
+                        let _ = t.send(Action::Error(trouble));
+                    }
                 }
                 Err(crate::catalogue::Error::Unauthorized) => {
                     let _ = t.send(Action::SessionExpired);
