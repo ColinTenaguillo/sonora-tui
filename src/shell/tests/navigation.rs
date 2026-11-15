@@ -95,14 +95,14 @@ fn the_help_opens_on_question_mark_and_any_key_closes_it() {
 
 #[test]
 fn enter_on_a_my_tracks_shortcut_goes_to_the_tracks_view() {
-    // The feed's shortcut grid points at the app's own views: "My
+    // A shortcut card points at the app's own views: "My
     // Tracks" is the favourites, not a collection to fetch.
     let mut app = signed_in(sidebar::Section::Music);
     let mut card = carousel::Card::new("My Tracks", "");
     card.target = Some(carousel::Target::Section(sidebar::Section::Tracks));
     app.home.rows.push(home::Row {
         heading: "Shortcuts".into(),
-        kind: crate::browse::RowKind::Shortcuts,
+        kind: crate::browse::RowKind::Carousel,
         cards: vec![card],
         state: carousel::CarouselState::default(),
     });
@@ -358,7 +358,7 @@ fn the_home_rows_are_shown_when_they_land() {
     let fresh = crate::browse::Home {
         rows: vec![crate::browse::HomeRow {
             heading: "Songs on repeat".into(),
-            kind: crate::browse::RowKind::Compact,
+            kind: crate::browse::RowKind::Carousel,
             cards: vec![carousel::Card::new("A track", "An artist")],
             more: None,
         }],

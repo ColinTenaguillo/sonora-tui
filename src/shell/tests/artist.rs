@@ -461,7 +461,7 @@ fn a_track_card_without_ids_still_opens_its_album_and_artist() {
     card.target = Some(carousel::Target::Track("42".into()));
     app.home.rows = vec![home::Row {
         heading: "Songs".into(),
-        kind: crate::browse::RowKind::Compact,
+        kind: crate::browse::RowKind::Carousel,
         cards: vec![card],
         state: Default::default(),
     }];

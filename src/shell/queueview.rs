@@ -17,8 +17,16 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use super::theme::Palette;
-use super::trackgrid::Marks;
 use super::tracklist::{self, Chrome, TrackList, TrackListState};
+
+/// What the track list marks a row with: what is playing, and the
+/// favourites.
+#[derive(Clone, Copy)]
+pub struct Marks<'a> {
+    pub favourites: &'a std::collections::HashSet<crate::domain::TrackId>,
+    pub playing: Option<&'a crate::domain::TrackId>,
+    pub tier: super::nowplaying::Tier,
+}
 
 /// The heading and the blank under it, above the list's own column headers.
 pub const HEADING_ROWS: u16 = super::carousel::HEADING_ROWS;
@@ -116,7 +124,6 @@ mod tests {
                     favourites: &favourites,
                     playing: Some(&TrackId::from(2)),
                     tier: Default::default(),
-                    liked: &crate::shell::carousel::nobody,
                 },
                 |_, _, _, _| false,
             );

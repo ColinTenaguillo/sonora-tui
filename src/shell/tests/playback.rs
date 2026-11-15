@@ -880,7 +880,7 @@ fn playing_from_a_row_of_track_cards_queues_the_row() {
     cards.insert(2, album);
     app.home.rows = vec![home::Row {
         heading: "New Tracks".into(),
-        kind: crate::browse::RowKind::Compact,
+        kind: crate::browse::RowKind::Carousel,
         cards,
         state: carousel::CarouselState {
             selected: 3,

@@ -779,25 +779,16 @@ impl Session {
         portrayed(sections, &portraits)
     }
 
-    /// The page a card of Explore or of such a page opens: the service's
-    /// own when the path is one of its, else sonora's page of the genre.
+    /// The page a card of Explore or of such a page opens: sonora's page
+    /// of the genre, which on TIDAL may be one of the service's own pages.
     pub async fn page_of_rows(&self, path: &str) -> Result<Home> {
-        if let Some(page) = self.extras.page(path).await.map_err(error)? {
-            return Ok(page);
-        }
         let genre = self.api.genre(path).await.map_err(error)?;
         Ok(rows(self.with_portraits(genre.sections).await))
     }
 
-    /// Explore: the service's own page where it has one, else sonora's
-    /// genres. A page that fails is not the end of Explore: the genres
-    /// are still there to show.
+    /// Explore: sonora's genres, which on TIDAL carry the moods and decades
+    /// of its own Explore page too.
     pub async fn explore(&self) -> Result<Home> {
-        match self.extras.explore().await {
-            Ok(Some(page)) => return Ok(page),
-            Ok(None) => {}
-            Err(error) => tracing::warn!("no Explore page of the service's own: {error:#}"),
-        }
         let genres = self.api.genres().await.map_err(error)?;
         Ok(rows(vec![GenreSection {
             title: "Genres".into(),
@@ -808,37 +799,17 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
-    /// A service whose own pages are these, or that fails to give them.
-    struct Pages(Option<&'static str>);
+    /// A service that keeps a track's radio as a playlist.
+    struct Radio;
 
     #[async_trait::async_trait]
-    impl crate::catalogue::Extras for Pages {
-        async fn explore(&self) -> anyhow::Result<Option<crate::browse::Home>> {
-            match self.0 {
-                Some(heading) => Ok(Some(one_row(heading))),
-                None => anyhow::bail!("down"),
-            }
-        }
-        async fn page(&self, path: &str) -> anyhow::Result<Option<crate::browse::Home>> {
-            Ok(path.starts_with("pages/").then(|| one_row("Its own page")))
-        }
+    impl crate::catalogue::Extras for Radio {
         async fn radio_playlist(&self, _: &str) -> anyhow::Result<Option<String>> {
             Ok(Some("mix:1".into()))
         }
     }
 
-    fn one_row(heading: &str) -> crate::browse::Home {
-        crate::browse::Home {
-            rows: vec![crate::browse::HomeRow {
-                heading: heading.into(),
-                kind: crate::browse::RowKind::Links,
-                cards: vec![crate::domain::Card::default()],
-                more: None,
-            }],
-        }
-    }
-
-    fn session_with(extras: Pages) -> super::Session {
+    fn session_with(extras: Radio) -> super::Session {
         use crate::catalogue::sample::Sample;
         let signed_in = Sample::session();
         super::Session {
@@ -901,37 +872,12 @@ mod tests {
     }
 
     #[test]
-    fn explore_is_the_services_own_page_where_it_has_one() {
-        let explore = wait(session_with(Pages(Some("Moods"))).explore()).expect("a page");
-        assert_eq!(explore.rows[0].heading, "Moods");
-    }
-
-    #[test]
-    fn an_explore_page_that_fails_leaves_sonoras_genres() {
-        // Not an error: sonora is asked instead, and for the sample service
-        // that is a page with nothing on it.
-        let explore = wait(session_with(Pages(None)).explore()).expect("sonora's answer");
-        assert!(explore.rows.is_empty());
-    }
-
-    #[test]
-    fn a_page_of_the_services_own_is_asked_of_it_and_a_genre_of_sonora() {
-        let session = session_with(Pages(Some("Moods")));
-        let page = wait(session.page_of_rows("pages/m_party")).expect("its page");
-        assert_eq!(page.rows[0].heading, "Its own page");
-        // The sample service has no page for any genre: this one was
-        // sonora's to answer.
-        let genre = wait(session.page_of_rows("genre_pop")).expect("sonora's");
-        assert!(genre.rows.is_empty());
-    }
-
-    #[test]
     fn a_radio_whose_playlist_cannot_be_listed_is_the_plain_station() {
         // The sample service lists no playlist and plays no station: the
         // name is dropped with the list it could not give, and what comes
         // back is the station's own answer, here its failure.
         let seed = crate::domain::TrackId::from(1);
-        let named = wait(session_with(Pages(None)).radio(&seed));
+        let named = wait(session_with(Radio).radio(&seed));
         assert!(matches!(named, Err(super::Error::Other(_))), "{named:?}");
     }
 
