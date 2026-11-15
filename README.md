@@ -145,7 +145,7 @@ Each signs in from the same screen, its own way:
 | `tidal` | A code and a link, confirmed in your browser. HiFi Plus for hi-res. See [TIDAL](#tidal) below. |
 | `spotify` | A link opens in the browser; authorise there and come back. Needs Premium, and an account Spotify still serves to librespot: newer accounts (late 2025 on) are refused playback keys whatever their plan, see [librespot#1649](https://github.com/librespot-org/librespot/issues/1649). |
 | `apple` | Paste the `Cookie` header of a signed-in music.apple.com tab. Playback needs Google's Widevine module: see below. |
-| `deezer` | Paste the `Cookie` header (or just the `arl` cookie) of a signed-in deezer.com tab. |
+| `deezer` | Paste the `Cookie` header (or just the `arl` cookie) of a signed-in deezer.com tab; on a family plan, pick your profile. |
 | `youtube` | `g` to continue as a guest, or paste the `Cookie` header of a signed-in music.youtube.com tab; with several accounts on it, pick one. |
 | `subsonic` | Server and user asked on the login screen the first time, then kept in the config; the password is typed each time, never stored. |
 | `local` | Nothing: the first run asks for a folder, and the folders in the config are read at each start. |
