@@ -44,7 +44,10 @@ impl Linked {
         match self.service.id() {
             "lastfm" => "Last.fm".to_string(),
             "librefm" => "Libre.fm".to_string(),
-            "listenbrainz" => "ListenBrainz".to_string(),
+            "listenbrainz" => match host(&self.account.server) {
+                "" => "ListenBrainz".to_string(),
+                host => format!("ListenBrainz on {host}"),
+            },
             _ if !self.account.name.is_empty() => self.account.name.clone(),
             other => other.to_string(),
         }
@@ -111,7 +114,7 @@ pub async fn link(
         let Some(secret) = secret_for(config, service.id()) else {
             continue;
         };
-        if let Some(account) = stored.get(service.id()).filter(|a| a.linked()) {
+        if let Some(account) = still_linked(&stored, service.id(), &secret, fresh) {
             linked.push(Linked {
                 service,
                 account: account.clone(),
@@ -134,6 +137,40 @@ pub async fn link(
     }
     store(file, &linked);
     (linked, refused)
+}
+
+/// The account kept from the last run for the service `id`, while it still
+/// stands: not when a Settings row of the service just changed, which links
+/// it again with what was typed, nor for a ListenBrainz account linked with
+/// another token, or to another server, than the config now names.
+fn still_linked<'a>(
+    stored: &'a HashMap<String, Account>,
+    id: &str,
+    secret: &Secret,
+    fresh: Option<&str>,
+) -> Option<&'a Account> {
+    if fresh == Some(id) {
+        return None;
+    }
+    let account = stored.get(id).filter(|a| a.linked())?;
+    match secret {
+        // sonora keeps the server as it rewrote it -- scheme added, `/1`
+        // dropped -- so a host is all the two have in common.
+        Secret::Token { token, server }
+            if account.session != token.trim() || host(&account.server) != host(server) =>
+        {
+            None
+        }
+        _ => Some(account),
+    }
+}
+
+/// The host of a server's address, port included: what is left of it
+/// without the scheme and the path. Empty for no server.
+fn host(server: &str) -> &str {
+    let server = server.trim();
+    let server = server.split_once("://").map_or(server, |(_, rest)| rest);
+    server.split('/').next().unwrap_or_default()
 }
 
 /// Write the accounts back, as they are now: linked afresh, or switched
@@ -281,6 +318,65 @@ mod tests {
 
     use super::*;
     use crate::config::{ApiKeys, MalojaConfig};
+
+    #[test]
+    fn a_kept_account_stands_until_its_row_changes_or_its_token_or_server_does() {
+        let token = |token: &str, server: &str| Secret::Token {
+            token: token.into(),
+            server: server.into(),
+        };
+        let account = |server: &str| Account {
+            session: "t".into(),
+            server: server.into(),
+            enabled: true,
+            ..Account::default()
+        };
+        let stored: HashMap<String, Account> = [("listenbrainz".to_owned(), account(""))].into();
+        let lb = "listenbrainz";
+        assert!(still_linked(&stored, lb, &token("t", ""), None).is_some());
+        assert!(
+            still_linked(&stored, lb, &token("t", ""), Some(lb)).is_none(),
+            "its row just changed"
+        );
+        assert!(
+            still_linked(&stored, lb, &token("t", ""), Some("maloja")).is_some(),
+            "another's row changed"
+        );
+        assert!(
+            still_linked(&stored, lb, &token("u", ""), None).is_none(),
+            "another token"
+        );
+        assert!(
+            still_linked(&stored, lb, &token("t", "https://lb.example.org"), None).is_none(),
+            "a server now"
+        );
+        let own: HashMap<String, Account> =
+            [("listenbrainz".to_owned(), account("https://lb.example.org"))].into();
+        assert!(
+            still_linked(&own, lb, &token("t", ""), None).is_none(),
+            "none now"
+        );
+        assert!(still_linked(&own, lb, &token("t", "lb.example.org/1/"), None).is_some());
+    }
+
+    #[test]
+    fn a_listenbrainz_account_on_a_server_of_ones_own_is_named_by_its_host() {
+        let on = |server: &str| {
+            Linked {
+                service: music::scrobble::services().remove(2),
+                account: Account {
+                    server: server.into(),
+                    ..Account::default()
+                },
+            }
+            .label()
+        };
+        assert_eq!(on(""), "ListenBrainz");
+        assert_eq!(
+            on("http://ms.local:9078/api/listenbrainz"),
+            "ListenBrainz on ms.local:9078"
+        );
+    }
 
     #[test]
     fn a_listenbrainz_server_goes_with_the_token_and_none_is_listenbrainz_org() {
