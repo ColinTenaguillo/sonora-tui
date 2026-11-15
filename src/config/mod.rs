@@ -189,6 +189,9 @@ pub struct ScrobbleConfig {
     pub librefm: bool,
     /// ListenBrainz: the user token from listenbrainz.org/settings.
     pub listenbrainz: Option<String>,
+    /// A ListenBrainz server of your own, or multi-scrobbler, to send the
+    /// listens to instead of listenbrainz.org.
+    pub listenbrainz_server: Option<String>,
     /// Maloja: the server and one of its API keys.
     pub maloja: Option<MalojaConfig>,
 }

@@ -1581,6 +1581,7 @@ impl App {
             | settings::Setting::LastfmSecret
             | settings::Setting::LastfmLink
             | settings::Setting::ListenbrainzToken
+            | settings::Setting::ListenbrainzServer
             | settings::Setting::MalojaUrl
             | settings::Setting::MalojaKey
             | settings::Setting::Discord

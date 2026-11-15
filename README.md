@@ -387,6 +387,7 @@ themselves count it.
 ```toml
 [scrobble]
 listenbrainz = "the user token from listenbrainz.org/settings"
+listenbrainz_server = "https://lb.example.org"   # your own, or multi-scrobbler; leave out for listenbrainz.org
 lastfm = { key = "an API key", secret = "its secret" }   # from last.fm/api/account/create
 librefm = true
 maloja = { url = "https://maloja.example.org", key = "an API key" }
