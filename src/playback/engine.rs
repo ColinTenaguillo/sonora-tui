@@ -82,16 +82,16 @@ impl Bands {
 
 /// Not `Clone`: a command is consumed by the audio thread exactly once.
 pub enum Cmd {
-    /// Start an engine on this service's factory, replacing whatever was
-    /// playing. Sent once a session is in hand; nothing plays before it.
+    /// The service's factory, and what its engines start with. The one
+    /// running ends, and the next `Play` or `PlayAt` starts another. Sent
+    /// once a session is in hand; nothing plays before it.
     Attach {
         factory: Arc<dyn music::PlaybackFactory>,
         options: Options,
     },
     /// What to ask for from the next track on. An engine asks for one
-    /// quality from its start, so another one starts a fresh engine and
-    /// the same one does nothing. Sent before each `Play`, so the track
-    /// being heard is left alone.
+    /// quality from its start, so another one is a fresh engine at the next
+    /// track, past any the running one has already joined to.
     Quality(crate::domain::Quality),
     /// Fetch and play a track.
     Play(TrackId),
@@ -105,6 +105,8 @@ pub enum Cmd {
     Resume,
     Seek(Duration),
     Volume(f32),
+    /// Nothing left to play: the engine ends, and lets go of the stream and
+    /// the output until the next track.
     Stop,
 }
 
@@ -183,7 +185,7 @@ pub enum PlaybackEvent {
 
 /// Start the command thread. Commands in on a std channel (the shell
 /// sends from wherever it is); events out on a tokio channel (the shell
-/// awaits it). The engine itself starts on `Cmd::Attach`.
+/// awaits it). An engine starts on the first track after `Cmd::Attach`.
 pub fn spawn() -> (
     Sender<Cmd>,
     tokio::sync::mpsc::UnboundedReceiver<PlaybackEvent>,
@@ -229,33 +231,88 @@ fn engine_quality(wanted: crate::domain::Quality) -> music::Quality {
 }
 
 /// The engine's `Player` is fire-and-forget, so each command is one call.
-/// Dropping a player ends its engine, so an `Attach` replaces the last.
 fn forward_commands(
     cmds: Receiver<Cmd>,
     events: tokio::sync::mpsc::UnboundedSender<PlaybackEvent>,
 ) {
-    let mut player: Option<Box<dyn music::Player>> = None;
-    // Kept across an attach: the level is set once at startup, before any
-    // session, and a fresh engine starts at full.
-    let mut volume = 1.0f32;
-    let segue: SharedSegue = Arc::default();
-    // What the running engine was started with, to start another like it.
-    let mut attached: Option<Attached> = None;
+    let mut commands = Commands::new(events);
     while let Ok(cmd) = cmds.recv() {
+        commands.handle(cmd);
+    }
+}
+
+/// What the command thread keeps between commands. An engine runs only
+/// while there is a track: `Play` and `PlayAt` start one on the factory
+/// attached, and dropping it ends it, so between a `Stop` and the next
+/// track nothing holds the stream or the output.
+struct Commands {
+    /// The running engine, and the quality it asks for.
+    engine: Option<(Box<dyn music::Player>, crate::domain::Quality)>,
+    /// What the next engine starts with.
+    attached: Option<Attached>,
+    /// Kept across engines: the level is set once at startup, before any
+    /// session, and a fresh engine starts at full.
+    volume: f32,
+    segue: SharedSegue,
+    events: tokio::sync::mpsc::UnboundedSender<PlaybackEvent>,
+}
+
+impl Commands {
+    fn new(events: tokio::sync::mpsc::UnboundedSender<PlaybackEvent>) -> Self {
+        Self {
+            engine: None,
+            attached: None,
+            volume: 1.0,
+            segue: Arc::default(),
+            events,
+        }
+    }
+
+    fn handle(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Attach { factory, options } => {
-                let fresh = Attached { factory, options };
-                player = Some(fresh.start(volume, &segue, &events));
-                attached = Some(fresh);
+                self.engine = None;
+                self.attached = Some(Attached { factory, options });
             }
             Cmd::Quality(wanted) => {
-                if let Some(running) = attached.as_mut().filter(|a| a.options.quality != wanted) {
-                    running.options.quality = wanted;
-                    player = Some(running.start(volume, &segue, &events));
+                if let Some(attached) = self.attached.as_mut() {
+                    attached.options.quality = wanted;
                 }
             }
-            cmd => command(player.as_deref(), cmd, &mut volume, &segue, &events),
+            Cmd::Stop => self.engine = None,
+            cmd => {
+                if self.ready_for(&cmd) {
+                    let player = self.engine.as_ref().map(|(player, _)| &**player);
+                    command(player, cmd, &mut self.volume, &self.segue, &self.events);
+                }
+            }
         }
+    }
+
+    /// Ends or starts the engine `cmd` needs, and says whether it still
+    /// goes to it. One asking for another quality than the settings keeps
+    /// only the track it has already joined to, which is being heard: the
+    /// next one starts a fresh engine rather than being lined up on it.
+    fn ready_for(&mut self, cmd: &Cmd) -> bool {
+        let wanted = self.attached.as_ref().map(|a| a.options.quality);
+        let stale = self
+            .engine
+            .as_ref()
+            .is_some_and(|(_, q)| Some(*q) != wanted);
+        match cmd {
+            Cmd::Preload(_) if stale => return false,
+            Cmd::Play(id) if stale && lock(&self.segue).joined.as_ref() != Some(id) => {
+                self.engine = None
+            }
+            _ => {}
+        }
+        if self.engine.is_none() && matches!(cmd, Cmd::Play(_) | Cmd::PlayAt(..)) {
+            self.engine = self.attached.as_ref().map(|a| {
+                let player = a.start(self.volume, &self.segue, &self.events);
+                (player, a.options.quality)
+            });
+        }
+        true
     }
 }
 
@@ -302,7 +359,7 @@ fn attach(
     fresh
 }
 
-/// Every command but `Attach`, on whichever engine is running. The level
+/// The commands for the engine, on whichever is running. The level
 /// and the end of a join are kept whether or not there is one; a `Play`
 /// with none fails, so the shell takes back the bar it filled.
 fn command(
@@ -327,8 +384,8 @@ fn command(
         return;
     };
     match cmd {
-        // Taken by the loop before it gets here.
-        Cmd::Attach { .. } | Cmd::Quality(_) => {}
+        // Taken by `Commands::handle` before it gets here.
+        Cmd::Attach { .. } | Cmd::Quality(_) | Cmd::Stop => {}
         Cmd::Play(id) => {
             let seamless = lock(segue).seamless(&id);
             if let Err(error) = player.load(id.as_str(), Duration::ZERO, seamless) {
@@ -348,9 +405,6 @@ fn command(
         Cmd::Resume => player.play(),
         Cmd::Seek(to) => player.seek(to),
         Cmd::Volume(_) => player.set_gain(*volume),
-        // ponytail: the engine has no stop. Paused, the track holds
-        // silent until the next load replaces it.
-        Cmd::Stop => player.pause(),
     }
 }
 
@@ -863,9 +917,20 @@ mod tests {
     }
 
     /// An engine that writes down what it was asked, and a stream that
-    /// ends at once, so the command thread can be driven to the end.
+    /// ends at once, so the command thread can be driven to the end. The
+    /// `true` ones are engines a factory started, and note when they end.
     #[derive(Clone, Default)]
-    struct Recorder(Arc<Mutex<Vec<String>>>);
+    struct Recorder(Arc<Mutex<Vec<String>>>, bool);
+
+    impl Drop for Recorder {
+        fn drop(&mut self) {
+            // Not through a lock that unwraps: a failed assertion holds
+            // it poisoned, and a panic in a drop aborts the whole run.
+            if let (true, Ok(mut calls)) = (self.1, self.0.lock()) {
+                calls.push("end".into());
+            }
+        }
+    }
 
     impl Recorder {
         fn note(&self, call: String) {
@@ -915,8 +980,125 @@ mod tests {
             config: music::PlaybackConfig,
         ) -> (Box<dyn music::Player>, Box<dyn music::PlaybackEvents>) {
             self.note(format!("start {}", config.quality.id()));
-            (Box::new(self.clone()), Box::new(Silent))
+            (Box::new(Recorder(self.0.clone(), true)), Box::new(Silent))
         }
+    }
+
+    #[test]
+    fn a_stop_ends_the_engine_and_the_next_track_starts_another_like_it() {
+        // Stopped, nothing holds the stream or the output; what follows
+        // starts afresh, at the quality and level the last one had.
+        let engine = Recorder::default();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (out, _events) = tokio::sync::mpsc::unbounded_channel();
+        let id = |s: &str| TrackId::from(s);
+        for cmd in [
+            Cmd::Volume(0.5),
+            Cmd::Attach {
+                factory: Arc::new(engine.clone()),
+                options: Options::default(),
+            },
+            Cmd::Play(id("a")),
+            Cmd::Stop,
+            // Nothing to act on, and no engine started for it.
+            Cmd::Pause,
+            Cmd::Resume,
+            Cmd::Seek(Duration::from_secs(3)),
+            Cmd::Preload(id("x")),
+            // Kept for the next one.
+            Cmd::Volume(0.25),
+            Cmd::PlayAt(id("b"), Duration::from_secs(9)),
+        ] {
+            tx.send(cmd).unwrap();
+        }
+        drop(tx);
+        forward_commands(rx, out);
+
+        assert_eq!(
+            *engine.0.lock().unwrap(),
+            [
+                "start hi-res",
+                "gain 0.5",
+                "load a 0s seamless=false",
+                "end",
+                "start hi-res",
+                "gain 0.25",
+                "load b 9s seamless=false",
+                "end",
+            ]
+        );
+    }
+
+    #[test]
+    fn an_attach_starts_nothing_until_a_track_plays_and_ends_the_one_running() {
+        // Signed in, or a setting changed, with nothing to play: the output
+        // stays free. With a track, the shell picks it up where it was.
+        let engine = Recorder::default();
+        let mut commands = Commands::new(tokio::sync::mpsc::unbounded_channel().0);
+        let attach = |quality| Cmd::Attach {
+            factory: Arc::new(engine.clone()),
+            options: Options {
+                quality,
+                ..Options::default()
+            },
+        };
+        commands.handle(attach(Quality::Lossless));
+        assert!(engine.0.lock().unwrap().is_empty());
+        commands.handle(Cmd::Play(TrackId::from("a")));
+        commands.handle(attach(Quality::Low));
+        commands.handle(Cmd::PlayAt(TrackId::from("a"), Duration::from_secs(5)));
+        assert_eq!(
+            *engine.0.lock().unwrap(),
+            [
+                "start lossless",
+                "gain 1",
+                "load a 0s seamless=false",
+                "end",
+                "start low",
+                "gain 1",
+                "load a 5s seamless=false",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_new_quality_waits_out_the_track_already_joined_to() {
+        // Changed while a plays, with b already joined behind it: b is
+        // being heard, so it goes on, and c is not lined up on the old
+        // engine but starts a fresh one at the new quality.
+        let engine = Recorder::default();
+        let mut commands = Commands::new(tokio::sync::mpsc::unbounded_channel().0);
+        let id = |s: &str| TrackId::from(s);
+        commands.handle(Cmd::Attach {
+            factory: Arc::new(engine.clone()),
+            options: Options::default(),
+        });
+        commands.handle(Cmd::Play(id("a")));
+        commands.handle(Cmd::Preload(id("b")));
+        lock(&commands.segue).ended();
+        for cmd in [
+            Cmd::Quality(Quality::Low),
+            Cmd::Play(id("b")),
+            Cmd::Preload(id("c")),
+            Cmd::Quality(Quality::Low),
+            Cmd::Play(id("c")),
+        ] {
+            commands.handle(cmd);
+        }
+        assert_eq!(
+            *engine.0.lock().unwrap(),
+            [
+                "start hi-res",
+                "gain 1",
+                "load a 0s seamless=false",
+                "preload b segue=true",
+                "load b 0s seamless=true",
+                "end",
+                "start low",
+                "gain 1",
+                "load c 0s seamless=false",
+            ]
+        );
     }
 
     #[test]
@@ -975,6 +1157,9 @@ mod tests {
             // track that follows.
             Cmd::Quality(crate::domain::Quality::Low),
             Cmd::Play(id("d")),
+            // Changed while one plays: that one ends, the next starts.
+            Cmd::Quality(crate::domain::Quality::High),
+            Cmd::Play(id("e")),
         ] {
             tx.send(cmd).unwrap();
         }
@@ -994,10 +1179,15 @@ mod tests {
                 "play",
                 "seek 12s",
                 "gain 1",
-                "pause",
+                "end",
                 "start low",
                 "gain 1",
                 "load d 0s seamless=false",
+                "end",
+                "start high",
+                "gain 1",
+                "load e 0s seamless=false",
+                "end",
             ]
         );
         assert!(matches!(
