@@ -4845,7 +4845,7 @@ impl App {
             login::LoginState::Text { field, typed } => Self::text_key(*field, typed, code),
             login::LoginState::Secret { typed } => Self::secret_key(typed, code),
             login::LoginState::Accounts { choices, selected } => {
-                Self::accounts_key(choices, selected, code)
+                Self::accounts_key(&choices.accounts, selected, code)
             }
             // Nothing to answer while the service works, or waits on
             // the browser: Enter must not start a second sign-in.

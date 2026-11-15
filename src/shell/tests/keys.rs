@@ -301,10 +301,12 @@ fn an_account_prompt_is_walked_with_j_and_k_and_picked_with_enter() {
     };
     let mut app = App::default();
     app.config.provider.kind = crate::config::ProviderKind::Youtube;
-    app.update(Action::LoginPrompt(music::SignInPrompt::Accounts(vec![
-        choice("1", "Me"),
-        choice("2", "Label"),
-    ])));
+    app.update(Action::LoginPrompt(music::SignInPrompt::Accounts(
+        music::AccountChoices {
+            kind: music::AccountKind::Session,
+            accounts: vec![choice("1", "Me"), choice("2", "Label")],
+        },
+    )));
     assert!(key(&mut app, KeyCode::Char('j')).is_none());
     assert!(
         key(&mut app, KeyCode::Char('j')).is_none(),

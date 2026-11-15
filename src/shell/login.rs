@@ -36,9 +36,10 @@ pub enum LoginState {
     Secret {
         typed: Secret,
     },
-    /// The cookies carried several accounts; the service wants one named.
+    /// The cookies carried several accounts, or the account several
+    /// profiles; the service wants one named.
     Accounts {
-        choices: Vec<music::AccountChoice>,
+        choices: music::AccountChoices,
         selected: usize,
     },
     /// The service is working on it: nothing to type, nothing to press.
@@ -168,8 +169,12 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
             Line::from("Enter with nothing pasted opens the sign-in window again."),
         ],
         LoginState::Accounts { choices, selected } => {
-            let mut lines = vec![Line::from("Which account?"), Line::from("")];
-            for (i, choice) in choices.iter().enumerate() {
+            let question = match choices.kind {
+                music::AccountKind::Session => "Which account?",
+                music::AccountKind::Profile => "Which profile?",
+            };
+            let mut lines = vec![Line::from(question), Line::from("")];
+            for (i, choice) in choices.accounts.iter().enumerate() {
                 let mark = if i == *selected { "> " } else { "  " };
                 let detail = choice
                     .detail
@@ -383,11 +388,32 @@ mod tests {
             detail: Some("brand".into()),
         };
         let text = rendered(&LoginState::Accounts {
-            choices: vec![choice("1", "Colin"), choice("2", "Label")],
+            choices: music::AccountChoices {
+                kind: music::AccountKind::Session,
+                accounts: vec![choice("1", "Colin"), choice("2", "Label")],
+            },
             selected: 1,
         });
+        assert!(text.contains("Which account?"), "{text}");
         assert!(text.contains("> Label"), "{text}");
         assert!(text.contains("  Colin"), "{text}");
+    }
+
+    #[test]
+    fn a_family_plan_asks_for_a_profile_not_an_account() {
+        let text = rendered(&LoginState::Accounts {
+            choices: music::AccountChoices {
+                kind: music::AccountKind::Profile,
+                accounts: vec![music::AccountChoice {
+                    id: "1".into(),
+                    name: "Kid".into(),
+                    detail: None,
+                }],
+            },
+            selected: 0,
+        });
+        assert!(text.contains("Which profile?"), "{text}");
+        assert!(text.contains("> Kid"), "{text}");
     }
 
     #[test]

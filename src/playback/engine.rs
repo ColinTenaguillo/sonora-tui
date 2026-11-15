@@ -483,13 +483,22 @@ fn translate(event: music::PlaybackEvent, starts: &mut Starts) -> Option<Playbac
             heard: heard.map(|(id, at)| (TrackId::from(id), at)),
         }),
         // A resume, a seek and a pause are things the shell already knows.
+        // The queue events are Soloist's, the headless Spotify player sonora
+        // plays through once the Sonora app has set it up. They follow a
+        // queue shared with other Spotify apps, which this one does not:
+        // ponytail: a track another app queues is not taken up, and Soloist
+        // pauses it; adopt QueuedTrack here if that is wanted.
         Engine::Playing { .. }
         | Engine::Loading { .. }
         | Engine::Paused { .. }
         | Engine::Seeked { .. }
         | Engine::Downloaded { id: None }
         | Engine::Unavailable { id: None }
-        | Engine::Throttled { id: None } => None,
+        | Engine::Throttled { id: None }
+        | Engine::QueueChanged { .. }
+        | Engine::QueuedTrack { .. }
+        | Engine::QueueRejected { .. }
+        | Engine::QueueAppended { .. } => None,
     }
 }
 

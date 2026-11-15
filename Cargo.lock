@@ -1911,42 +1911,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "hyper-proxy2"
-version = "0.1.0"
+name = "hyper-http-proxy"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9043b7b23fb0bc4a1c7014c27b50a4fc42cc76206f71d34fc0dfe5b28ddc3faf"
+checksum = "bd1d471ea2f65ba45eddb1d6ab7d58ac2671d2d4ac14da5c6516ae1d97e1327a"
 dependencies = [
  "bytes",
  "futures-util",
  "headers",
  "http",
  "hyper",
- "hyper-rustls 0.26.0",
+ "hyper-rustls",
  "hyper-util",
  "pin-project-lite",
- "rustls-native-certs 0.7.3",
  "tokio",
- "tokio-rustls 0.25.0",
- "tower-service",
- "webpki",
-]
-
-[[package]]
-name = "hyper-rustls"
-version = "0.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0bea761b46ae2b24eb4aef630d8d1c398157b6fc29e6350ecf090a0b70c952c"
-dependencies = [
- "futures-util",
- "http",
- "hyper",
- "hyper-util",
- "log",
- "rustls 0.22.4",
- "rustls-native-certs 0.7.3",
- "rustls-pki-types",
- "tokio",
- "tokio-rustls 0.25.0",
+ "tokio-rustls",
  "tower-service",
 ]
 
@@ -1959,10 +1938,10 @@ dependencies = [
  "http",
  "hyper",
  "hyper-util",
- "rustls 0.23.46",
- "rustls-native-certs 0.8.5",
+ "rustls",
+ "rustls-native-certs",
  "tokio",
- "tokio-rustls 0.26.6",
+ "tokio-rustls",
  "tower-service",
  "webpki-roots",
 ]
@@ -2502,7 +2481,7 @@ dependencies = [
 [[package]]
 name = "librespot-audio"
 version = "0.8.0"
-source = "git+https://github.com/sonorahq/librespot?rev=84f551d4afc7823ef12b6b02d09e34e2ddaccf99#84f551d4afc7823ef12b6b02d09e34e2ddaccf99"
+source = "git+https://github.com/sonorahq/librespot?rev=c3bbdf7faca8b6e36a9fdc6ba3e8b8923e89b893#c3bbdf7faca8b6e36a9fdc6ba3e8b8923e89b893"
 dependencies = [
  "aes",
  "bytes",
@@ -2521,7 +2500,7 @@ dependencies = [
 [[package]]
 name = "librespot-core"
 version = "0.8.0"
-source = "git+https://github.com/sonorahq/librespot?rev=84f551d4afc7823ef12b6b02d09e34e2ddaccf99#84f551d4afc7823ef12b6b02d09e34e2ddaccf99"
+source = "git+https://github.com/sonorahq/librespot?rev=c3bbdf7faca8b6e36a9fdc6ba3e8b8923e89b893#c3bbdf7faca8b6e36a9fdc6ba3e8b8923e89b893"
 dependencies = [
  "aes",
  "base64 0.22.1",
@@ -2538,8 +2517,8 @@ dependencies = [
  "http-body-util",
  "httparse",
  "hyper",
- "hyper-proxy2",
- "hyper-rustls 0.27.10",
+ "hyper-http-proxy",
+ "hyper-rustls",
  "hyper-util",
  "librespot-oauth",
  "librespot-protocol",
@@ -2578,7 +2557,7 @@ dependencies = [
 [[package]]
 name = "librespot-metadata"
 version = "0.8.0"
-source = "git+https://github.com/sonorahq/librespot?rev=84f551d4afc7823ef12b6b02d09e34e2ddaccf99#84f551d4afc7823ef12b6b02d09e34e2ddaccf99"
+source = "git+https://github.com/sonorahq/librespot?rev=c3bbdf7faca8b6e36a9fdc6ba3e8b8923e89b893#c3bbdf7faca8b6e36a9fdc6ba3e8b8923e89b893"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2595,7 +2574,7 @@ dependencies = [
 [[package]]
 name = "librespot-oauth"
 version = "0.8.0"
-source = "git+https://github.com/sonorahq/librespot?rev=84f551d4afc7823ef12b6b02d09e34e2ddaccf99#84f551d4afc7823ef12b6b02d09e34e2ddaccf99"
+source = "git+https://github.com/sonorahq/librespot?rev=c3bbdf7faca8b6e36a9fdc6ba3e8b8923e89b893#c3bbdf7faca8b6e36a9fdc6ba3e8b8923e89b893"
 dependencies = [
  "log",
  "oauth2",
@@ -2609,7 +2588,7 @@ dependencies = [
 [[package]]
 name = "librespot-playback"
 version = "0.8.0"
-source = "git+https://github.com/sonorahq/librespot?rev=84f551d4afc7823ef12b6b02d09e34e2ddaccf99#84f551d4afc7823ef12b6b02d09e34e2ddaccf99"
+source = "git+https://github.com/sonorahq/librespot?rev=c3bbdf7faca8b6e36a9fdc6ba3e8b8923e89b893#c3bbdf7faca8b6e36a9fdc6ba3e8b8923e89b893"
 dependencies = [
  "form_urlencoded",
  "futures-util",
@@ -2630,7 +2609,7 @@ dependencies = [
 [[package]]
 name = "librespot-protocol"
 version = "0.8.0"
-source = "git+https://github.com/sonorahq/librespot?rev=84f551d4afc7823ef12b6b02d09e34e2ddaccf99#84f551d4afc7823ef12b6b02d09e34e2ddaccf99"
+source = "git+https://github.com/sonorahq/librespot?rev=c3bbdf7faca8b6e36a9fdc6ba3e8b8923e89b893#c3bbdf7faca8b6e36a9fdc6ba3e8b8923e89b893"
 dependencies = [
  "protobuf",
  "protobuf-codegen",
@@ -2907,7 +2886,7 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 [[package]]
 name = "music"
 version = "0.49.1"
-source = "git+https://github.com/sonorahq/sonora?rev=cd2a7cf7407df6576a1b95668a91c6b276bafd07#cd2a7cf7407df6576a1b95668a91c6b276bafd07"
+source = "git+https://github.com/sonorahq/sonora?rev=10ffdfe4c22996244cb7d46e99f4b3d57b27f98c#10ffdfe4c22996244cb7d46e99f4b3d57b27f98c"
 dependencies = [
  "alsa",
  "anyhow",
@@ -2954,6 +2933,7 @@ dependencies = [
  "serde",
  "serde-saphyr",
  "serde_json",
+ "sha1 0.11.0",
  "storage",
  "symphonia",
  "tempfile",
@@ -3377,12 +3357,6 @@ dependencies = [
  "is-wsl",
  "libc",
 ]
-
-[[package]]
-name = "openssl-probe"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
 
 [[package]]
 name = "openssl-probe"
@@ -3990,7 +3964,7 @@ dependencies = [
  "quinn-proto",
  "quinn-udp",
  "rustc-hash",
- "rustls 0.23.46",
+ "rustls",
  "socket2",
  "thiserror 2.0.21",
  "tokio",
@@ -4012,7 +3986,7 @@ dependencies = [
  "rand_pcg",
  "ring",
  "rustc-hash",
- "rustls 0.23.46",
+ "rustls",
  "rustls-pki-types",
  "slab",
  "thiserror 2.0.21",
@@ -4479,22 +4453,22 @@ dependencies = [
  "http-body",
  "http-body-util",
  "hyper",
- "hyper-rustls 0.27.10",
+ "hyper-rustls",
  "hyper-util",
  "js-sys",
  "log",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
- "rustls 0.23.46",
- "rustls-native-certs 0.8.5",
+ "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "sync_wrapper",
  "tokio",
- "tokio-rustls 0.26.6",
+ "tokio-rustls",
  "tower",
  "tower-http",
  "tower-service",
@@ -4520,14 +4494,14 @@ dependencies = [
  "http-body",
  "http-body-util",
  "hyper",
- "hyper-rustls 0.27.10",
+ "hyper-rustls",
  "hyper-util",
  "js-sys",
  "log",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
- "rustls 0.23.46",
+ "rustls",
  "rustls-pki-types",
  "rustls-platform-verifier",
  "serde",
@@ -4535,7 +4509,7 @@ dependencies = [
  "serde_urlencoded",
  "sync_wrapper",
  "tokio",
- "tokio-rustls 0.26.6",
+ "tokio-rustls",
  "tokio-util",
  "tower",
  "tower-http",
@@ -4761,20 +4735,6 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.22.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf4ef73721ac7bcd79b2b315da7779d8fc09718c6b3d2d1b2d94850eb8c18432"
-dependencies = [
- "log",
- "ring",
- "rustls-pki-types",
- "rustls-webpki 0.102.8",
- "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "rustls"
 version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
@@ -4783,22 +4743,9 @@ dependencies = [
  "once_cell",
  "ring",
  "rustls-pki-types",
- "rustls-webpki 0.103.16",
+ "rustls-webpki",
  "subtle",
  "zeroize",
-]
-
-[[package]]
-name = "rustls-native-certs"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5bfb394eeed242e909609f56089eecfe5fda225042e8b171791b9c95f5931e5"
-dependencies = [
- "openssl-probe 0.1.6",
- "rustls-pemfile",
- "rustls-pki-types",
- "schannel",
- "security-framework 2.11.1",
 ]
 
 [[package]]
@@ -4807,19 +4754,10 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a073f5dc7469f984c52ad2752b63b0807745133b6de880b7b64c1ac4c48aec4"
 dependencies = [
- "openssl-probe 0.2.2",
+ "openssl-probe",
  "rustls-pki-types",
  "schannel",
- "security-framework 3.7.0",
-]
-
-[[package]]
-name = "rustls-pemfile"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
-dependencies = [
- "rustls-pki-types",
+ "security-framework",
 ]
 
 [[package]]
@@ -4843,11 +4781,11 @@ dependencies = [
  "jni",
  "log",
  "once_cell",
- "rustls 0.23.46",
- "rustls-native-certs 0.8.5",
+ "rustls",
+ "rustls-native-certs",
  "rustls-platform-verifier-android",
- "rustls-webpki 0.103.16",
- "security-framework 3.7.0",
+ "rustls-webpki",
+ "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
  "windows-sys 0.61.2",
@@ -4858,17 +4796,6 @@ name = "rustls-platform-verifier-android"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eec689c0bc40ff2458a5977b6619cb718087084a18e02a131c599b62d05e1a5f"
-
-[[package]]
-name = "rustls-webpki"
-version = "0.102.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64ca1bc8749bd4cf37b5ce386cc146580777b4e8572c7b97baf22c83f444bee9"
-dependencies = [
- "ring",
- "rustls-pki-types",
- "untrusted",
-]
 
 [[package]]
 name = "rustls-webpki"
@@ -4932,19 +4859,6 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
-
-[[package]]
-name = "security-framework"
-version = "2.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
-dependencies = [
- "bitflags 2.13.2",
- "core-foundation 0.9.4",
- "core-foundation-sys",
- "libc",
- "security-framework-sys",
-]
 
 [[package]]
 name = "security-framework"
@@ -5285,7 +5199,7 @@ dependencies = [
  "ratatui-image",
  "reqwest 0.13.5",
  "rodio",
- "rustls 0.23.46",
+ "rustls",
  "serde",
  "serde_json",
  "storage",
@@ -5364,7 +5278,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "storage"
 version = "0.49.1"
-source = "git+https://github.com/sonorahq/sonora?rev=cd2a7cf7407df6576a1b95668a91c6b276bafd07#cd2a7cf7407df6576a1b95668a91c6b276bafd07"
+source = "git+https://github.com/sonorahq/sonora?rev=10ffdfe4c22996244cb7d46e99f4b3d57b27f98c#10ffdfe4c22996244cb7d46e99f4b3d57b27f98c"
 dependencies = [
  "anyhow",
  "dirs",
@@ -5925,22 +5839,11 @@ dependencies = [
 
 [[package]]
 name = "tokio-rustls"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "775e0c0f0adb3a2f22a00c4745d728b479985fc15ee7ca6a2608388c5569860f"
-dependencies = [
- "rustls 0.22.4",
- "rustls-pki-types",
- "tokio",
-]
-
-[[package]]
-name = "tokio-rustls"
 version = "0.26.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c9cc2678c2cdd569ef8215e2afd7954ada2ae20b4fdd2c5fe6139a3b02d105db"
 dependencies = [
- "rustls 0.23.46",
+ "rustls",
  "tokio",
 ]
 
@@ -5963,11 +5866,11 @@ checksum = "d25a406cddcc431a75d3d9afc6a7c0f7428d4891dd973e4d54c56b46127bf857"
 dependencies = [
  "futures-util",
  "log",
- "rustls 0.23.46",
- "rustls-native-certs 0.8.5",
+ "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
- "tokio-rustls 0.26.6",
+ "tokio-rustls",
  "tungstenite 0.28.0",
 ]
 
@@ -5979,11 +5882,11 @@ checksum = "17a073bfed563fa236697a068031408a93cd9522e08abf9933ead3e73411bd71"
 dependencies = [
  "futures-util",
  "log",
- "rustls 0.23.46",
- "rustls-native-certs 0.8.5",
+ "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
- "tokio-rustls 0.26.6",
+ "tokio-rustls",
  "tungstenite 0.30.0",
 ]
 
@@ -6215,7 +6118,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.5",
- "rustls 0.23.46",
+ "rustls",
  "rustls-pki-types",
  "sha1 0.10.7",
  "thiserror 2.0.21",
@@ -6234,7 +6137,7 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.10.3",
- "rustls 0.23.46",
+ "rustls",
  "rustls-pki-types",
  "sha1 0.11.0",
  "thiserror 2.0.21",
@@ -6586,16 +6489,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "webpki"
-version = "0.22.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed63aea5ce73d0ff405984102c42de94fc55a6b75765d621c65262469b3c9b53"
-dependencies = [
- "ring",
- "untrusted",
-]
-
-[[package]]
 name = "webpki-root-certs"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6616,7 +6509,7 @@ dependencies = [
 [[package]]
 name = "webview"
 version = "0.49.1"
-source = "git+https://github.com/sonorahq/sonora?rev=cd2a7cf7407df6576a1b95668a91c6b276bafd07#cd2a7cf7407df6576a1b95668a91c6b276bafd07"
+source = "git+https://github.com/sonorahq/sonora?rev=10ffdfe4c22996244cb7d46e99f4b3d57b27f98c#10ffdfe4c22996244cb7d46e99f4b3d57b27f98c"
 dependencies = [
  "anyhow",
  "block2",
@@ -6768,7 +6661,7 @@ dependencies = [
 [[package]]
 name = "widevine"
 version = "0.49.1"
-source = "git+https://github.com/sonorahq/sonora?rev=cd2a7cf7407df6576a1b95668a91c6b276bafd07#cd2a7cf7407df6576a1b95668a91c6b276bafd07"
+source = "git+https://github.com/sonorahq/sonora?rev=10ffdfe4c22996244cb7d46e99f4b3d57b27f98c#10ffdfe4c22996244cb7d46e99f4b3d57b27f98c"
 dependencies = [
  "anyhow",
  "cc",
