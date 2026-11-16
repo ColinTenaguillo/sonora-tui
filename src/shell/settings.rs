@@ -231,36 +231,7 @@ impl Setting {
 /// What a text row holds now, as the box opens on it.
 pub fn text_of(config: &crate::config::Config, setting: Setting) -> String {
     match setting {
-        Setting::LastfmKey => config
-            .scrobble
-            .lastfm
-            .as_ref()
-            .map(|k| k.key.clone())
-            .unwrap_or_default(),
-        Setting::LastfmSecret => config
-            .scrobble
-            .lastfm
-            .as_ref()
-            .map(|k| k.secret.clone())
-            .unwrap_or_default(),
-        Setting::ListenbrainzToken => config.scrobble.listenbrainz.clone().unwrap_or_default(),
-        Setting::ListenbrainzServer => config
-            .scrobble
-            .listenbrainz_server
-            .clone()
-            .unwrap_or_default(),
-        Setting::MalojaUrl => config
-            .scrobble
-            .maloja
-            .as_ref()
-            .map(|m| m.url.clone())
-            .unwrap_or_default(),
-        Setting::MalojaKey => config
-            .scrobble
-            .maloja
-            .as_ref()
-            .map(|m| m.key.clone())
-            .unwrap_or_default(),
+        _ if setting.is_scrobbling() => scrobble_text_of(&config.scrobble, setting),
         Setting::Discord => config.discord.application_id.clone(),
         Setting::SubsonicServer => config.subsonic.server.clone(),
         Setting::SubsonicUser => config.subsonic.username.clone(),
@@ -269,42 +240,77 @@ pub fn text_of(config: &crate::config::Config, setting: Setting) -> String {
     }
 }
 
-/// Write what was typed into the row. A pair that is empty on both sides
-/// -- Last.fm's key and secret, Maloja's server and key -- is no service
-/// at all, and is written as none.
+fn scrobble_text_of(scrobble: &crate::config::ScrobbleConfig, setting: Setting) -> String {
+    let lastfm = scrobble.lastfm.as_ref();
+    let maloja = scrobble.maloja.as_ref();
+    let text = match setting {
+        Setting::LastfmKey => lastfm.map(|k| &k.key),
+        Setting::LastfmSecret => lastfm.map(|k| &k.secret),
+        Setting::ListenbrainzToken => scrobble.listenbrainz.as_ref(),
+        Setting::ListenbrainzServer => scrobble.listenbrainz_server.as_ref(),
+        Setting::MalojaUrl => maloja.map(|m| &m.url),
+        Setting::MalojaKey => maloja.map(|m| &m.key),
+        _ => None,
+    };
+    text.cloned().unwrap_or_default()
+}
+
+/// Write what was typed into the row.
 pub fn set_text(config: &mut crate::config::Config, setting: Setting, text: &str) {
     let text = text.trim();
     match setting {
-        Setting::LastfmKey | Setting::LastfmSecret => {
-            let mut keys = config.scrobble.lastfm.take().unwrap_or_default();
-            match setting {
-                Setting::LastfmKey => keys.key = text.to_owned(),
-                _ => keys.secret = text.to_owned(),
-            }
-            config.scrobble.lastfm =
-                (!keys.key.is_empty() || !keys.secret.is_empty()).then_some(keys);
-        }
-        Setting::ListenbrainzToken => {
-            config.scrobble.listenbrainz = (!text.is_empty()).then(|| text.to_owned());
-        }
-        Setting::ListenbrainzServer => {
-            config.scrobble.listenbrainz_server = (!text.is_empty()).then(|| text.to_owned());
-        }
-        Setting::MalojaUrl | Setting::MalojaKey => {
-            let mut maloja = config.scrobble.maloja.take().unwrap_or_default();
-            match setting {
-                Setting::MalojaUrl => maloja.url = text.to_owned(),
-                _ => maloja.key = text.to_owned(),
-            }
-            config.scrobble.maloja =
-                (!maloja.url.is_empty() || !maloja.key.is_empty()).then_some(maloja);
-        }
+        _ if setting.is_scrobbling() => set_scrobble_text(&mut config.scrobble, setting, text),
         Setting::Discord => config.discord.application_id = text.to_owned(),
         Setting::SubsonicServer => config.subsonic.server = text.to_owned(),
         Setting::SubsonicUser => config.subsonic.username = text.to_owned(),
         Setting::LocalFolders if !text.is_empty() => config.local.folders.push(text.to_owned()),
         _ => {}
     }
+}
+
+/// A pair that is empty on both sides -- Last.fm's key and secret,
+/// Maloja's server and key -- is no service at all, and is written as
+/// none; so is an empty ListenBrainz token or server.
+fn set_scrobble_text(scrobble: &mut crate::config::ScrobbleConfig, setting: Setting, text: &str) {
+    let typed = (!text.is_empty()).then(|| text.to_owned());
+    match setting {
+        Setting::LastfmKey | Setting::LastfmSecret => {
+            let first = setting == Setting::LastfmKey;
+            scrobble.lastfm = set_pair(
+                scrobble.lastfm.take(),
+                |k| (&mut k.key, &mut k.secret),
+                first,
+                text,
+            );
+        }
+        Setting::MalojaUrl | Setting::MalojaKey => {
+            let first = setting == Setting::MalojaUrl;
+            scrobble.maloja = set_pair(
+                scrobble.maloja.take(),
+                |m| (&mut m.url, &mut m.key),
+                first,
+                text,
+            );
+        }
+        Setting::ListenbrainzToken => scrobble.listenbrainz = typed,
+        Setting::ListenbrainzServer => scrobble.listenbrainz_server = typed,
+        _ => {}
+    }
+}
+
+/// Writes `text` to the first of the pair `fields` picks out, or to the
+/// second, and keeps the pair only while one of the two is set.
+fn set_pair<T: Default>(
+    pair: Option<T>,
+    fields: fn(&mut T) -> (&mut String, &mut String),
+    first: bool,
+    text: &str,
+) -> Option<T> {
+    let mut pair = pair.unwrap_or_default();
+    let (a, b) = fields(&mut pair);
+    *(if first { &mut *a } else { &mut *b }) = text.to_owned();
+    let set = !a.is_empty() || !b.is_empty();
+    set.then_some(pair)
 }
 
 /// `x` on the folders row.
@@ -985,6 +991,20 @@ mod tests {
         set_text(&mut config, Setting::LastfmKey, "");
         set_text(&mut config, Setting::LastfmSecret, "");
         assert!(config.scrobble.lastfm.is_none(), "both empty is no service");
+
+        set_text(&mut config, Setting::MalojaUrl, "https://maloja");
+        set_text(&mut config, Setting::MalojaKey, "k");
+        assert_eq!(text_of(&config, Setting::MalojaUrl), "https://maloja");
+        assert_eq!(text_of(&config, Setting::MalojaKey), "k");
+        set_text(&mut config, Setting::MalojaUrl, "");
+        assert!(config.scrobble.maloja.is_some(), "the key alone is kept");
+        set_text(&mut config, Setting::MalojaKey, " ");
+        assert!(config.scrobble.maloja.is_none(), "both empty is no service");
+
+        set_text(&mut config, Setting::ListenbrainzToken, "t");
+        assert_eq!(text_of(&config, Setting::ListenbrainzToken), "t");
+        set_text(&mut config, Setting::ListenbrainzToken, "");
+        assert_eq!(config.scrobble.listenbrainz, None);
 
         set_text(&mut config, Setting::LocalFolders, "~/Music");
         set_text(&mut config, Setting::LocalFolders, "/media/flac");
