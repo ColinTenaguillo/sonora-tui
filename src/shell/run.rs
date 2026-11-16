@@ -548,10 +548,11 @@ fn side_effects(app: &mut App, action: &Action, out: &Outlets) {
         }
         // The way in the service offers, apart from going without an
         // account: a code for TIDAL, a link for Spotify, cookies for
-        // the rest. A Subsonic server went through `Connect` above.
+        // the rest. A server of the listener's own went through `Connect`
+        // above.
         Action::BeginLogin
             if app.session.is_none()
-                && app.config.provider.kind != crate::config::ProviderKind::Subsonic =>
+                && (app.config.provider.kind.server().is_none() || app.resumes_kept_sign_in()) =>
         {
             begin_login(app, action_tx);
         }
@@ -632,9 +633,13 @@ fn connect(
     secret: &login::Secret,
     action_tx: &tokio::sync::mpsc::UnboundedSender<Action>,
 ) {
+    let Some(server) = app.config.provider.kind.server() else {
+        return;
+    };
+    let kept = app.config.server(server);
     let method = music::SignIn::Credentials {
-        server: app.config.subsonic.server.trim().to_owned(),
-        username: app.config.subsonic.username.trim().to_owned(),
+        server: kept.server.trim().to_owned(),
+        username: kept.username.trim().to_owned(),
         password: secret.0.clone(),
     };
     start_sign_in(app, method, action_tx);
@@ -648,6 +653,8 @@ fn begin_login(app: &mut App, action_tx: &tokio::sync::mpsc::UnboundedSender<Act
             let folders = app.config.local.folders();
             (!folders.is_empty()).then_some(music::SignIn::Path(folders))
         }
+        // What the server's provider keeps, which `sign_in` resumes.
+        _ if app.config.provider.kind.server().is_some() => Some(music::SignIn::Default),
         _ => Some(
             app.provider
                 .as_ref()
@@ -1368,7 +1375,10 @@ async fn sign_in(
     tx: tokio::sync::mpsc::UnboundedSender<Action>,
 ) {
     let name = provider.label();
-    if provider.stored() {
+    // A password typed is a sign-in of its own: resuming what is kept
+    // instead would let any password in.
+    let typed = matches!(method, music::SignIn::Credentials { .. });
+    if provider.stored() && !typed {
         if let Ok(Some(session)) = provider.restore().await {
             tracing::info!("resumed the stored {name} session");
             let session =
@@ -1376,6 +1386,16 @@ async fn sign_in(
             let _ = tx.send(Action::SessionOpened(std::sync::Arc::new(session)));
             return;
         }
+    }
+    // A server's kept sign-in that did not resume: its password, rather
+    // than the provider's own way in, which for Jellyfin opens a browser.
+    let server = provider
+        .sign_in_options()
+        .iter()
+        .any(|m| matches!(m, music::SignIn::Credentials { .. }));
+    if server && !typed {
+        let _ = tx.send(Action::AskPassword);
+        return;
     }
     let prompt: music::PromptSink = {
         let tx = tx.clone();

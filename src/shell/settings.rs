@@ -37,8 +37,9 @@ pub enum Setting {
     MalojaUrl,
     MalojaKey,
     Discord,
-    SubsonicServer,
-    SubsonicUser,
+    /// Where a server of the listener's own is, and who signs in to it.
+    ServerAddress(crate::config::Server),
+    ServerUser(crate::config::Server),
     LocalFolders,
 }
 
@@ -59,7 +60,7 @@ pub enum Kind {
 }
 
 impl Setting {
-    pub const ALL: [Setting; 25] = [
+    pub const ALL: [Setting; 27] = [
         Setting::Service,
         Setting::Quality,
         Setting::Volume,
@@ -82,8 +83,10 @@ impl Setting {
         Setting::MalojaUrl,
         Setting::MalojaKey,
         Setting::Discord,
-        Setting::SubsonicServer,
-        Setting::SubsonicUser,
+        Setting::ServerAddress(crate::config::Server::Subsonic),
+        Setting::ServerUser(crate::config::Server::Subsonic),
+        Setting::ServerAddress(crate::config::Server::Jellyfin),
+        Setting::ServerUser(crate::config::Server::Jellyfin),
         Setting::LocalFolders,
     ];
 
@@ -107,8 +110,8 @@ impl Setting {
             | Setting::ListenbrainzServer
             | Setting::MalojaUrl
             | Setting::Discord
-            | Setting::SubsonicServer
-            | Setting::SubsonicUser => Kind::Text { secret: false },
+            | Setting::ServerAddress(_)
+            | Setting::ServerUser(_) => Kind::Text { secret: false },
             Setting::LastfmSecret | Setting::ListenbrainzToken | Setting::MalojaKey => {
                 Kind::Text { secret: true }
             }
@@ -141,7 +144,7 @@ impl Setting {
             | Setting::MalojaUrl
             | Setting::MalojaKey => "Scrobbling",
             Setting::Discord => "Discord",
-            Setting::SubsonicServer | Setting::SubsonicUser => "Subsonic",
+            Setting::ServerAddress(server) | Setting::ServerUser(server) => server.name(),
             Setting::LocalFolders => "Local files",
         }
     }
@@ -188,8 +191,8 @@ impl Setting {
             Setting::MalojaUrl => "Maloja server",
             Setting::MalojaKey => "Maloja API key",
             Setting::Discord => "Discord application id",
-            Setting::SubsonicServer => "Subsonic server",
-            Setting::SubsonicUser => "Subsonic user",
+            Setting::ServerAddress(server) => server.address_label(),
+            Setting::ServerUser(server) => server.user_label(),
             Setting::LocalFolders => "Music folders",
         }
     }
@@ -221,8 +224,8 @@ impl Setting {
             Setting::MalojaUrl => "Your Maloja server, with its scheme. Enter to type it.",
             Setting::MalojaKey => "Its API key. Enter to type it; shown as dots.",
             Setting::Discord => "From discord.com/developers; empty turns the presence off. Enter to type it.",
-            Setting::SubsonicServer => "Used at the next sign-in. Enter to type it.",
-            Setting::SubsonicUser => "The password is asked on the sign-in screen. Enter to type it.",
+            Setting::ServerAddress(_) => "Used at the next sign-in. Enter to type it.",
+            Setting::ServerUser(_) => "The password is asked on the sign-in screen. Enter to type it.",
             Setting::LocalFolders => "Enter adds a folder, x takes the last one out; the library is read again.",
         }
     }
@@ -233,8 +236,8 @@ pub fn text_of(config: &crate::config::Config, setting: Setting) -> String {
     match setting {
         _ if setting.is_scrobbling() => scrobble_text_of(&config.scrobble, setting),
         Setting::Discord => config.discord.application_id.clone(),
-        Setting::SubsonicServer => config.subsonic.server.clone(),
-        Setting::SubsonicUser => config.subsonic.username.clone(),
+        Setting::ServerAddress(server) => config.server(server).server.clone(),
+        Setting::ServerUser(server) => config.server(server).username.clone(),
         // A folder row opens on an empty box: the text is a new folder.
         _ => String::new(),
     }
@@ -261,8 +264,8 @@ pub fn set_text(config: &mut crate::config::Config, setting: Setting, text: &str
     match setting {
         _ if setting.is_scrobbling() => set_scrobble_text(&mut config.scrobble, setting, text),
         Setting::Discord => config.discord.application_id = text.to_owned(),
-        Setting::SubsonicServer => config.subsonic.server = text.to_owned(),
-        Setting::SubsonicUser => config.subsonic.username = text.to_owned(),
+        Setting::ServerAddress(server) => config.server_mut(server).server = text.to_owned(),
+        Setting::ServerUser(server) => config.server_mut(server).username = text.to_owned(),
         Setting::LocalFolders if !text.is_empty() => config.local.folders.push(text.to_owned()),
         _ => {}
     }
@@ -502,8 +505,8 @@ pub fn cycle(config: &mut crate::config::Config, setting: Setting, forward: bool
         | Setting::MalojaUrl
         | Setting::MalojaKey
         | Setting::Discord
-        | Setting::SubsonicServer
-        | Setting::SubsonicUser
+        | Setting::ServerAddress(_)
+        | Setting::ServerUser(_)
         | Setting::LocalFolders => {}
     }
 }
@@ -658,8 +661,8 @@ fn value_of(
         Setting::LastfmKey
         | Setting::MalojaUrl
         | Setting::Discord
-        | Setting::SubsonicServer
-        | Setting::SubsonicUser => {
+        | Setting::ServerAddress(_)
+        | Setting::ServerUser(_) => {
             let text = text_of(config, setting);
             match text.is_empty() {
                 true => "not set".to_string(),
@@ -1022,6 +1025,40 @@ mod tests {
         assert_eq!(config.ui.theme, super::super::theme::THEMES[1]);
         cycle(&mut config, Setting::Theme, false);
         assert_eq!(config.ui.theme, super::super::theme::THEMES[0]);
+    }
+
+    #[test]
+    fn each_servers_rows_write_its_own_section_of_the_config() {
+        use crate::config::Server;
+        let mut config = crate::config::Config::default();
+        set_text(
+            &mut config,
+            Setting::ServerAddress(Server::Jellyfin),
+            " https://jf ",
+        );
+        set_text(&mut config, Setting::ServerUser(Server::Jellyfin), "colin");
+        set_text(
+            &mut config,
+            Setting::ServerAddress(Server::Subsonic),
+            "https://nd",
+        );
+        assert_eq!(config.jellyfin.server, "https://jf");
+        assert_eq!(config.jellyfin.username, "colin");
+        assert_eq!(config.subsonic.server, "https://nd");
+        assert_eq!(
+            value_of(&config, Setting::ServerUser(Server::Subsonic), &[]),
+            "not set"
+        );
+        assert_eq!(
+            value_of(&config, Setting::ServerUser(Server::Jellyfin), &[]),
+            "colin"
+        );
+        let jellyfin = Setting::ALL
+            .iter()
+            .filter(|row| row.group() == "Jellyfin")
+            .map(|row| row.label())
+            .collect::<Vec<_>>();
+        assert_eq!(jellyfin, ["Jellyfin server", "Jellyfin user"]);
     }
 
     #[test]

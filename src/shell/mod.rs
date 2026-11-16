@@ -92,8 +92,12 @@ pub enum Action {
     /// A session is in hand, fresh or resumed: start its engine and
     /// fetch what every signed-in screen needs.
     SessionReady,
-    /// The password typed for the Subsonic server the config names.
+    /// The password typed for the Subsonic or Jellyfin server the config
+    /// names.
     Connect(login::Secret),
+    /// The sign-in kept for the server could not be resumed: its password
+    /// is asked for instead.
+    AskPassword,
     /// Tab on the sign-in screen: the next service in the list, as the
     /// Settings row would pick it, without going through Settings -- which
     /// a screen stuck on "retry or quit" could not reach.
@@ -103,7 +107,7 @@ pub enum Action {
     /// else in the app; quitting from it was the one place it was not.
     CancelLogin,
     /// A setting typed on the sign-in screen, to check and write to the
-    /// config: the local folder, the Subsonic server or user.
+    /// config: the local folder, or a server and its user.
     Typed(login::Field, String),
     /// A playlist edit the user confirmed in its prompt: the loop sends
     /// it to the service.
@@ -1584,8 +1588,8 @@ impl App {
             | settings::Setting::MalojaUrl
             | settings::Setting::MalojaKey
             | settings::Setting::Discord
-            | settings::Setting::SubsonicServer
-            | settings::Setting::SubsonicUser
+            | settings::Setting::ServerAddress(_)
+            | settings::Setting::ServerUser(_)
             | settings::Setting::LocalFolders => None,
         }
     }
@@ -2642,6 +2646,7 @@ impl App {
             | Action::OpenSignInWindow
             | Action::CancelLogin
             | Action::Typed(..)
+            | Action::AskPassword
             | Action::PasteCookies) => self.on_sign_in_action(a),
             a @ (Action::SessionOpened(..)
             | Action::SessionExpired
@@ -2786,6 +2791,12 @@ impl App {
             }
             Action::CancelLogin => self.cancel_login(),
             Action::Typed(field, typed) => self.on_typed(field, typed),
+            Action::AskPassword => {
+                if let Some(server) = self.config.provider.kind.server() {
+                    self.login = self.server_prompt(server);
+                }
+                None
+            }
             Action::PasteCookies => {
                 self.login = login::LoginState::Secret {
                     typed: login::Secret::default(),
@@ -3250,7 +3261,7 @@ impl App {
     }
 
     fn begin_login(&mut self) -> Option<Action> {
-        // A Subsonic server asks for its password first; any other
+        // A Subsonic or Jellyfin server asks for its password first; any other
         // service is contacted now, and says what it wants next.
         self.login = match self.login_prompt() {
             login::LoginState::Idle => {
@@ -3285,8 +3296,14 @@ impl App {
                 }
                 self.config.local.folders.push(typed);
             }
-            login::Field::Server => self.config.subsonic.server = typed,
-            login::Field::Username => self.config.subsonic.username = typed,
+            login::Field::Server | login::Field::Username => {
+                let server = self.config.provider.kind.server()?;
+                let kept = self.config.server_mut(server);
+                match field {
+                    login::Field::Server => kept.server = typed,
+                    _ => kept.username = typed,
+                }
+            }
         }
         self.save_config();
         // On to what the service wants next: the user after the
@@ -4268,10 +4285,15 @@ impl App {
     }
 
     /// The login screen for the service the config names: TIDAL waits for
-    /// Enter to show its code, a Subsonic server asks for its password.
+    /// Enter to show its code, a server of the listener's own asks for its
+    /// password.
     fn login_prompt(&self) -> login::LoginState {
+        if let Some(server) = self.config.provider.kind.server() {
+            if !self.resumes_kept_sign_in() {
+                return self.server_prompt(server);
+            }
+        }
         match self.config.provider.kind {
-            crate::config::ProviderKind::Subsonic => self.subsonic_prompt(),
             // Nothing to sign in to: the folders are read as soon as the
             // loop starts, and this is what the screen says meanwhile. With
             // none named yet, the first is asked for here.
@@ -4290,7 +4312,13 @@ impl App {
 
     /// What the login screen calls the service.
     fn service_name(&self) -> &'static str {
-        self.provider.as_ref().map(|p| p.label()).unwrap_or("TIDAL")
+        // With no provider -- one that failed to start -- a server is
+        // still named, so its prompt does not ask for a TIDAL server.
+        self.provider
+            .as_ref()
+            .map(|p| p.label())
+            .or_else(|| self.config.provider.kind.server().map(|s| s.name()))
+            .unwrap_or("TIDAL")
     }
 
     /// The login screen's key for going in without an account. Named
@@ -4306,26 +4334,41 @@ impl App {
             .is_some_and(|p| p.sign_in_options().contains(&music::SignIn::Anonymous))
     }
 
-    /// The login screen for the Subsonic server the config names: the
-    /// server and the user are asked for first when it names none, and
-    /// the password every time.
-    fn subsonic_prompt(&self) -> login::LoginState {
-        let subsonic = &self.config.subsonic;
-        if subsonic.server.trim().is_empty() {
+    /// Whether the service is a server whose sign-in the provider keeps,
+    /// for the server the config names: Enter resumes it, with no
+    /// password. One kept for another server is not, or a server changed
+    /// in Settings would go on reading the old one.
+    pub fn resumes_kept_sign_in(&self) -> bool {
+        let (Some(server), Some(provider)) = (self.config.provider.kind.server(), &self.provider)
+        else {
+            return false;
+        };
+        provider.stored()
+            && provider
+                .location()
+                .is_some_and(|at| self.config.server(server).is_at(&at))
+    }
+
+    /// The login screen for the server the config names: the server and
+    /// the user are asked for first when it names none, and the password
+    /// every time.
+    fn server_prompt(&self, server: crate::config::Server) -> login::LoginState {
+        let kept = self.config.server(server);
+        if kept.server.trim().is_empty() {
             return login::LoginState::Text {
                 field: login::Field::Server,
                 typed: String::new(),
             };
         }
-        if subsonic.username.trim().is_empty() {
+        if kept.username.trim().is_empty() {
             return login::LoginState::Text {
                 field: login::Field::Username,
                 typed: String::new(),
             };
         }
         login::LoginState::Password {
-            server: subsonic.server.trim().to_owned(),
-            username: subsonic.username.trim().to_owned(),
+            server: kept.server.trim().to_owned(),
+            username: kept.username.trim().to_owned(),
             typed: login::Secret::default(),
         }
     }
@@ -4870,9 +4913,8 @@ impl App {
             KeyCode::Backspace => {
                 typed.0.pop();
             }
-            KeyCode::Enter if !typed.0.is_empty() => {
-                return Some(Action::Connect(std::mem::take(typed)));
-            }
+            // Empty too: a Jellyfin account may have no password.
+            KeyCode::Enter => return Some(Action::Connect(std::mem::take(typed))),
             KeyCode::Tab => return Some(Action::NextService),
             KeyCode::Esc => return Some(Action::CancelLogin),
             _ => {}

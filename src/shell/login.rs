@@ -13,7 +13,8 @@ pub enum LoginState {
         code: String,
         url: String,
     },
-    /// A Subsonic server named in the config, waiting for its password.
+    /// A Subsonic or Jellyfin server named in the config, waiting for its
+    /// password.
     /// Typed here and handed to the provider, which keeps it; it is never
     /// written to the config file.
     Password {
@@ -22,7 +23,7 @@ pub enum LoginState {
         typed: Secret,
     },
     /// A setting the config has not got yet, typed here and written to
-    /// it: the local folder, or the Subsonic server and user.
+    /// it: the local folder, or a server and its user.
     Text {
         field: Field,
         typed: String,
@@ -56,11 +57,12 @@ pub enum Field {
 }
 
 impl Field {
-    pub fn question(self) -> &'static str {
+    /// What is asked, of `service` when it is a server's.
+    pub fn question(self, service: &str) -> String {
         match self {
-            Field::Folder => "Where is your music?",
-            Field::Server => "Which Subsonic server?",
-            Field::Username => "Which user on it?",
+            Field::Folder => "Where is your music?".into(),
+            Field::Server => format!("Which {service} server?"),
+            Field::Username => "Which user on it?".into(),
         }
     }
 
@@ -133,7 +135,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
             Line::from("Tab to change service."),
         ],
         LoginState::Text { field, typed } => vec![
-            Line::from(field.question()),
+            Line::from(field.question(service)),
             Line::from(""),
             Line::from(vec![
                 Span::raw(format!("{}: ", field.label())),
@@ -273,9 +275,13 @@ mod tests {
     use super::*;
 
     fn rendered(state: &LoginState) -> String {
+        rendered_for(state, "TIDAL")
+    }
+
+    fn rendered_for(state: &LoginState, service: &str) -> String {
         let mut terminal = Terminal::new(TestBackend::new(70, 12)).unwrap();
         terminal
-            .draw(|frame| render(frame, frame.area(), state, "TIDAL", false))
+            .draw(|frame| render(frame, frame.area(), state, service, false))
             .unwrap();
         let buffer = terminal.backend().buffer().clone();
         (0..buffer.area.height)
@@ -424,11 +430,14 @@ mod tests {
         });
         assert!(text.contains("~/Music"), "{text}");
         assert!(text.contains("Tab"), "says how to leave:\n{text}");
-        let text = rendered(&LoginState::Text {
+        let server = LoginState::Text {
             field: Field::Server,
             typed: "https://".into(),
-        });
-        assert!(text.contains("Subsonic server"), "{text}");
+        };
+        let text = rendered_for(&server, "Subsonic");
+        assert!(text.contains("Which Subsonic server?"), "{text}");
+        let text = rendered_for(&server, "Jellyfin");
+        assert!(text.contains("Which Jellyfin server?"), "{text}");
     }
 
     #[test]

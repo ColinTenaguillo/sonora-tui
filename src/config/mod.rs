@@ -62,7 +62,9 @@ pub struct Config {
     /// Which service the app signs in to. TIDAL unless said otherwise.
     pub provider: ProviderConfig,
     /// A Subsonic or Navidrome server, for `provider.kind = "subsonic"`.
-    pub subsonic: SubsonicConfig,
+    pub subsonic: ServerConfig,
+    /// A Jellyfin server, for `provider.kind = "jellyfin"`.
+    pub jellyfin: ServerConfig,
     /// Where listens are reported. Nothing, unless a service is named.
     pub scrobble: ScrobbleConfig,
     /// The folders to read, for `provider.kind = "local"`.
@@ -91,6 +93,8 @@ pub enum ProviderKind {
     /// A Subsonic-compatible server: Navidrome, Gonic, Airsonic and the
     /// like, through sonora's `music` crate.
     Subsonic,
+    /// A Jellyfin server's music libraries.
+    Jellyfin,
     /// Spotify Premium: authorised in the browser, which calls back to a
     /// port the provider listens on.
     Spotify,
@@ -110,13 +114,14 @@ pub enum ProviderKind {
 
 impl ProviderKind {
     /// Every service, in the order the Settings row steps through them.
-    pub const ALL: [ProviderKind; 7] = [
+    pub const ALL: [ProviderKind; 8] = [
         ProviderKind::Tidal,
         ProviderKind::Spotify,
         ProviderKind::Apple,
         ProviderKind::Deezer,
         ProviderKind::Youtube,
         ProviderKind::Subsonic,
+        ProviderKind::Jellyfin,
         ProviderKind::Local,
     ];
 
@@ -129,7 +134,66 @@ impl ProviderKind {
             ProviderKind::Deezer => "Deezer",
             ProviderKind::Youtube => "YouTube Music",
             ProviderKind::Subsonic => "Subsonic server",
+            ProviderKind::Jellyfin => "Jellyfin",
             ProviderKind::Local => "Local files",
+        }
+    }
+
+    /// The listener's own server this service runs on, when it is one:
+    /// signed in to with its address, a user and a password.
+    pub fn server(self) -> Option<Server> {
+        match self {
+            ProviderKind::Subsonic => Some(Server::Subsonic),
+            ProviderKind::Jellyfin => Some(Server::Jellyfin),
+            _ => None,
+        }
+    }
+}
+
+/// A service on the listener's own server, each with its own section of
+/// the config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Server {
+    Subsonic,
+    Jellyfin,
+}
+
+impl Server {
+    /// The service's own name, which its section of Settings goes under.
+    pub fn name(self) -> &'static str {
+        self.labels()[0]
+    }
+
+    /// What its address and its user are called in Settings.
+    pub fn address_label(self) -> &'static str {
+        self.labels()[1]
+    }
+
+    pub fn user_label(self) -> &'static str {
+        self.labels()[2]
+    }
+
+    fn labels(self) -> [&'static str; 3] {
+        match self {
+            Server::Subsonic => ["Subsonic", "Subsonic server", "Subsonic user"],
+            Server::Jellyfin => ["Jellyfin", "Jellyfin server", "Jellyfin user"],
+        }
+    }
+}
+
+impl Config {
+    /// Where `server` is and who signs in to it.
+    pub fn server(&self, server: Server) -> &ServerConfig {
+        match server {
+            Server::Subsonic => &self.subsonic,
+            Server::Jellyfin => &self.jellyfin,
+        }
+    }
+
+    pub fn server_mut(&mut self, server: Server) -> &mut ServerConfig {
+        match server {
+            Server::Subsonic => &mut self.subsonic,
+            Server::Jellyfin => &mut self.jellyfin,
         }
     }
 }
@@ -210,15 +274,29 @@ pub struct MalojaConfig {
     pub key: String,
 }
 
-/// Where a Subsonic server is and who signs in. The password is asked for
-/// on the login screen and kept by the provider's own credential store,
-/// never written here.
+/// Where a Subsonic or Jellyfin server is and who signs in. The password
+/// is asked for on the login screen and kept by the provider's own
+/// credential store, never written here.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct SubsonicConfig {
+pub struct ServerConfig {
     /// `https://music.example.org`, scheme optional.
     pub server: String,
     pub username: String,
+}
+
+impl ServerConfig {
+    /// Whether `location`, the address a provider keeps its sign-in under,
+    /// is this server: the scheme, a trailing slash and the case aside,
+    /// since the config may be written without them.
+    pub fn is_at(&self, location: &str) -> bool {
+        let bare = |address: &str| {
+            let address = address.trim();
+            let address = address.split_once("://").map_or(address, |(_, rest)| rest);
+            address.trim_end_matches('/').to_lowercase()
+        };
+        !self.server.trim().is_empty() && bare(&self.server) == bare(location)
+    }
 }
 
 /// What may be played, and what happens when the queue ends.
