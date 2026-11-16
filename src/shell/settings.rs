@@ -40,6 +40,8 @@ pub enum Setting {
     /// Where a server of the listener's own is, and who signs in to it.
     ServerAddress(crate::config::Server),
     ServerUser(crate::config::Server),
+    /// Which of its server's libraries a Subsonic account reads.
+    Library,
     LocalFolders,
 }
 
@@ -60,7 +62,7 @@ pub enum Kind {
 }
 
 impl Setting {
-    pub const ALL: [Setting; 27] = [
+    pub const ALL: [Setting; 28] = [
         Setting::Service,
         Setting::Quality,
         Setting::Volume,
@@ -85,6 +87,7 @@ impl Setting {
         Setting::Discord,
         Setting::ServerAddress(crate::config::Server::Subsonic),
         Setting::ServerUser(crate::config::Server::Subsonic),
+        Setting::Library,
         Setting::ServerAddress(crate::config::Server::Jellyfin),
         Setting::ServerUser(crate::config::Server::Jellyfin),
         Setting::LocalFolders,
@@ -97,6 +100,7 @@ impl Setting {
             | Setting::Volume
             | Setting::Equalizer
             | Setting::Output
+            | Setting::Library
             | Setting::Theme => Kind::Cycle,
             Setting::Normalisation
             | Setting::Gapless
@@ -145,6 +149,7 @@ impl Setting {
             | Setting::MalojaKey => "Scrobbling",
             Setting::Discord => "Discord",
             Setting::ServerAddress(server) | Setting::ServerUser(server) => server.name(),
+            Setting::Library => crate::config::Server::Subsonic.name(),
             Setting::LocalFolders => "Local files",
         }
     }
@@ -193,6 +198,7 @@ impl Setting {
             Setting::Discord => "Discord application id",
             Setting::ServerAddress(server) => server.address_label(),
             Setting::ServerUser(server) => server.user_label(),
+            Setting::Library => "Subsonic library",
             Setting::LocalFolders => "Music folders",
         }
     }
@@ -226,6 +232,7 @@ impl Setting {
             Setting::Discord => "From discord.com/developers; empty turns the presence off. Enter to type it.",
             Setting::ServerAddress(_) => "Used at the next sign-in. Enter to type it.",
             Setting::ServerUser(_) => "The password is asked on the sign-in screen. Enter to type it.",
+            Setting::Library => "h or l to pick one, Enter to read only it; all is the whole server.",
             Setting::LocalFolders => "Enter adds a folder, x takes the last one out; the library is read again.",
         }
     }
@@ -472,8 +479,8 @@ pub fn cycle(config: &mut crate::config::Config, setting: Setting, forward: bool
             let next = if forward { at + 1 } else { at + n - 1 };
             config.audio.equalizer = EQUALIZERS[next % n].to_string();
         }
-        // Stepped by the app, which holds the list of outputs.
-        Setting::Output => {}
+        // Stepped by the app, which holds the lists of outputs and libraries.
+        Setting::Output | Setting::Library => {}
         Setting::MatchRate => config.audio.match_rate = !config.audio.match_rate,
         Setting::Autoplay => config.playback.autoplay = !config.playback.autoplay,
         Setting::Explicit => config.playback.explicit = !config.playback.explicit,
@@ -570,6 +577,79 @@ fn set_or_not(text: &str) -> String {
 pub struct Live<'a> {
     pub linked: &'a [(String, String, bool)],
     pub outputs: &'a [Output],
+    pub libraries: Option<&'a Libraries>,
+}
+
+/// The libraries of the server signed in to, for the Library row: those
+/// it offers, the one the session reads and the one the row has stepped
+/// to, `None` being the whole server.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Libraries {
+    pub offered: Vec<music::Library>,
+    pub in_use: Option<music::Library>,
+    pub picked: Option<music::Library>,
+}
+
+impl Libraries {
+    pub fn new(offered: Vec<music::Library>, in_use: Option<music::Library>) -> Self {
+        Self {
+            offered,
+            picked: in_use.clone(),
+            in_use,
+        }
+    }
+
+    /// Whether the row has stepped away from the library the session reads.
+    pub fn changed(&self) -> bool {
+        let id = |l: &Option<music::Library>| l.as_ref().map(|l| l.id);
+        id(&self.picked) != id(&self.in_use)
+    }
+
+    /// The whole server, then each library offered, then the one in use
+    /// when the server no longer lists it, so it can be stepped back to.
+    fn choices(&self) -> Vec<Option<&music::Library>> {
+        let gone = self
+            .in_use
+            .as_ref()
+            .filter(|l| !self.offered.iter().any(|o| o.id == l.id));
+        std::iter::once(None)
+            .chain(self.offered.iter().map(Some))
+            .chain(gone.map(Some))
+            .collect()
+    }
+}
+
+/// The next library along, or the one before, with the whole server
+/// between the last and the first.
+pub fn step_library(libraries: &mut Libraries, forward: bool) {
+    let choices = libraries.choices();
+    let picked = libraries.picked.as_ref().map(|l| l.id);
+    let at = choices
+        .iter()
+        .position(|c| c.map(|l| l.id) == picked)
+        .unwrap_or(0);
+    let n = choices.len();
+    let next = if forward { at + 1 } else { at + n - 1 };
+    libraries.picked = choices[next % n].cloned();
+}
+
+/// How the Library row reads: the library by its name, or its number when
+/// the server gives it none, and whether Enter is still to read it.
+pub fn library_label(libraries: Option<&Libraries>) -> String {
+    let Some(libraries) = libraries else {
+        return "not on this service".into();
+    };
+    let name = match &libraries.picked {
+        None => "All libraries".to_string(),
+        Some(library) => library
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("Library {}", library.id)),
+    };
+    match libraries.changed() {
+        true => format!("{name}, Enter to read it"),
+        false => name,
+    }
 }
 
 /// An output the Output row can pick: its id, as the config keeps it,
@@ -680,6 +760,7 @@ fn value_of(
         Setting::Gapless => on_off(config.audio.gapless),
         Setting::Equalizer => equalizer_value(config),
         Setting::Output => output_label(&config.audio.output, &[]),
+        Setting::Library => library_label(None),
         Setting::MatchRate => on_off(config.audio.match_rate),
         Setting::Autoplay => on_off(config.playback.autoplay),
         Setting::Explicit => on_off(config.playback.explicit),
@@ -769,7 +850,11 @@ pub fn render(
     focused: bool,
     live: Live,
 ) {
-    let Live { linked, outputs } = live;
+    let Live {
+        linked,
+        outputs,
+        libraries,
+    } = live;
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -843,6 +928,7 @@ pub fn render(
                 Span::styled(
                     match setting {
                         Setting::Output => output_label(&config.audio.output, outputs),
+                        Setting::Library => library_label(libraries),
                         _ => value_of(config, *setting, linked),
                     },
                     palette.accent_text(),
@@ -1062,6 +1148,58 @@ mod tests {
     }
 
     #[test]
+    fn a_library_reads_by_its_name_or_its_number_and_none_is_the_whole_server() {
+        assert_eq!(library_label(None), "not on this service");
+        let jazz = music::Library {
+            id: 1,
+            name: Some("Jazz".into()),
+        };
+        let mut libraries = Libraries {
+            offered: vec![jazz.clone(), music::Library { id: 2, name: None }],
+            in_use: None,
+            picked: None,
+        };
+        assert_eq!(library_label(Some(&libraries)), "All libraries");
+        step_library(&mut libraries, true);
+        assert_eq!(library_label(Some(&libraries)), "Jazz, Enter to read it");
+        step_library(&mut libraries, true);
+        assert_eq!(
+            library_label(Some(&libraries)),
+            "Library 2, Enter to read it"
+        );
+        step_library(&mut libraries, false);
+        step_library(&mut libraries, false);
+        step_library(&mut libraries, false);
+        assert_eq!(
+            library_label(Some(&libraries)),
+            "Library 2, Enter to read it",
+            "round the other way"
+        );
+    }
+
+    #[test]
+    fn a_library_the_server_no_longer_lists_stays_among_the_choices() {
+        let gone = music::Library {
+            id: 7,
+            name: Some("Old".into()),
+        };
+        let mut libraries = Libraries::new(vec![music::Library { id: 1, name: None }], Some(gone));
+        assert_eq!(library_label(Some(&libraries)), "Old");
+        step_library(&mut libraries, false);
+        assert_eq!(
+            library_label(Some(&libraries)),
+            "Library 1, Enter to read it"
+        );
+        step_library(&mut libraries, true);
+        assert_eq!(library_label(Some(&libraries)), "Old");
+        step_library(&mut libraries, true);
+        assert_eq!(
+            library_label(Some(&libraries)),
+            "All libraries, Enter to read it"
+        );
+    }
+
+    #[test]
     fn the_listenbrainz_server_row_is_listenbrainz_org_until_one_is_typed() {
         let mut config = crate::config::Config::default();
         let row = Setting::ListenbrainzServer;
@@ -1093,7 +1231,7 @@ mod tests {
                 }
             }
         }
-        let buf = crate::shell::geometry::draw(120, 90, |f, area, palette| {
+        let buf = crate::shell::geometry::draw(120, 100, |f, area, palette| {
             render(
                 f,
                 area,

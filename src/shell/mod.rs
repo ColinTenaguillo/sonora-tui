@@ -128,6 +128,19 @@ pub enum Action {
     ListOutputs,
     /// The outputs the system offers, for the Output row.
     OutputsListed(Vec<settings::Output>),
+    /// The libraries the server of the service `slug` offers, and the one
+    /// its account reads, for the Library row.
+    LibrariesListed {
+        slug: &'static str,
+        offered: Vec<music::Library>,
+        in_use: Option<music::Library>,
+    },
+    /// Keep the library the Library row picked, `None` for the whole
+    /// server: the loop has the provider that stores it.
+    UseLibrary(Option<music::Library>),
+    /// The account now reads another library: the session is opened again
+    /// from the sign-in kept, so everything is read afresh.
+    ReloadSession,
     /// Play on the output the Output row names: opened off the loop first,
     /// since a device can take seconds to answer.
     UseOutput,
@@ -1090,6 +1103,9 @@ pub struct App {
     pub settings: settings::SettingsState,
     /// The outputs the system offered when the settings page last opened.
     pub outputs: Vec<settings::Output>,
+    /// The server's libraries and the one picked, when the service has
+    /// any.
+    pub libraries: Option<settings::Libraries>,
     /// Where the settings are written. `None` in tests, which must not
     /// touch the real file — one that did left this machine on LOW.
     pub config_path: Option<std::path::PathBuf>,
@@ -1529,6 +1545,11 @@ impl App {
                 self.config.audio.output =
                     settings::step_output(&self.outputs, &self.config.audio.output, forward);
             }
+            settings::Setting::Library => {
+                if let Some(libraries) = &mut self.libraries {
+                    settings::step_library(libraries, forward);
+                }
+            }
             _ => settings::cycle(&mut self.config, which, forward),
         }
     }
@@ -1542,7 +1563,11 @@ impl App {
     fn change_setting(&mut self, forward: bool) -> Option<Action> {
         let which = self.settings.current();
         self.step_setting(which, forward);
-        self.save_config();
+        // The library is the provider's to keep, on Enter: the config
+        // holds nothing of it.
+        if which != settings::Setting::Library {
+            self.save_config();
+        }
         // The volume is heard now rather than on the next track: a level
         // you cannot hear yourself setting is one you set by guessing.
         match which {
@@ -1571,6 +1596,7 @@ impl App {
             // here and opened on Enter: stepping through the list must not
             // open, and take, every device on the way.
             settings::Setting::Output
+            | settings::Setting::Library
             | settings::Setting::Quality
             | settings::Setting::Autoplay
             | settings::Setting::Explicit
@@ -2654,6 +2680,7 @@ impl App {
             | Action::SwitchProvider
             | Action::NextService
             | Action::LoginPrompt(..)
+            | Action::ReloadSession
             | Action::ScrobblersLinked(..)) => self.on_session_action(a),
             a @ (Action::CdmFound(..)
             | Action::AnswerCdm(..)
@@ -2724,14 +2751,16 @@ impl App {
             | Action::FavouriteChanged { .. }) => self.on_library_action(a),
             a @ (Action::SettingTyped(..)
             | Action::SettingChanged(..)
-            | Action::OutputsListed(..)
-            | Action::OutputOpened(..)
             | Action::CycleSleep
             | Action::ToggleLyrics) => self.on_settings_action(a),
+            a @ (Action::OutputsListed(..)
+            | Action::LibrariesListed { .. }
+            | Action::OutputOpened(..)) => self.on_choices_action(a),
             // The loop does these: it has the client, the engine and the
             // devices, and owns the channel to the audio thread. Nothing here
             // changes until it answers -- a sign-in's prompt stays up, emptied.
             Action::Connect(_)
+            | Action::UseLibrary(_)
             | Action::LookForCdm
             | Action::DownloadCdm
             | Action::LoadHome
@@ -2835,7 +2864,7 @@ impl App {
             // a service that does not need it.
             Action::SessionReady => self.on_session_ready(),
             Action::ScrobblersLinked(linked, refused) => self.on_scrobblers_linked(linked, refused),
-            Action::SwitchProvider => {
+            Action::SwitchProvider | Action::ReloadSession => {
                 self.leave_service();
                 Some(Action::BeginLogin)
             }
@@ -3201,7 +3230,7 @@ impl App {
         }
     }
 
-    /// Settings, the output device, the sleep timer and the lyrics pane.
+    /// Settings, the sleep timer and the lyrics pane.
     fn on_settings_action(&mut self, action: Action) -> Option<Action> {
         match action {
             Action::CycleSleep => {
@@ -3224,8 +3253,26 @@ impl App {
             }
             // What the shell itself reads live; the loop does the rest.
             Action::SettingChanged(setting) => self.on_setting_changed(setting),
+            other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// What the Output and Library rows choose from, and the output chosen.
+    fn on_choices_action(&mut self, action: Action) -> Option<Action> {
+        match action {
             Action::OutputsListed(outputs) => {
                 self.outputs = outputs;
+                None
+            }
+            // An answer for a service left since is dropped.
+            Action::LibrariesListed {
+                slug,
+                offered,
+                in_use,
+            } => {
+                if self.provider.as_ref().is_some_and(|p| p.slug() == slug) {
+                    self.libraries = Some(settings::Libraries::new(offered, in_use));
+                }
                 None
             }
             Action::OutputOpened(Ok(label)) => {
@@ -4124,11 +4171,25 @@ impl App {
         Some(fetch)
     }
 
+    /// Enter on the Library row reads the library picked, unless it is the
+    /// one read already: opening the session again would stop the music
+    /// and empty the queue for nothing.
+    fn activate_library(&mut self) -> Option<Action> {
+        match &self.libraries {
+            None => {
+                self.say("this service has no libraries to pick from");
+                None
+            }
+            Some(l) => l.changed().then(|| Action::UseLibrary(l.picked.clone())),
+        }
+    }
+
     fn activate_setting(&mut self) -> Option<Action> {
         let which = self.settings.current();
         match (which, which.kind()) {
             (settings::Setting::Service, _) => Some(Action::SwitchProvider),
             (settings::Setting::Output, _) => Some(Action::UseOutput),
+            (settings::Setting::Library, _) => self.activate_library(),
             (_, settings::Kind::Text { .. } | settings::Kind::Folders) => {
                 self.setting_edit = Some(settings::Edit {
                     setting: which,

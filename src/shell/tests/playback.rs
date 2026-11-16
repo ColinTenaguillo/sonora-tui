@@ -1518,6 +1518,73 @@ fn the_output_row_picks_with_h_and_l_and_switches_on_enter() {
     ));
 }
 
+fn libraries() -> Vec<music::Library> {
+    vec![
+        music::Library {
+            id: 1,
+            name: Some("Jazz".into()),
+        },
+        music::Library { id: 2, name: None },
+    ]
+}
+
+#[test]
+fn the_library_row_steps_through_the_servers_libraries_and_reads_the_one_picked_on_enter() {
+    let mut app = on_setting(settings::Setting::Library);
+    // Enter as the loop carries it out.
+    let enter = |app: &mut App| key(app, KeyCode::Enter).and_then(|a| app.update(a));
+    app.provider = Some(std::sync::Arc::new(HeldSignIn { at: "https://nd" }));
+    assert!(drawn(&mut app).contains("not on this service"));
+    assert!(enter(&mut app).is_none());
+    assert!(
+        app.status
+            .as_deref()
+            .unwrap_or_default()
+            .contains("no libraries"),
+        "Enter says why it does nothing: {:?}",
+        app.status
+    );
+
+    // A list answered for a service since left is not this one's.
+    app.update(Action::LibrariesListed {
+        slug: "tidal",
+        offered: libraries(),
+        in_use: None,
+    });
+    assert!(app.libraries.is_none());
+
+    app.update(Action::LibrariesListed {
+        slug: "jellyfin",
+        offered: libraries(),
+        in_use: Some(libraries()[0].clone()),
+    });
+    assert!(drawn(&mut app).contains("Jazz"), "the library in use");
+    assert!(
+        enter(&mut app).is_none(),
+        "the library already read is not opened again"
+    );
+
+    press(&mut app, KeyCode::Char('l'));
+    assert!(
+        drawn(&mut app).contains("Library 2, Enter to read it"),
+        "{}",
+        drawn(&mut app)
+    );
+    press(&mut app, KeyCode::Char('l'));
+    assert!(drawn(&mut app).contains("All libraries, Enter to read it"));
+    press(&mut app, KeyCode::Char('h'));
+    assert!(matches!(
+        enter(&mut app),
+        Some(Action::UseLibrary(Some(library))) if library.id == 2
+    ));
+    // Kept, the choice is read by a session opened again.
+    assert!(matches!(
+        app.update(Action::ReloadSession),
+        Some(Action::BeginLogin)
+    ));
+    assert!(app.session.is_none());
+}
+
 #[test]
 fn an_output_that_opened_restarts_the_engine_on_it_and_one_that_did_not_says_why() {
     let mut app = on_setting(settings::Setting::Output);

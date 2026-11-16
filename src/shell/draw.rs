@@ -248,6 +248,7 @@ fn draw_section(
                 settings::Live {
                     linked: &linked,
                     outputs: &app.outputs,
+                    libraries: app.libraries.as_ref(),
                 },
             );
         }

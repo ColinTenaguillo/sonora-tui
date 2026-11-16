@@ -60,6 +60,52 @@ fn assert_clear_of_the_bar(app: &mut App, height: u16, what: &str) {
     }
 }
 
+/// A server provider that holds a sign-in to `at`, as sonora keeps one.
+pub(super) struct HeldSignIn {
+    pub(super) at: &'static str,
+}
+
+#[async_trait::async_trait]
+impl music::MusicProvider for HeldSignIn {
+    fn name(&self) -> &'static str {
+        "Jellyfin"
+    }
+    fn slug(&self) -> &'static str {
+        "jellyfin"
+    }
+    fn sign_in_options(&self) -> Vec<music::SignIn> {
+        vec![music::SignIn::Credentials {
+            server: String::new(),
+            username: String::new(),
+            password: String::new(),
+        }]
+    }
+    fn stored(&self) -> bool {
+        true
+    }
+    fn location(&self) -> Option<String> {
+        Some(self.at.into())
+    }
+    async fn restore(&self) -> anyhow::Result<Option<music::ProviderSession>> {
+        Ok(None)
+    }
+    async fn sign_in(
+        &self,
+        _: music::SignIn,
+        _: music::PromptSink,
+        _: music::InputSource,
+    ) -> anyhow::Result<music::ProviderSession> {
+        anyhow::bail!("not in a test")
+    }
+    fn sign_out(&self) {}
+    fn choose_library(&self, library: Option<music::Library>) -> anyhow::Result<()> {
+        match library {
+            Some(l) if l.id < 0 => anyhow::bail!("no such library"),
+            _ => Ok(()),
+        }
+    }
+}
+
 fn signed_in(section: sidebar::Section) -> App {
     let mut app = App {
         session: Some(sample_session()),
