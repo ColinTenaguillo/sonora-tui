@@ -1063,6 +1063,157 @@ fn a_late_reply_marks_its_own_track_not_the_selected_one() {
     );
 }
 
+/// A playlist of the account's own, open, with tracks Alpha, Bravo and
+/// Charlie, each with its title for an id.
+fn with_own_playlist_open() -> App {
+    let mut app = signed_in(sidebar::Section::Tracks);
+    app.tracks = some_tracks(&["Alpha", "Bravo", "Charlie"])
+        .into_iter()
+        .map(|mut t| {
+            t.id = crate::domain::TrackId(t.title.clone());
+            t
+        })
+        .collect();
+    app.playlists = vec![
+        owned_playlist("mine", "Mine", true),
+        owned_playlist("theirs", "Theirs", false),
+    ];
+    with_open_playlist(&mut app, "mine");
+    app
+}
+
+/// The tracks' order, by their initials.
+fn order(app: &App) -> String {
+    app.tracks
+        .iter()
+        .filter_map(|t| t.title.chars().next())
+        .collect()
+}
+
+/// The ids of the tracks whose initials are `of`, in that order.
+fn ids(of: &str) -> Vec<String> {
+    of.chars()
+        .map(|c| match c {
+            'A' => "Alpha",
+            'B' => "Bravo",
+            _ => "Charlie",
+        })
+        .map(String::from)
+        .collect()
+}
+
+#[test]
+fn angle_brackets_move_a_track_in_a_playlist_of_yours_and_the_service_hears_one_order_at_a_time() {
+    let mut app = with_own_playlist_open();
+    with_open_playlist(&mut app, "theirs");
+    assert!(key(&mut app, KeyCode::Char('>')).is_none());
+    assert_eq!(order(&app), "ABC", "someone else's playlist stays as it is");
+
+    with_open_playlist(&mut app, "mine");
+    assert!(matches!(
+        key(&mut app, KeyCode::Char('>')),
+        Some(Action::ReorderPlaylist { uuid, seen, wanted })
+            if uuid == "mine" && seen == ids("ABC") && wanted == ids("BAC")
+    ));
+    assert_eq!(order(&app), "BAC");
+    assert_eq!(
+        app.tracklist.selected, 1,
+        "the selection goes with the track"
+    );
+    let page = drawn(&mut app);
+    assert!(
+        page.find("Bravo") < page.find("Alpha"),
+        "drawn in the new order:\n{page}"
+    );
+
+    // Moved again before the service answered: held, then sent from the
+    // order it confirmed.
+    assert!(key(&mut app, KeyCode::Char('>')).is_none());
+    assert_eq!(order(&app), "BCA");
+    assert!(matches!(
+        app.update(Action::PlaylistReordered {
+            uuid: "mine".into(),
+            wanted: ids("BAC"),
+            refused: None,
+        }),
+        Some(Action::ReorderPlaylist { seen, wanted, .. })
+            if seen == ids("BAC") && wanted == ids("BCA")
+    ));
+
+    // Refused: the playlist is read again, for the order the service keeps.
+    let asked = open_request(&app);
+    app.update(Action::PlaylistReordered {
+        uuid: "mine".into(),
+        wanted: ids("BCA"),
+        refused: Some("the playlist changed elsewhere".into()),
+    });
+    assert_ne!(open_request(&app), asked, "the playlist is fetched again");
+    let said = app.status.clone().unwrap_or_default();
+    assert!(said.contains("changed elsewhere"), "{said}");
+    // What it reads is what the next move starts from.
+    app.update(Action::CollectionLoaded {
+        request: open_request(&app),
+        tracks: app.tracks.iter().rev().cloned().collect(),
+    });
+    assert_eq!(order(&app), "ACB");
+    assert!(matches!(
+        key(&mut app, KeyCode::Char('>')),
+        Some(Action::ReorderPlaylist { seen, wanted, .. })
+            if seen == ids("ACB") && wanted == ids("CAB")
+    ));
+
+    // At the top there is nowhere further up to go.
+    app.tracklist.selected = 0;
+    assert!(key(&mut app, KeyCode::Char('<')).is_none());
+}
+
+#[test]
+fn a_move_held_for_the_last_answer_is_sent_after_the_playlist_is_left() {
+    let mut app = with_own_playlist_open();
+    key(&mut app, KeyCode::Char('>'));
+    key(&mut app, KeyCode::Char('>'));
+    with_open_playlist(&mut app, "theirs");
+    assert!(matches!(
+        app.update(Action::PlaylistReordered {
+            uuid: "mine".into(),
+            wanted: ids("BAC"),
+            refused: None,
+        }),
+        Some(Action::ReorderPlaylist { uuid, seen, wanted })
+            if uuid == "mine" && seen == ids("BAC") && wanted == ids("BCA")
+    ));
+}
+
+#[test]
+fn the_keys_leave_a_playlist_alone_under_a_search() {
+    let mut app = with_own_playlist_open();
+    app.search = Some(SearchState::default());
+    assert!(key(&mut app, KeyCode::Char('>')).is_none());
+    assert_eq!(order(&app), "ABC");
+}
+
+#[test]
+fn a_sorted_or_filtered_playlist_is_not_reordered() {
+    let mut app = with_own_playlist_open();
+    app.tracklist.sort = Some(crate::shell::tracklist::Column::Title);
+    assert!(key(&mut app, KeyCode::Char('>')).is_none());
+    assert_eq!(order(&app), "ABC");
+    let said = app.status.clone().unwrap_or_default();
+    assert!(said.contains("own order"), "{said}");
+}
+
+#[test]
+fn a_service_that_keeps_its_own_order_says_so() {
+    let mut app = with_own_playlist_open();
+    app.session = Some(crate::catalogue::Session::sample_in_fixed_order());
+    assert!(key(&mut app, KeyCode::Char('<')).is_none());
+    app.tracklist.selected = 1;
+    assert!(key(&mut app, KeyCode::Char('<')).is_none());
+    assert_eq!(order(&app), "ABC");
+    let said = app.status.clone().unwrap_or_default();
+    assert!(said.contains("its own order"), "{said}");
+}
+
 #[test]
 fn the_playlist_keys_open_their_prompts_and_x_takes_a_track_out() {
     let mut app = signed_in(sidebar::Section::Tracks);

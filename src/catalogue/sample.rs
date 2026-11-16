@@ -31,7 +31,12 @@ impl Sample {
             playback: Arc::new(Sample),
             shape: Shape::Saved,
             authenticated: true,
-            capabilities: Capabilities::ALL,
+            // Everything offered, nothing done; the order of a playlist
+            // too, which `ALL` leaves to each provider to turn on.
+            capabilities: Capabilities {
+                playlist_order: true,
+                ..Capabilities::ALL
+            },
         }
     }
 }

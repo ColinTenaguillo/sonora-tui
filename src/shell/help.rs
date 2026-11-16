@@ -118,6 +118,10 @@ const BINDINGS: &[Binding] = &[
             "in the queue or a playlist of yours, take the track out; in Settings, the last folder",
     },
     Binding {
+        keys: "< >",
+        what: "in a playlist of yours, in its own order: move the track up / down",
+    },
+    Binding {
         keys: "i",
         what: "in the queue: autoplay on or off",
     },
