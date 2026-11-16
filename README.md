@@ -289,6 +289,7 @@ Press `?` in the app for the full list.
 | `m` / `D` | Rename, or delete after a `y`, the playlist open or under the cursor — yours only |
 | `V` | Make the playlist open or under the cursor private, or public again — yours only, where the service allows it (Deezer does not); a private one says so beside its maker |
 | `x` | In a playlist of yours: take the highlighted track out |
+| `<` `>` | In a playlist of yours, in its own order: move the highlighted track up / down (Spotify, Subsonic, local files) |
 | `n` / `p` | Next / previous in the queue |
 | `.` / `,` | Ten seconds forward / back in the track |
 | `e` / `E` | Queue the selected track next, or after the rest |

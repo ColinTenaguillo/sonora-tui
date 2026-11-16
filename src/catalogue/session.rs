@@ -27,6 +27,8 @@ pub struct Session {
     /// Whether the library is what the user starred, or everything the
     /// service has -- a folder of files -- with the stars drawn on top.
     shape: music::Shape,
+    /// What the service lets the user do beyond reading.
+    capabilities: music::Capabilities,
 }
 
 /// The shell's state derives `Debug`; a session prints as its service.
@@ -45,8 +47,15 @@ impl Session {
             api: session.api,
             playback: session.playback,
             shape: session.shape,
+            capabilities: session.capabilities,
             provider,
         }
+    }
+
+    /// Whether the service keeps a playlist of the user's own in an order
+    /// they choose.
+    pub fn can_reorder(&self) -> bool {
+        self.capabilities.playlist_order
     }
 
     /// Whether the library is the whole catalogue rather than the stars.
@@ -60,6 +69,15 @@ impl Session {
     pub fn sample() -> Arc<Self> {
         use super::sample::Sample;
         Arc::new(Self::open(Arc::new(Sample), Sample::session()))
+    }
+
+    /// The same, on a service that keeps playlists in its own order.
+    #[doc(hidden)]
+    pub fn sample_in_fixed_order() -> Arc<Self> {
+        use super::sample::Sample;
+        let mut session = Sample::session();
+        session.capabilities.playlist_order = false;
+        Arc::new(Self::open(Arc::new(Sample), session))
     }
 
     /// What the service is called, for the log and the status line.
@@ -573,6 +591,20 @@ impl Session {
             .map_err(error)
     }
 
+    /// Puts the playlist in the order `wanted`, from the order `seen` the
+    /// service last had; it refuses when its order is no longer that.
+    pub async fn reorder_playlist(
+        &self,
+        uuid: &str,
+        seen: &[String],
+        wanted: &[String],
+    ) -> Result<()> {
+        self.api
+            .reorder_playlist(uuid, seen, wanted)
+            .await
+            .map_err(error)
+    }
+
     pub async fn playlists(&self) -> Result<Vec<Playlist>> {
         let lists = self.api.playlists().await.map_err(error)?;
         Ok(lists.into_iter().map(playlist).collect())
@@ -819,6 +851,7 @@ mod tests {
             extras: std::sync::Arc::new(extras),
             playback: signed_in.playback,
             shape: signed_in.shape,
+            capabilities: signed_in.capabilities,
         }
     }
 

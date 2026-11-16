@@ -586,6 +586,9 @@ fn side_effects(app: &mut App, action: &Action, out: &Outlets) {
         }
         Action::ListOutputs => list_outputs(action_tx),
         Action::UseLibrary(library) => use_library(app, library.clone(), action_tx),
+        Action::ReorderPlaylist { uuid, seen, wanted } => {
+            reorder_playlist(app, uuid, seen, wanted, action_tx);
+        }
         Action::UseOutput => use_output(app, action_tx),
         Action::Edit(edit) => edit_playlist(app, edit, action_tx),
         Action::RemoveFromPlaylist { uuid, track } => {
@@ -968,6 +971,31 @@ fn remove_from_playlist(
                 .await
                 .map(|()| ("taken out of the playlist".to_string(), uuid, false, -1));
             finish_edit(&client, &tx, done).await;
+        });
+    }
+}
+
+fn reorder_playlist(
+    app: &App,
+    uuid: &str,
+    seen: &[String],
+    wanted: &[String],
+    action_tx: &tokio::sync::mpsc::UnboundedSender<Action>,
+) {
+    if let Some(session) = &app.session {
+        let (client, tx) = (std::sync::Arc::clone(session), action_tx.clone());
+        let (uuid, seen, wanted) = (uuid.to_owned(), seen.to_vec(), wanted.to_vec());
+        tokio::spawn(async move {
+            let refused = client
+                .reorder_playlist(&uuid, &seen, &wanted)
+                .await
+                .err()
+                .map(|e| e.to_string());
+            let _ = tx.send(Action::PlaylistReordered {
+                uuid,
+                wanted,
+                refused,
+            });
         });
     }
 }

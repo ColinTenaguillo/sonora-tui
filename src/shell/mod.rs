@@ -128,6 +128,19 @@ pub enum Action {
     ListOutputs,
     /// The outputs the system offers, for the Output row.
     OutputsListed(Vec<settings::Output>),
+    /// Put the playlist in the order `wanted`, from the order `seen` the
+    /// service last confirmed: the loop sends it.
+    ReorderPlaylist {
+        uuid: String,
+        seen: Vec<String>,
+        wanted: Vec<String>,
+    },
+    /// The service took the order `wanted`, or refused it and said why.
+    PlaylistReordered {
+        uuid: String,
+        wanted: Vec<String>,
+        refused: Option<String>,
+    },
     /// The libraries the server of the service `slug` offers, and the one
     /// its account reads, for the Library row.
     LibrariesListed {
@@ -896,12 +909,27 @@ pub enum Collection {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RequestId(u64);
 
+/// A playlist of the user's own being put in a new order, by its track
+/// ids: the order the service last confirmed, the one last made on screen,
+/// and whether an order is on its way to the service.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Reorder {
+    pub confirmed: Vec<String>,
+    pub latest: Vec<String>,
+    pub sending: bool,
+}
+
+fn track_ids(tracks: &[crate::domain::Track]) -> Vec<String> {
+    tracks.iter().map(|t| t.id.0.clone()).collect()
+}
+
 /// A playlist or album the user opened, shown in place of the section the
 /// sidebar points at.
 ///
 /// Its title and byline are carried here rather than looked up again: the
 /// card the user pressed enter on already had them, and a second lookup
 /// could disagree with what they just saw.
+
 #[derive(Debug, Clone)]
 pub struct OpenCollection {
     pub title: String,
@@ -1106,6 +1134,8 @@ pub struct App {
     /// The server's libraries and the one picked, when the service has
     /// any.
     pub libraries: Option<settings::Libraries>,
+    /// The playlists being put in a new order, by uuid, a move at a time.
+    pub reorders: std::collections::HashMap<String, Reorder>,
     /// Where the settings are written. `None` in tests, which must not
     /// touch the real file — one that did left this machine on LOW.
     pub config_path: Option<std::path::PathBuf>,
@@ -2748,6 +2778,7 @@ impl App {
             | Action::Edit(..)
             | Action::RemoveFromPlaylist { .. }
             | Action::PlaylistEdited { .. }
+            | Action::PlaylistReordered { .. }
             | Action::FavouriteChanged { .. }) => self.on_library_action(a),
             a @ (Action::SettingTyped(..)
             | Action::SettingChanged(..)
@@ -2761,6 +2792,7 @@ impl App {
             // changes until it answers -- a sign-in's prompt stays up, emptied.
             Action::Connect(_)
             | Action::UseLibrary(_)
+            | Action::ReorderPlaylist { .. }
             | Action::LookForCdm
             | Action::DownloadCdm
             | Action::LoadHome
@@ -3226,6 +3258,11 @@ impl App {
                 count_delta,
             } => self.on_playlist_edited(message, uuid, deleted, count_delta),
             Action::FavouriteChanged { id, favourite } => self.on_favourite_changed(id, favourite),
+            Action::PlaylistReordered {
+                uuid,
+                wanted,
+                refused,
+            } => self.on_playlist_reordered(&uuid, wanted, refused),
             other => unreachable!("{other:?} is routed elsewhere by update"),
         }
     }
@@ -3478,6 +3515,11 @@ impl App {
                 }
                 let opened = self.open.as_ref().and_then(|o| o.target.clone());
                 if let Some(Collection::Playlist(uuid)) = opened {
+                    // The service's order now, which a move starts from;
+                    // one on its way still has its answer to come.
+                    if !self.reorders.get(&uuid).is_some_and(|r| r.sending) {
+                        self.reorders.remove(&uuid);
+                    }
                     self.note_playlist_length(&uuid, self.tracks.len(), total);
                 }
             }
@@ -5065,6 +5107,7 @@ impl App {
             KeyCode::Char('b' | 'O' | 'I' | 'x' | 'F' | 't' | '.' | ',') | KeyCode::Tab => {
                 self.on_view_key(code)
             }
+            KeyCode::Char('<') | KeyCode::Char('>') => self.move_track(code == KeyCode::Char('>')),
             KeyCode::Char('q') => Some(Action::Quit),
             KeyCode::Enter if self.session.is_none() => Some(Action::BeginLogin),
             _ if self.session.is_some() => self.on_signed_in_key(code),
@@ -5233,6 +5276,98 @@ impl App {
             } else {
                 list.next_sort(&columns);
             }
+        }
+        None
+    }
+
+    /// `<` and `>` move the highlighted track up or down a playlist of the
+    /// user's own, on a service that keeps the order. The list moves at
+    /// once; the service is told the new order when it has answered the
+    /// last, so moves in a row are not refused for crossing each other.
+    fn move_track(&mut self, later: bool) -> Option<Action> {
+        // What is drawn: a search over the playlist leaves it open
+        // underneath, out of sight.
+        if self.showing() != Showing::Tracks {
+            return None;
+        }
+        let uuid = self.open_owned_playlist()?;
+        if let Some(why) = self.cannot_reorder() {
+            self.say(why);
+            return None;
+        }
+        let from = self.tracklist.selected;
+        let to = if later {
+            from + 1
+        } else {
+            from.checked_sub(1)?
+        };
+        if to >= self.tracks.len() {
+            return None;
+        }
+        let tracks = &mut self.tracks;
+        let reorder = self
+            .reorders
+            .entry(uuid.clone())
+            .or_insert_with(|| Reorder {
+                confirmed: track_ids(tracks),
+                ..Reorder::default()
+            });
+        tracks.swap(from, to);
+        reorder.latest = track_ids(tracks);
+        self.tracklist
+            .step(later, self.tracks.len(), self.list_visible());
+        self.send_order(&uuid)
+    }
+
+    /// Why the open playlist cannot be put in a new order now.
+    fn cannot_reorder(&self) -> Option<&'static str> {
+        if !self.session.as_ref().is_some_and(|s| s.can_reorder()) {
+            return Some("this service keeps playlists in its own order");
+        }
+        let sorted = self.tracklist.sort.is_some() || !self.tracklist.filter.is_empty();
+        sorted.then_some("a track moves in the playlist's own order: clear the sort and the filter")
+    }
+
+    /// The order last made on `uuid`, when the service has not got it and
+    /// nothing is on its way to it. Once the service has the order, the
+    /// playlist is forgotten here, so the next move starts from the tracks
+    /// shown then.
+    fn send_order(&mut self, uuid: &str) -> Option<Action> {
+        let reorder = self.reorders.get_mut(uuid)?;
+        if reorder.sending {
+            return None;
+        }
+        if reorder.latest == reorder.confirmed {
+            self.reorders.remove(uuid);
+            return None;
+        }
+        reorder.sending = true;
+        Some(Action::ReorderPlaylist {
+            uuid: uuid.to_owned(),
+            seen: reorder.confirmed.clone(),
+            wanted: reorder.latest.clone(),
+        })
+    }
+
+    /// The service's answer. Taken, a move made meanwhile goes next, the
+    /// playlist open or not. Refused, the playlist is read again: the
+    /// service's own order is the one to move from.
+    fn on_playlist_reordered(
+        &mut self,
+        uuid: &str,
+        wanted: Vec<String>,
+        refused: Option<String>,
+    ) -> Option<Action> {
+        let Some(why) = refused else {
+            let reorder = self.reorders.get_mut(uuid)?;
+            reorder.sending = false;
+            reorder.confirmed = wanted;
+            return self.send_order(uuid);
+        };
+        self.reorders.remove(uuid);
+        self.say(format!("the playlist was not reordered: {why}"));
+        if self.open_owned_playlist().as_deref() == Some(uuid) {
+            self.refresh_open_playlist(uuid);
         }
         None
     }
