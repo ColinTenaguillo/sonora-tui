@@ -379,46 +379,6 @@ fn a_jellyfin_server_is_asked_for_like_a_subsonic_one_and_kept_apart_from_it() {
     );
 }
 
-/// A server provider that holds a sign-in to `at`, as sonora keeps one.
-struct HeldSignIn {
-    at: &'static str,
-}
-
-#[async_trait::async_trait]
-impl music::MusicProvider for HeldSignIn {
-    fn name(&self) -> &'static str {
-        "Jellyfin"
-    }
-    fn slug(&self) -> &'static str {
-        "jellyfin"
-    }
-    fn sign_in_options(&self) -> Vec<music::SignIn> {
-        vec![music::SignIn::Credentials {
-            server: String::new(),
-            username: String::new(),
-            password: String::new(),
-        }]
-    }
-    fn stored(&self) -> bool {
-        true
-    }
-    fn location(&self) -> Option<String> {
-        Some(self.at.into())
-    }
-    async fn restore(&self) -> anyhow::Result<Option<music::ProviderSession>> {
-        Ok(None)
-    }
-    async fn sign_in(
-        &self,
-        _: music::SignIn,
-        _: music::PromptSink,
-        _: music::InputSource,
-    ) -> anyhow::Result<music::ProviderSession> {
-        anyhow::bail!("not in a test")
-    }
-    fn sign_out(&self) {}
-}
-
 fn jellyfin_holding(at: &'static str, configured: &str) -> App {
     let mut app = App::default();
     app.config.provider.kind = crate::config::ProviderKind::Jellyfin;

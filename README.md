@@ -181,6 +181,11 @@ server   = "https://music.example.org"
 username = "you"
 ```
 
+A server that keeps several libraries apart (Navidrome's, for one) can be
+read one library at a time: the Subsonic library row in Settings steps
+through them with `h`/`l`, and Enter opens the session again on the one
+picked.
+
 ### Jellyfin
 
 The music libraries of a Jellyfin server, asked for and kept the same way,

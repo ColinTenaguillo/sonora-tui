@@ -543,7 +543,7 @@ fn side_effects(app: &mut App, action: &Action, out: &Outlets) {
         Action::Connect(secret) if app.session.is_none() => connect(app, secret, action_tx),
         // The old engine falls silent; the new one attaches at
         // `SessionReady`.
-        Action::SwitchProvider => {
+        Action::SwitchProvider | Action::ReloadSession => {
             let _ = cmd_tx.send(crate::playback::Cmd::Stop);
         }
         // The way in the service offers, apart from going without an
@@ -585,6 +585,7 @@ fn side_effects(app: &mut App, action: &Action, out: &Outlets) {
             restart_engine(app, cmd_tx);
         }
         Action::ListOutputs => list_outputs(action_tx),
+        Action::UseLibrary(library) => use_library(app, library.clone(), action_tx),
         Action::UseOutput => use_output(app, action_tx),
         Action::Edit(edit) => edit_playlist(app, edit, action_tx),
         Action::RemoveFromPlaylist { uuid, track } => {
@@ -743,6 +744,48 @@ fn session_ready(app: &App, out: &Outlets) {
             options: app.playback_options(),
         });
         load_collection(std::sync::Arc::clone(session), out.action_tx.clone());
+    }
+    list_libraries(app, &out.action_tx);
+}
+
+/// The server's libraries, for the Library row, when the account can be
+/// limited to one.
+fn list_libraries(app: &App, action_tx: &tokio::sync::mpsc::UnboundedSender<Action>) {
+    let Some(provider) = app.provider.clone().filter(|p| p.has_libraries()) else {
+        return;
+    };
+    let tx = action_tx.clone();
+    tokio::spawn(async move {
+        // The one in use is read from what is kept, so the row names it
+        // even when the server does not answer with the list.
+        let in_use = provider.library();
+        let offered = provider.libraries().await.unwrap_or_else(|e| {
+            tracing::warn!("the server's libraries could not be read: {e:#}");
+            Vec::new()
+        });
+        let slug = provider.slug();
+        let _ = tx.send(Action::LibrariesListed {
+            slug,
+            offered,
+            in_use,
+        });
+    });
+}
+
+/// Keeps the library picked; the session then opens again around it.
+fn use_library(
+    app: &mut App,
+    library: Option<music::Library>,
+    action_tx: &tokio::sync::mpsc::UnboundedSender<Action>,
+) {
+    let Some(provider) = &app.provider else {
+        return;
+    };
+    match provider.choose_library(library) {
+        Ok(()) => {
+            let _ = action_tx.send(Action::ReloadSession);
+        }
+        Err(e) => app.say(format!("the library could not be kept: {e:#}")),
     }
 }
 
@@ -1466,6 +1509,26 @@ mod tests {
     use super::{after_window, open_sign_in_window, repaint, unsettle};
     use crate::shell::signin_window::Outcome;
     use crate::shell::{Action, App};
+
+    #[test]
+    fn a_library_kept_opens_the_session_again_and_one_refused_says_why() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App {
+            provider: Some(std::sync::Arc::new(crate::shell::tests::HeldSignIn {
+                at: "x",
+            })),
+            ..App::default()
+        };
+        let jazz = music::Library { id: 1, name: None };
+        super::use_library(&mut app, Some(jazz), &tx);
+        assert!(matches!(rx.try_recv(), Ok(Action::ReloadSession)));
+
+        let refused = music::Library { id: -1, name: None };
+        super::use_library(&mut app, Some(refused), &tx);
+        assert!(rx.try_recv().is_err(), "nothing is opened again");
+        let said = app.status.clone().unwrap_or_default();
+        assert!(said.contains("no such library"), "{said}");
+    }
 
     #[test]
     fn a_sign_in_window_answers_with_its_cookies_and_anything_else_brings_the_box_back() {
