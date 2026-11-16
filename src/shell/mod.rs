@@ -2700,6 +2700,7 @@ impl App {
             | Action::BeginGuest
             | Action::Answer(..)
             | Action::OpenSignInWindow
+            | Action::Connect(_)
             | Action::CancelLogin
             | Action::Typed(..)
             | Action::AskPassword
@@ -2789,9 +2790,8 @@ impl App {
             | Action::OutputOpened(..)) => self.on_choices_action(a),
             // The loop does these: it has the client, the engine and the
             // devices, and owns the channel to the audio thread. Nothing here
-            // changes until it answers -- a sign-in's prompt stays up, emptied.
-            Action::Connect(_)
-            | Action::UseLibrary(_)
+            // changes until it answers.
+            Action::UseLibrary(_)
             | Action::ReorderPlaylist { .. }
             | Action::LookForCdm
             | Action::DownloadCdm
@@ -2835,7 +2835,10 @@ impl App {
         match action {
             Action::BeginLogin => self.begin_login(),
             // The prompt is taken down while the service or the loop works.
-            a @ (Action::BeginGuest | Action::Answer(_) | Action::OpenSignInWindow) => {
+            a @ (Action::BeginGuest
+            | Action::Answer(_)
+            | Action::OpenSignInWindow
+            | Action::Connect(_)) => {
                 self.login = login::LoginState::Busy(Self::waiting_on(&a).into());
                 None
             }
@@ -3385,14 +3388,9 @@ impl App {
                 }
                 self.config.local.folders.push(typed);
             }
-            login::Field::Server | login::Field::Username => {
-                let server = self.config.provider.kind.server()?;
-                let kept = self.config.server_mut(server);
-                match field {
-                    login::Field::Server => kept.server = typed,
-                    _ => kept.username = typed,
-                }
-            }
+            // Kept under the server it was asked for.
+            login::Field::Server(server) => self.config.server_mut(server).server = typed,
+            login::Field::Username(server) => self.config.server_mut(server).username = typed,
         }
         self.save_config();
         // On to what the service wants next: the user after the
@@ -4464,13 +4462,13 @@ impl App {
         let kept = self.config.server(server);
         if kept.server.trim().is_empty() {
             return login::LoginState::Text {
-                field: login::Field::Server,
+                field: login::Field::Server(server),
                 typed: String::new(),
             };
         }
         if kept.username.trim().is_empty() {
             return login::LoginState::Text {
-                field: login::Field::Username,
+                field: login::Field::Username(server),
                 typed: String::new(),
             };
         }
@@ -5038,6 +5036,11 @@ impl App {
             }
             KeyCode::Enter if !typed.trim().is_empty() => {
                 return Some(Action::Typed(field, typed.trim().to_owned()));
+            }
+            // No user to save: the password-less Credentials that follow
+            // are what asks sonora for Quick Connect.
+            KeyCode::Enter if field.quick_connect() => {
+                return Some(Action::Connect(login::Secret::default()));
             }
             KeyCode::Tab => return Some(Action::NextService),
             KeyCode::Esc => return Some(Action::CancelLogin),

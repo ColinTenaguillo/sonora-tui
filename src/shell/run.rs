@@ -1558,6 +1558,25 @@ mod tests {
         assert!(said.contains("no such library"), "{said}");
     }
 
+    #[tokio::test]
+    async fn jellyfin_with_no_user_is_asked_for_with_no_user_and_no_password() {
+        // Both empty is what makes sonora sign in by Quick Connect.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App {
+            provider: Some(std::sync::Arc::new(crate::shell::tests::HeldSignIn {
+                at: "https://jf.example.org",
+            })),
+            ..App::default()
+        };
+        app.config.provider.kind = crate::config::ProviderKind::Jellyfin;
+        app.config.jellyfin.server = "https://jf.example.org".into();
+        super::connect(&mut app, &crate::shell::login::Secret::default(), &tx);
+        match rx.recv().await {
+            Some(Action::Error(said)) => assert_eq!(said, r#"asked as "" with 0 password"#),
+            other => panic!("the sign-in is attempted, got {other:?}"),
+        }
+    }
+
     #[test]
     fn a_sign_in_window_answers_with_its_cookies_and_anything_else_brings_the_box_back() {
         assert!(matches!(
