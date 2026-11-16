@@ -99,6 +99,7 @@ pub fn provider_for(config: &Config) -> anyhow::Result<Arc<dyn Provider>> {
     Ok(match config.provider.kind {
         ProviderKind::Tidal => Arc::new(music::tidal::TidalProvider::new()),
         ProviderKind::Subsonic => Arc::new(music::subsonic::SubsonicProvider::new()),
+        ProviderKind::Jellyfin => Arc::new(music::jellyfin::JellyfinProvider::new()),
         ProviderKind::Spotify => Arc::new(music::spotify::SpotifyProvider::from_env()),
         ProviderKind::Apple => Arc::new(music::apple::AppleProvider::new()),
         ProviderKind::Deezer => Arc::new(music::deezer::DeezerProvider::new()),

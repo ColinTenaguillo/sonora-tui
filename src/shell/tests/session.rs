@@ -307,7 +307,7 @@ fn tab_on_the_sign_in_screen_moves_to_the_next_service_without_signing_in() {
     ));
 
     // A folder of files already named is read at once.
-    app.config.provider.kind = crate::config::ProviderKind::Subsonic;
+    app.config.provider.kind = crate::config::ProviderKind::Jellyfin;
     app.config.local.folders = vec!["~".into()];
     assert!(matches!(
         app.update(Action::NextService),
@@ -347,6 +347,129 @@ fn a_subsonic_config_without_a_server_asks_for_it_then_the_user_then_the_passwor
     ));
     assert_eq!(app.config.subsonic.server, "https://music.example.org");
     assert_eq!(app.config.subsonic.username, "colin");
+}
+
+#[test]
+fn a_jellyfin_server_is_asked_for_like_a_subsonic_one_and_kept_apart_from_it() {
+    let mut app = App::default();
+    app.config.provider.kind = crate::config::ProviderKind::Jellyfin;
+    app.config.subsonic.server = "https://navidrome.example.org".into();
+    app.update(Action::BeginLogin);
+    assert!(matches!(
+        &app.login,
+        login::LoginState::Text { field: login::Field::Server, typed } if typed.is_empty()
+    ));
+    app.update(Action::Typed(
+        login::Field::Server,
+        "https://jellyfin.example.org".into(),
+    ));
+    app.update(Action::BeginLogin);
+    app.update(Action::Typed(login::Field::Username, "colin".into()));
+    app.update(Action::BeginLogin);
+    assert!(matches!(
+        &app.login,
+        login::LoginState::Password { server, username, .. }
+            if server == "https://jellyfin.example.org" && username == "colin"
+    ));
+    assert_eq!(app.config.jellyfin.server, "https://jellyfin.example.org");
+    assert_eq!(app.config.jellyfin.username, "colin");
+    assert_eq!(
+        app.config.subsonic.server, "https://navidrome.example.org",
+        "the Subsonic server stays as it was"
+    );
+}
+
+/// A server provider that holds a sign-in to `at`, as sonora keeps one.
+struct HeldSignIn {
+    at: &'static str,
+}
+
+#[async_trait::async_trait]
+impl music::MusicProvider for HeldSignIn {
+    fn name(&self) -> &'static str {
+        "Jellyfin"
+    }
+    fn slug(&self) -> &'static str {
+        "jellyfin"
+    }
+    fn sign_in_options(&self) -> Vec<music::SignIn> {
+        vec![music::SignIn::Credentials {
+            server: String::new(),
+            username: String::new(),
+            password: String::new(),
+        }]
+    }
+    fn stored(&self) -> bool {
+        true
+    }
+    fn location(&self) -> Option<String> {
+        Some(self.at.into())
+    }
+    async fn restore(&self) -> anyhow::Result<Option<music::ProviderSession>> {
+        Ok(None)
+    }
+    async fn sign_in(
+        &self,
+        _: music::SignIn,
+        _: music::PromptSink,
+        _: music::InputSource,
+    ) -> anyhow::Result<music::ProviderSession> {
+        anyhow::bail!("not in a test")
+    }
+    fn sign_out(&self) {}
+}
+
+fn jellyfin_holding(at: &'static str, configured: &str) -> App {
+    let mut app = App::default();
+    app.config.provider.kind = crate::config::ProviderKind::Jellyfin;
+    app.config.jellyfin.server = configured.into();
+    app.config.jellyfin.username = "colin".into();
+    app.provider = Some(std::sync::Arc::new(HeldSignIn { at }));
+    app
+}
+
+#[test]
+fn a_sign_in_kept_for_the_configured_server_is_resumed_without_a_password() {
+    let mut app = jellyfin_holding("https://jf.example.org", "jf.example.org/");
+    app.update(Action::BeginLogin);
+    assert!(
+        matches!(app.login, login::LoginState::Busy(_)),
+        "Enter resumes what is kept, got {:?}",
+        app.login
+    );
+    assert!(app.resumes_kept_sign_in());
+
+    // Kept for another server than the one now configured: that one is
+    // signed in to afresh, with its password.
+    let mut app = jellyfin_holding("https://old.example.org", "https://new.example.org");
+    app.update(Action::BeginLogin);
+    assert!(matches!(app.login, login::LoginState::Password { .. }));
+    assert!(!app.resumes_kept_sign_in());
+}
+
+#[test]
+fn a_kept_sign_in_that_cannot_be_resumed_asks_for_the_password() {
+    let mut app = jellyfin_holding("https://jf.example.org", "https://jf.example.org");
+    app.update(Action::BeginLogin);
+    app.update(Action::AskPassword);
+    assert!(
+        matches!(&app.login, login::LoginState::Password { server, .. } if server == "https://jf.example.org"),
+        "{:?}",
+        app.login
+    );
+}
+
+#[test]
+fn an_empty_password_is_sent_for_a_server_that_takes_none() {
+    let mut app = App::default();
+    app.config.provider.kind = crate::config::ProviderKind::Jellyfin;
+    app.config.jellyfin.server = "https://jf.example.org".into();
+    app.config.jellyfin.username = "colin".into();
+    app.update(Action::BeginLogin);
+    match key(&mut app, KeyCode::Enter) {
+        Some(Action::Connect(secret)) => assert!(secret.0.is_empty()),
+        other => panic!("Enter signs in with no password, got {other:?}"),
+    }
 }
 
 #[test]

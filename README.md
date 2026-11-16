@@ -23,7 +23,7 @@
 
 ### A terminal music player for your streaming services
 
-TIDAL, Spotify, Apple Music, Deezer, YouTube Music, Subsonic and your own files —
+TIDAL, Spotify, Apple Music, Deezer, YouTube Music, Subsonic, Jellyfin and your own files —
 in the terminal, over [sonora](https://github.com/sonorahq/sonora)'s `music` crate.
 
 </div>
@@ -46,7 +46,7 @@ in the terminal, over [sonora](https://github.com/sonorahq/sonora)'s `music` cra
 
 ## Features
 
-- **TIDAL, Spotify, Apple Music, Deezer, YouTube Music, Subsonic/Navidrome**
+- **TIDAL, Spotify, Apple Music, Deezer, YouTube Music, Subsonic/Navidrome, Jellyfin**
   and local files — one service at a time, switched from Settings
 - The home page, Explore, search, album and artist pages, your playlists,
   albums, artists and favourites, each in its own view
@@ -130,7 +130,7 @@ The service comes from the config, and TIDAL is the default:
 
 ```toml
 [provider]
-kind = "tidal"   # spotify, apple, deezer, youtube, subsonic, local
+kind = "tidal"   # spotify, apple, deezer, youtube, subsonic, jellyfin, local
 ```
 
 Settings (`8`) has the same choice as its first row: pick a service with
@@ -147,7 +147,8 @@ Each signs in from the same screen, its own way:
 | `apple` | Paste the `Cookie` header of a signed-in music.apple.com tab. Playback needs Google's Widevine module: see below. |
 | `deezer` | Paste the `Cookie` header (or just the `arl` cookie) of a signed-in deezer.com tab; on a family plan, pick your profile. |
 | `youtube` | `g` to continue as a guest, or paste the `Cookie` header of a signed-in music.youtube.com tab; with several accounts on it, pick one. |
-| `subsonic` | Server and user asked on the login screen the first time, then kept in the config; the password is typed each time, never stored. |
+| `subsonic` | Server and user asked on the login screen the first time, then kept in the config; the password is typed at sign-in, and the session is kept until the server changes. |
+| `jellyfin` | The same as `subsonic`; an account with no password signs in with an empty one. |
 | `local` | Nothing: the first run asks for a folder, and the folders in the config are read at each start. |
 
 In practice the service's own sign-in page opens in a window instead: sign
@@ -177,6 +178,20 @@ kind = "subsonic"
 
 [subsonic]
 server   = "https://music.example.org"
+username = "you"
+```
+
+### Jellyfin
+
+The music libraries of a Jellyfin server, asked for and kept the same way,
+under their own section:
+
+```toml
+[provider]
+kind = "jellyfin"
+
+[jellyfin]
+server   = "https://jellyfin.example.org"
 username = "you"
 ```
 
@@ -331,7 +346,7 @@ delivers them rather than the terminal.
 
 Settings (`8`) edits `config.toml` in place, row by row: the service, the
 sound, the content filters, the look, the scrobbling accounts, the Discord
-application, the Subsonic server and the music folders. `h`/`l` step a
+application, the Subsonic and Jellyfin servers and the music folders. `h`/`l` step a
 value, Enter opens a box on a text row and
 saves on Enter, `x` drops the last music folder. A secret is drawn as dots
 and never shown back. What something reads live follows at once: the
