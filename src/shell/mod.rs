@@ -2773,28 +2773,15 @@ impl App {
     fn on_sign_in_action(&mut self, action: Action) -> Option<Action> {
         match action {
             Action::BeginLogin => self.begin_login(),
-            Action::BeginGuest => {
-                self.login = login::LoginState::Busy("Continuing as a guest…".into());
-                None
-            }
-            // Sent on by the loop; the prompt is taken down while the
-            // service checks the answer.
-            Action::Answer(_) => {
-                self.login = login::LoginState::Busy("Signing in…".into());
-                None
-            }
-            // The window is the loop's to open; it answers the prompt, or
-            // sends it again when the window is closed.
-            Action::OpenSignInWindow => {
-                self.login = login::LoginState::Busy("Sign in in the window that opened…".into());
+            // The prompt is taken down while the service or the loop works.
+            a @ (Action::BeginGuest | Action::Answer(_) | Action::OpenSignInWindow) => {
+                self.login = login::LoginState::Busy(Self::waiting_on(&a).into());
                 None
             }
             Action::CancelLogin => self.cancel_login(),
             Action::Typed(field, typed) => self.on_typed(field, typed),
             Action::AskPassword => {
-                if let Some(server) = self.config.provider.kind.server() {
-                    self.login = self.server_prompt(server);
-                }
+                self.ask_password();
                 None
             }
             Action::PasteCookies => {
@@ -2804,6 +2791,24 @@ impl App {
                 None
             }
             other => unreachable!("{other:?} is routed elsewhere by update"),
+        }
+    }
+
+    /// What the sign-in screen says while `action` is under way. An answer
+    /// is sent on by the loop and checked by the service; the window is the
+    /// loop's to open, and it answers the prompt or sends it again when it
+    /// is closed.
+    fn waiting_on(action: &Action) -> &'static str {
+        match action {
+            Action::BeginGuest => "Continuing as a guest…",
+            Action::OpenSignInWindow => "Sign in in the window that opened…",
+            _ => "Signing in…",
+        }
+    }
+
+    fn ask_password(&mut self) {
+        if let Some(server) = self.config.provider.kind.server() {
+            self.login = self.server_prompt(server);
         }
     }
 
