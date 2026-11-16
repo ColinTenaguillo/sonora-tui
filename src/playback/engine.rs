@@ -451,7 +451,7 @@ struct Starts {
     announced: Option<String>,
     /// What the engine said of each track it opened and has not yet
     /// played: it opens the next one while this one is still heard.
-    // ponytail: a track opened and never played, or sought in, keeps its
+    // A track opened and never played, or sought in, keeps its
     // entry until the engine is replaced. A few bytes each; drop them on
     // `Ended` if a session ever shows it matters.
     signals: HashMap<String, Meta>,
@@ -540,7 +540,7 @@ fn translate(event: music::PlaybackEvent, starts: &mut Starts) -> Option<Playbac
         // The queue events are Soloist's, the headless Spotify player sonora
         // plays through once the Sonora app has set it up. They follow a
         // queue shared with other Spotify apps, which this one does not:
-        // ponytail: a track another app queues is not taken up, and Soloist
+        // a track another app queues is not taken up, and Soloist
         // pauses it; adopt QueuedTrack here if that is wanted.
         Engine::Playing { .. }
         | Engine::Loading { .. }
