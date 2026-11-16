@@ -89,13 +89,19 @@ impl music::MusicProvider for HeldSignIn {
     async fn restore(&self) -> anyhow::Result<Option<music::ProviderSession>> {
         Ok(None)
     }
+    /// Refuses, saying who it was asked to sign in as, for a test to read.
     async fn sign_in(
         &self,
-        _: music::SignIn,
+        method: music::SignIn,
         _: music::PromptSink,
         _: music::InputSource,
     ) -> anyhow::Result<music::ProviderSession> {
-        anyhow::bail!("not in a test")
+        match method {
+            music::SignIn::Credentials {
+                username, password, ..
+            } => anyhow::bail!("asked as {username:?} with {} password", password.len()),
+            _ => anyhow::bail!("not in a test"),
+        }
     }
     fn sign_out(&self) {}
     fn choose_library(&self, library: Option<music::Library>) -> anyhow::Result<()> {

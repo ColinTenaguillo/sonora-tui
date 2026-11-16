@@ -148,7 +148,7 @@ Each signs in from the same screen, its own way:
 | `deezer` | Paste the `Cookie` header (or just the `arl` cookie) of a signed-in deezer.com tab; on a family plan, pick your profile. |
 | `youtube` | `g` to continue as a guest, or paste the `Cookie` header of a signed-in music.youtube.com tab; with several accounts on it, pick one. |
 | `subsonic` | Server and user asked on the login screen the first time, then kept in the config; the password is typed at sign-in, and the session is kept until the server changes. |
-| `jellyfin` | The same as `subsonic`; an account with no password signs in with an empty one. |
+| `jellyfin` | The same as `subsonic`; an account with no password signs in with an empty one, and an empty user signs in by Quick Connect. |
 | `local` | Nothing: the first run asks for a folder, and the folders in the config are read at each start. |
 
 In practice the service's own sign-in page opens in a window instead: sign
@@ -199,6 +199,13 @@ kind = "jellyfin"
 server   = "https://jellyfin.example.org"
 username = "you"
 ```
+
+Leave the user empty on the sign-in screen to sign in by Quick Connect
+instead: the server gives a code, its Quick Connect page opens in the
+browser, and approving the code there from an account already signed in
+opens the session. The server has to have Quick Connect turned on. Once a
+user is kept, the sign-in screen asks for its password instead; empty the
+Jellyfin user row in Settings to be offered Quick Connect again.
 
 ### Local files
 

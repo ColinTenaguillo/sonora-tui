@@ -4,6 +4,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
+use crate::config::Server;
+
 #[derive(Debug, Clone, Default)]
 pub enum LoginState {
     #[default]
@@ -52,8 +54,10 @@ pub enum LoginState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
     Folder,
-    Server,
-    Username,
+    /// The address of this server.
+    Server(Server),
+    /// The user on this server.
+    Username(Server),
 }
 
 impl Field {
@@ -61,23 +65,29 @@ impl Field {
     pub fn question(self, service: &str) -> String {
         match self {
             Field::Folder => "Where is your music?".into(),
-            Field::Server => format!("Which {service} server?"),
-            Field::Username => "Which user on it?".into(),
+            Field::Server(_) => format!("Which {service} server?"),
+            Field::Username(_) => "Which user on it?".into(),
         }
+    }
+
+    /// Whether leaving it empty signs in by Quick Connect: Jellyfin then
+    /// shows a code to approve from an app already signed in to it.
+    pub fn quick_connect(self) -> bool {
+        self == Field::Username(Server::Jellyfin)
     }
 
     fn label(self) -> &'static str {
         match self {
             Field::Folder => "folder",
-            Field::Server => "server",
-            Field::Username => "user",
+            Field::Server(_) => "server",
+            Field::Username(_) => "user",
         }
     }
 
     fn enter(self) -> &'static str {
         match self {
             Field::Folder => "Enter to read it",
-            Field::Server | Field::Username => "Enter to continue",
+            Field::Server(_) | Field::Username(_) => "Enter to continue",
         }
     }
 }
@@ -134,19 +144,25 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
             }),
             Line::from("Tab to change service."),
         ],
-        LoginState::Text { field, typed } => vec![
-            Line::from(field.question(service)),
-            Line::from(""),
-            Line::from(vec![
-                Span::raw(format!("{}: ", field.label())),
-                Span::styled(typed.clone(), Style::default().add_modifier(Modifier::BOLD)),
-            ]),
-            Line::from(""),
-            Line::from(format!(
-                "{}, Tab to change service, Esc to cancel.",
-                field.enter()
-            )),
-        ],
+        LoginState::Text { field, typed } => {
+            let mut lines = vec![
+                Line::from(field.question(service)),
+                Line::from(""),
+                Line::from(vec![
+                    Span::raw(format!("{}: ", field.label())),
+                    Span::styled(typed.clone(), Style::default().add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(""),
+                Line::from(format!(
+                    "{}, Tab to change service, Esc to cancel.",
+                    field.enter()
+                )),
+            ];
+            if field.quick_connect() {
+                lines.push(Line::from("Leave it empty to sign in by Quick Connect."));
+            }
+            lines
+        }
         LoginState::Url(url) => [
             vec![Line::from("Authorise in your browser — opening it now.")],
             link_lines(url),
@@ -431,7 +447,7 @@ mod tests {
         assert!(text.contains("~/Music"), "{text}");
         assert!(text.contains("Tab"), "says how to leave:\n{text}");
         let server = LoginState::Text {
-            field: Field::Server,
+            field: Field::Server(Server::Subsonic),
             typed: "https://".into(),
         };
         let text = rendered_for(&server, "Subsonic");

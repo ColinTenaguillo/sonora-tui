@@ -323,10 +323,10 @@ fn a_subsonic_config_without_a_server_asks_for_it_then_the_user_then_the_passwor
     app.update(Action::BeginLogin);
     assert!(matches!(
         &app.login,
-        login::LoginState::Text { field: login::Field::Server, typed } if typed.is_empty()
+        login::LoginState::Text { field: login::Field::Server(crate::config::Server::Subsonic), typed } if typed.is_empty()
     ));
     let next = app.update(Action::Typed(
-        login::Field::Server,
+        login::Field::Server(crate::config::Server::Subsonic),
         "https://music.example.org".into(),
     ));
     assert!(matches!(next, Some(Action::BeginLogin)));
@@ -334,11 +334,14 @@ fn a_subsonic_config_without_a_server_asks_for_it_then_the_user_then_the_passwor
     assert!(matches!(
         &app.login,
         login::LoginState::Text {
-            field: login::Field::Username,
+            field: login::Field::Username(crate::config::Server::Subsonic),
             ..
         }
     ));
-    app.update(Action::Typed(login::Field::Username, "colin".into()));
+    app.update(Action::Typed(
+        login::Field::Username(crate::config::Server::Subsonic),
+        "colin".into(),
+    ));
     app.update(Action::BeginLogin);
     assert!(matches!(
         &app.login,
@@ -357,14 +360,17 @@ fn a_jellyfin_server_is_asked_for_like_a_subsonic_one_and_kept_apart_from_it() {
     app.update(Action::BeginLogin);
     assert!(matches!(
         &app.login,
-        login::LoginState::Text { field: login::Field::Server, typed } if typed.is_empty()
+        login::LoginState::Text { field: login::Field::Server(crate::config::Server::Jellyfin), typed } if typed.is_empty()
     ));
     app.update(Action::Typed(
-        login::Field::Server,
+        login::Field::Server(crate::config::Server::Jellyfin),
         "https://jellyfin.example.org".into(),
     ));
     app.update(Action::BeginLogin);
-    app.update(Action::Typed(login::Field::Username, "colin".into()));
+    app.update(Action::Typed(
+        login::Field::Username(crate::config::Server::Jellyfin),
+        "colin".into(),
+    ));
     app.update(Action::BeginLogin);
     assert!(matches!(
         &app.login,
@@ -430,6 +436,34 @@ fn an_empty_password_is_sent_for_a_server_that_takes_none() {
         Some(Action::Connect(secret)) => assert!(secret.0.is_empty()),
         other => panic!("Enter signs in with no password, got {other:?}"),
     }
+}
+
+#[test]
+fn enter_with_no_user_signs_in_to_jellyfin_by_quick_connect() {
+    let mut app = App::default();
+    app.config.provider.kind = crate::config::ProviderKind::Jellyfin;
+    app.config.jellyfin.server = "https://jf.example.org".into();
+    app.update(Action::BeginLogin);
+    assert!(drawn(&mut app).contains("Leave it empty to sign in by Quick Connect"));
+    match key(&mut app, KeyCode::Enter) {
+        Some(Action::Connect(secret)) => {
+            assert!(secret.0.is_empty());
+            app.update(Action::Connect(secret));
+        }
+        other => panic!("Enter with no user starts Quick Connect, got {other:?}"),
+    }
+    // The prompt is taken down: a second Enter would start a second one.
+    assert!(drawn(&mut app).contains("Signing in…"));
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+
+    // Subsonic has no Quick Connect: its user is still asked for.
+    let mut app = App::default();
+    app.config.provider.kind = crate::config::ProviderKind::Subsonic;
+    app.config.subsonic.server = "https://music.example.org".into();
+    app.update(Action::BeginLogin);
+    assert!(!drawn(&mut app).contains("Quick Connect"));
+    assert!(key(&mut app, KeyCode::Enter).is_none());
+    assert!(drawn(&mut app).contains("Which user on it?"));
 }
 
 #[test]
