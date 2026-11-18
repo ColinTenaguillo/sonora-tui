@@ -28,17 +28,7 @@ pub enum Shape {
 pub struct Loaded {
     pub url: String,
     pub shape: Shape,
-    decoded: Option<Decoded>,
-}
-
-/// A decoded cover: the protocol that draws it whole, and the picture it
-/// came from.
-///
-/// The picture is kept because a cover at the fold cannot be drawn by
-/// handing the protocol fewer rows — see `Ready::cut`.
-struct Decoded {
-    protocol: Box<StatefulProtocol>,
-    image: image::DynamicImage,
+    decoded: Option<image::DynamicImage>,
 }
 
 impl std::fmt::Debug for Loaded {
@@ -61,7 +51,15 @@ enum Entry {
 
 /// A cover ready to draw, whole or cut off at the fold.
 struct Ready {
-    whole: Box<StatefulProtocol>,
+    /// One encoding per area the cover is drawn whole in, oldest first.
+    ///
+    /// One would re-encode whenever the area changed, and one cover is
+    /// often on screen at two sizes at once: an album's card and the top
+    /// tracks beside it. Kitty draws every placement of an id with the
+    /// image last sent under it, so a shared encoding showed the tracks a
+    /// corner of the card's picture, or the card a stamp of the tracks'.
+    whole: Vec<(Size, Box<StatefulProtocol>)>,
+    /// The picture the encodings are made from, also cut by `cut`.
     image: image::DynamicImage,
     /// The cut encoding and the area it was made for. A view has one row at
     /// the fold and one card at the right-hand edge, so this is at most one
@@ -69,7 +67,37 @@ struct Ready {
     cut: Option<(Size, ratatui_image::protocol::Protocol)>,
 }
 
+/// How many sizes of one cover keep their encoding: the card, the track
+/// row, the header and the now-playing bar. Past that the oldest is
+/// dropped, and a resized terminal does not keep stale ones forever.
+const WHOLE_SIZES: usize = 4;
+
 impl Ready {
+    fn new(image: image::DynamicImage) -> Self {
+        Self {
+            whole: Vec::new(),
+            image,
+            cut: None,
+        }
+    }
+
+    /// The encoding that draws this cover whole into `area`, made the first
+    /// time the cover is drawn at that size.
+    fn whole(&mut self, area: Size, picker: &Picker) -> &mut StatefulProtocol {
+        let i = match self.whole.iter().position(|(size, _)| *size == area) {
+            Some(i) => i,
+            None => {
+                if self.whole.len() == WHOLE_SIZES {
+                    self.whole.remove(0);
+                }
+                let protocol = picker.new_resize_protocol(self.image.clone());
+                self.whole.push((area, Box::new(protocol)));
+                self.whole.len() - 1
+            }
+        };
+        self.whole[i].1.as_mut()
+    }
+
     /// The encoding for this cover shown `rows` deep where a whole row would
     /// have given it `whole`.
     ///
@@ -298,11 +326,12 @@ impl Artwork {
                     }
                 }
                 let drawn = drawn.unwrap_or_else(|| {
-                    let size = ready.whole.size_for(cover_resize(), area.into());
+                    let protocol = ready.whole(area.into(), &picker);
+                    let size = protocol.size_for(cover_resize(), area.into());
                     frame.render_stateful_widget(
                         StatefulImage::default().resize(cover_resize()),
                         area,
-                        ready.whole.as_mut(),
+                        protocol,
                     );
                     size
                 });
@@ -512,11 +541,7 @@ impl Artwork {
     /// Take a finished download into the cache.
     pub fn insert(&mut self, loaded: Loaded) {
         let entry = match loaded.decoded {
-            Some(d) => Entry::Ready(Ready {
-                whole: d.protocol,
-                image: d.image,
-                cut: None,
-            }),
+            Some(image) => Entry::Ready(Ready::new(image)),
             None => Entry::Failed,
         };
         self.cache.insert((loaded.url, loaded.shape), entry);
@@ -528,7 +553,7 @@ async fn fetch_and_decode(
     picker: &Picker,
     url: &str,
     shape: Shape,
-) -> Option<Decoded> {
+) -> Option<image::DynamicImage> {
     let bytes: Vec<u8> = match url.strip_prefix("file://") {
         // The local provider's covers: the file beside the album, or the
         // tag's picture written out to the cache.
@@ -562,10 +587,7 @@ async fn fetch_and_decode(
             }
             Shape::Round => round_off(image),
         };
-        Some(Decoded {
-            protocol: Box::new(picker.new_resize_protocol(image.clone())),
-            image,
-        })
+        Some(image)
     })
     .await
     .ok()?
@@ -726,11 +748,7 @@ mod tests {
             };
             art.cache.insert(
                 ("u".to_string(), Shape::Square),
-                Entry::Ready(Ready {
-                    whole: Box::new(art.picker.new_resize_protocol(image.clone())),
-                    image: image.clone(),
-                    cut: None,
-                }),
+                Entry::Ready(Ready::new(image.clone())),
             );
             let mut term = Terminal::new(TestBackend::new(16, 8)).unwrap();
             term.draw(|f| {
@@ -776,11 +794,7 @@ mod tests {
         let picker = Picker::halfblocks();
 
         for rows in 1..8u16 {
-            let mut ready = Ready {
-                whole: Box::new(picker.new_resize_protocol(image.clone())),
-                image: image.clone(),
-                cut: None,
-            };
+            let mut ready = Ready::new(image.clone());
             let p = ready
                 .cut(rows, 16, Size::new(16, 8), &picker)
                 .expect("encodes");
@@ -1030,14 +1044,8 @@ mod tests {
                 http: reqwest::Client::new(),
                 tx,
             };
-            art.cache.insert(
-                ("u".into(), shape),
-                Entry::Ready(Ready {
-                    whole: Box::new(picker.new_resize_protocol(image.clone())),
-                    image,
-                    cut: None,
-                }),
-            );
+            art.cache
+                .insert(("u".into(), shape), Entry::Ready(Ready::new(image)));
             let mut term = Terminal::new(TestBackend::new(16, 8)).unwrap();
             term.draw(|f| {
                 // A selection band under the card, as a selected card has.
@@ -1079,6 +1087,65 @@ mod tests {
             Color::Rgb(255, 0, 0),
             "a square cover keeps its corners"
         );
+    }
+
+    #[test]
+    fn one_cover_drawn_at_two_sizes_keeps_both() {
+        // An artist page draws an album's cover on its card and again,
+        // smaller, beside each top track from it. Kitty draws a placement
+        // with whatever image was last sent under its id, so when the two
+        // shared one encoding, each frame re-sent it at one size and then
+        // the other: the tracks showed a corner of the card's picture, or
+        // the card a stamp of the tracks'.
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut picker = Picker::halfblocks();
+        picker.set_protocol_type(ratatui_image::picker::ProtocolType::Kitty);
+        let image = image::DynamicImage::ImageRgb8(image::RgbImage::new(640, 640));
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut art = Artwork::with_picker(picker, tx);
+        art.cache
+            .insert(("u".into(), Shape::Square), Entry::Ready(Ready::new(image)));
+        let (track, card) = (Rect::new(0, 0, 4, 2), Rect::new(0, 2, 16, 8));
+        let mut term = Terminal::new(TestBackend::new(16, 10)).unwrap();
+        let mut frame = || {
+            term.draw(|f| {
+                assert!(art.render_shaped(f, track, "u", Shape::Square));
+                assert!(art.render_shaped(f, card, "u", Shape::Square));
+            })
+            .unwrap();
+            let buf = term.backend().buffer();
+            let first = |a: Rect| buf[(a.x, a.y)].clone();
+            (first(track), first(card))
+        };
+
+        let (track_cell, card_cell) = frame();
+        assert_ne!(
+            track_cell.fg, card_cell.fg,
+            "each size is placed from an image of its own"
+        );
+        let (track_cell, card_cell) = frame();
+        for (what, cell) in [("track", track_cell), ("card", card_cell)] {
+            assert!(
+                !cell.symbol().contains("\x1b_G"),
+                "the {what}'s image is not sent again on the next frame"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cover_keeps_the_encodings_of_its_latest_sizes_only() {
+        // A terminal resized a step at a time asks for a new size each
+        // step; the encodings of the old ones must not pile up.
+        let picker = Picker::halfblocks();
+        let mut ready = Ready::new(image::DynamicImage::ImageRgb8(image::RgbImage::new(8, 8)));
+        let sizes: Vec<Size> = (1..=6).map(|w| Size::new(w, 3)).collect();
+        for size in &sizes {
+            ready.whole(*size, &picker);
+        }
+        let kept: Vec<Size> = ready.whole.iter().map(|(size, _)| *size).collect();
+        assert_eq!(kept, sizes[2..]);
     }
 
     #[test]
@@ -1158,11 +1225,7 @@ mod cut_alignment {
         };
         art.cache.insert(
             ("u".to_string(), Shape::Square),
-            Entry::Ready(Ready {
-                whole: Box::new(art.picker.new_resize_protocol(image.clone())),
-                image,
-                cut: None,
-            }),
+            Entry::Ready(Ready::new(image)),
         );
         let mut term = Terminal::new(TestBackend::new(w, 3)).unwrap();
         term.draw(|f| {
