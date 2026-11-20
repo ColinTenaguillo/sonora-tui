@@ -93,6 +93,9 @@ fn app() -> anyhow::Result<()> {
             std::process::exit(1);
         }
     };
+    // After try_init, so its failure message above still reaches the
+    // terminal. From here stderr goes to the log: see `divert_stderr`.
+    let diverted = divert_stderr();
 
     // try_init() has installed a panic hook that restores the terminal. Chain
     // an exit onto it: a panic on a detached task does not stop the process
@@ -107,6 +110,10 @@ fn app() -> anyhow::Result<()> {
         // user sees the app simply vanish — with nothing in the log either,
         // which makes a crash indistinguishable from a clean exit.
         tracing::error!("panic: {info}");
+        // The hook prints the message after the restore, to stderr.
+        if let Some(diverted) = diverted {
+            diverted.restore();
+        }
         restore_then_exit(info);
         std::process::exit(1);
     }));
@@ -120,6 +127,22 @@ fn app() -> anyhow::Result<()> {
         tokio::runtime::Handle::current().block_on(sonora_tui::shell::run(&mut terminal, picker))
     });
     ratatui::restore();
+    // Shut down first: what the libraries print on the way out still goes
+    // to the log, not under the shell prompt.
+    #[cfg(not(target_os = "macos"))]
+    drop(runtime);
+    if let Some(diverted) = diverted {
+        diverted.restore();
+    }
 
     result
+}
+
+/// Sends what libraries print to stderr into the log while the TUI is up:
+/// see `config::log::divert_stderr`.
+fn divert_stderr() -> Option<sonora_tui::config::log::Diverted> {
+    use sonora_tui::config::log;
+    log::divert_stderr(log::from_stderr)
+        .inspect_err(|error| tracing::warn!("stderr stays on the terminal: {error}"))
+        .ok()
 }

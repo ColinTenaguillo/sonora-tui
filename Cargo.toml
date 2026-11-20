@@ -92,6 +92,10 @@ storage = { git = "https://github.com/sonorahq/sonora", rev = "314e0be32200dbae4
 # without it still starts. The same workspace, so the same commit.
 webview = { git = "https://github.com/sonorahq/sonora", rev = "314e0be32200dbae49bef59d66de701c976e1a0b" }
 
+# fd 2 moved to a file while the TUI is up: see `config::log::divert_stderr`.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # The OS media keys. MPRIS is a D-Bus interface, so it is Linux-only by
 # definition; macOS has its own below.
 [target.'cfg(target_os = "linux")'.dependencies]
