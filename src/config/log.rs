@@ -54,6 +54,68 @@ impl<W: Write> Write for Redacted<W> {
     }
 }
 
+/// Takes over stderr while the TUI owns the terminal: each line written to
+/// it is handed to `line`, and what comes back points it at the terminal
+/// again. Libraries write warnings straight to fd 2, which is the terminal
+/// the TUI draws on, so their lines landed across the screen; GTK,
+/// WebKitGTK and GStreamer do it in the Linux sign-in window and the web
+/// processes it starts, which inherit fd 2 and keep writing to the pipe.
+#[cfg(unix)]
+pub fn divert_stderr(mut line: impl FnMut(String) + Send + 'static) -> io::Result<Diverted> {
+    use std::io::BufRead;
+    use std::os::fd::{AsFd, AsRawFd, IntoRawFd};
+    // Close-on-exec, unlike `dup`: a child the app starts gets no handle on
+    // the terminal through it. Kept open for as long as the process lives.
+    let terminal = io::stderr().as_fd().try_clone_to_owned()?.into_raw_fd();
+    let (reader, writer) = io::pipe()?;
+    if unsafe { libc::dup2(writer.as_raw_fd(), libc::STDERR_FILENO) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    std::thread::Builder::new()
+        .name("stderr".into())
+        .spawn(move || {
+            for text in io::BufReader::new(reader)
+                .split(b'\n')
+                .map_while(Result::ok)
+            {
+                line(String::from_utf8_lossy(&text).into_owned());
+            }
+        })?;
+    Ok(Diverted { terminal })
+}
+
+/// Logs a line a library wrote to stderr, as a warning, under the app's own
+/// target so the default filter keeps it. The redaction applies: such a line
+/// can name a stream's signed address or a path under the home folder.
+pub fn from_stderr(line: String) {
+    tracing::warn!(target: "sonora_tui::stderr", "{line}");
+}
+
+/// Elsewhere stderr stays where it is: nothing there is known to write to it.
+#[cfg(not(unix))]
+pub fn divert_stderr(_line: impl FnMut(String) + Send + 'static) -> io::Result<Diverted> {
+    Ok(Diverted {})
+}
+
+/// The terminal's stderr, kept open while fd 2 points at the pipe.
+#[derive(Clone, Copy)]
+pub struct Diverted {
+    #[cfg(unix)]
+    terminal: std::os::raw::c_int,
+}
+
+impl Diverted {
+    /// Points stderr at the terminal again, for what is printed once the
+    /// TUI is gone: a panic's message, or the error the app ends on. Calling
+    /// it twice does no harm.
+    pub fn restore(self) {
+        #[cfg(unix)]
+        unsafe {
+            libc::dup2(self.terminal, libc::STDERR_FILENO)
+        };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,6 +152,19 @@ mod tests {
         assert!(line.contains("spotify:user:<user>:collection"), "{line}");
         assert!(line.contains("https://api.example/v1/me?"), "{line}");
         assert!(!line.contains("colin"), "{line}");
+        assert!(!line.contains("s3cret"), "{line}");
+    }
+
+    #[test]
+    fn a_library_line_from_stderr_is_kept_and_redacted() {
+        let line = logged(|| {
+            from_stderr("Could not open resource https://cdn.example/a.flac?token=s3cret".into())
+        });
+
+        assert!(
+            line.contains("Could not open resource https://cdn.example/a.flac?"),
+            "{line}"
+        );
         assert!(!line.contains("s3cret"), "{line}");
     }
 
