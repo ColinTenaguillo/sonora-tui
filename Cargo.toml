@@ -58,7 +58,15 @@ ratatui-image = { version = "11", default-features = false, features = ["crosste
 # installs ring before anything, which settles it whatever the tree holds.
 # The covers, and the few pages `catalogue::tidal_extras` asks TIDAL for
 # itself; every other request to a service is sonora's.
-reqwest = { version = "0.13.4", default-features = false, features = ["rustls-no-provider"] }
+#
+# `socks`: a feature is switched on for every user of a crate at once, so
+# naming it here is what lets sonora's own clients go through the SOCKS
+# proxy of `[network]`; sonora builds them without it. YouTube Music's
+# client is on reqwest 0.12, a second crate as far as cargo is concerned,
+# which `reqwest_012` names for that feature alone. Both go the day
+# sonora's workspace asks for `socks` itself.
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls-no-provider", "socks"] }
+reqwest_012 = { package = "reqwest", version = "0.12", default-features = false, features = ["socks"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 # Not used from here: the engine is sonora's. Named for its `tracing`
 # feature alone, without which rodio reports with eprintln!, which lands in
