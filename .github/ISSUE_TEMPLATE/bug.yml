@@ -1,0 +1,57 @@
+name: Bug report
+description: Something does not work, or not the way the README says
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: service
+    attributes:
+      label: Service
+      description: The one you were listening to or signing in to.
+      multiple: true
+      options:
+        - TIDAL
+        - Spotify
+        - Apple Music
+        - Deezer
+        - YouTube Music
+        - Jellyfin
+        - Subsonic
+        - Local files
+        - Not tied to a service
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: System
+      options:
+        - Linux
+        - macOS
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: sonora-tui version and terminal
+      description: The release you installed (or the commit you built), and the terminal you run it in.
+      placeholder: v0.19.0, kitty
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: >-
+        The lines of `sonora-tui.log` from around the time it happened. The
+        README's "Where things live" table says where the log is on each
+        system. Tokens,
+        user names and your home folder are already taken out of it.
+      render: text

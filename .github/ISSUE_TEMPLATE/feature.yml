@@ -1,0 +1,36 @@
+name: Feature request
+description: Something sonora-tui does not do yet
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you would like
+      description: What sonora-tui should do, as you would see it on screen or in the config file.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What it is for
+      description: >-
+        The situation you are in without it: your network, your library, your
+        setup. It decides how the feature is built, and whether it belongs
+        here or in sonora's crates, which every service goes through.
+    validations:
+      required: true
+  - type: dropdown
+    id: service
+    attributes:
+      label: Service
+      description: Leave empty if it concerns all of them.
+      multiple: true
+      options:
+        - TIDAL
+        - Spotify
+        - Apple Music
+        - Deezer
+        - YouTube Music
+        - Jellyfin
+        - Subsonic
+        - Local files
