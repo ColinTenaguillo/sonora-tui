@@ -28,6 +28,8 @@ pub enum Setting {
     Ai,
     NerdFont,
     Theme,
+    /// What the requests to the services go through.
+    Proxy,
     LastfmKey,
     LastfmSecret,
     LastfmLink,
@@ -62,7 +64,7 @@ pub enum Kind {
 }
 
 impl Setting {
-    pub const ALL: [Setting; 28] = [
+    pub const ALL: [Setting; 29] = [
         Setting::Service,
         Setting::Quality,
         Setting::Volume,
@@ -76,6 +78,7 @@ impl Setting {
         Setting::Ai,
         Setting::NerdFont,
         Setting::Theme,
+        Setting::Proxy,
         Setting::LastfmKey,
         Setting::LastfmSecret,
         Setting::LastfmLink,
@@ -114,6 +117,7 @@ impl Setting {
             | Setting::ListenbrainzServer
             | Setting::MalojaUrl
             | Setting::Discord
+            | Setting::Proxy
             | Setting::ServerAddress(_)
             | Setting::ServerUser(_) => Kind::Text { secret: false },
             Setting::LastfmSecret | Setting::ListenbrainzToken | Setting::MalojaKey => {
@@ -128,6 +132,7 @@ impl Setting {
     pub fn group(&self) -> &'static str {
         match self {
             Setting::Service => "Streaming",
+            Setting::Proxy => "Network",
             Setting::Quality
             | Setting::Volume
             | Setting::Normalisation
@@ -175,6 +180,7 @@ impl Setting {
     fn label(&self) -> &'static str {
         match self {
             Setting::Service => "Service",
+            Setting::Proxy => "Proxy",
             Setting::Quality => "Audio quality",
             Setting::Volume => "Volume",
             Setting::Normalisation => "Normalise loudness",
@@ -207,6 +213,7 @@ impl Setting {
     fn explain(&self) -> &'static str {
         match self {
             Setting::Service => "h or l to pick one, Enter to switch to it and sign in.",
+            Setting::Proxy => "As socks5h://host:port, or http://; empty is none. Used from the next start. Spotify's audio does not go through it. Enter to type it.",
             Setting::Quality => "What is asked for. The bar shows what arrived.",
             Setting::Volume => "Applied to the output, so full is untouched audio.",
             Setting::Normalisation => {
@@ -243,6 +250,7 @@ pub fn text_of(config: &crate::config::Config, setting: Setting) -> String {
     match setting {
         _ if setting.is_scrobbling() => scrobble_text_of(&config.scrobble, setting),
         Setting::Discord => config.discord.application_id.clone(),
+        Setting::Proxy => config.network.proxy.clone(),
         Setting::ServerAddress(server) => config.server(server).server.clone(),
         Setting::ServerUser(server) => config.server(server).username.clone(),
         // A folder row opens on an empty box: the text is a new folder.
@@ -265,12 +273,26 @@ fn scrobble_text_of(scrobble: &crate::config::ScrobbleConfig, setting: Setting) 
     text.cloned().unwrap_or_default()
 }
 
+/// Why what was typed cannot go into the row, in words for the corner.
+/// The proxy is the one row with a rule: see `NetworkConfig::proxy`.
+pub fn check_text(setting: Setting, text: &str) -> Result<(), String> {
+    if setting != Setting::Proxy {
+        return Ok(());
+    }
+    let typed = crate::config::NetworkConfig { proxy: text.into() };
+    typed
+        .proxy()
+        .map(drop)
+        .map_err(|refusal| refusal.to_string())
+}
+
 /// Write what was typed into the row.
 pub fn set_text(config: &mut crate::config::Config, setting: Setting, text: &str) {
     let text = text.trim();
     match setting {
         _ if setting.is_scrobbling() => set_scrobble_text(&mut config.scrobble, setting, text),
         Setting::Discord => config.discord.application_id = text.to_owned(),
+        Setting::Proxy => config.network.proxy = text.to_owned(),
         Setting::ServerAddress(server) => config.server_mut(server).server = text.to_owned(),
         Setting::ServerUser(server) => config.server_mut(server).username = text.to_owned(),
         Setting::LocalFolders if !text.is_empty() => config.local.folders.push(text.to_owned()),
@@ -512,6 +534,7 @@ pub fn cycle(config: &mut crate::config::Config, setting: Setting, forward: bool
         | Setting::MalojaUrl
         | Setting::MalojaKey
         | Setting::Discord
+        | Setting::Proxy
         | Setting::ServerAddress(_)
         | Setting::ServerUser(_)
         | Setting::LocalFolders => {}
@@ -749,6 +772,10 @@ fn value_of(
                 false => text,
             }
         }
+        Setting::Proxy => match config.network.proxy_shown() {
+            address if address.is_empty() => "none".to_string(),
+            address => address,
+        },
         Setting::LocalFolders => match config.local.folders.len() {
             0 => "none".to_string(),
             _ => config.local.folders.join(", "),
@@ -1243,7 +1270,7 @@ mod tests {
             );
         });
         let text = crate::shell::geometry::text(&buf);
-        for group in ["Scrobbling", "Discord", "Local files", "TIDAL"] {
+        for group in ["Network", "Scrobbling", "Discord", "Local files", "TIDAL"] {
             assert!(text.contains(group), "{group} is headed:\n{text}");
         }
     }

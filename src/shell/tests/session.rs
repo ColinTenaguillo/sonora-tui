@@ -149,6 +149,81 @@ fn the_settings_keys_do_not_reach_the_view_behind_it() {
 }
 
 #[test]
+fn the_proxy_row_takes_an_address_and_refuses_what_is_not_one() {
+    let mut app = signed_in(sidebar::Section::Settings);
+    while app.settings.current() != settings::Setting::Proxy {
+        app.settings.next();
+    }
+    // The box opens on what the row holds, so it is emptied first.
+    let type_in = |app: &mut App, text: &str| {
+        app.update(Action::ActivateSelection);
+        while app
+            .setting_edit
+            .as_ref()
+            .is_some_and(|e| !e.typed.is_empty())
+        {
+            key(app, KeyCode::Backspace);
+        }
+        for c in text.chars() {
+            key(app, KeyCode::Char(c));
+        }
+        let typed = key(app, KeyCode::Enter).expect("Enter sends the text");
+        app.update(typed)
+    };
+
+    let next = type_in(&mut app, "socks5h://127.0.0.1:1080");
+    assert!(matches!(
+        next,
+        Some(Action::SettingChanged(settings::Setting::Proxy))
+    ));
+    assert_eq!(app.config.network.proxy, "socks5h://127.0.0.1:1080");
+    let screen = drawn(&mut app);
+    assert!(
+        screen.contains("Network"),
+        "the row has a heading:\n{screen}"
+    );
+    assert!(
+        screen.contains("socks5h://127.0.0.1:1080"),
+        "the row shows the address:\n{screen}"
+    );
+
+    // Not an address: nothing is written, and the corner says why.
+    assert!(type_in(&mut app, "sock5://127.0.0.1").is_none());
+    assert_eq!(app.config.network.proxy, "socks5h://127.0.0.1:1080");
+    let screen = drawn(&mut app);
+    assert!(
+        screen.contains("not a proxy address"),
+        "the refusal is on screen:\n{screen}"
+    );
+    // The box is back on what was typed, to be put right.
+    assert_eq!(
+        app.setting_edit.as_ref().map(|edit| edit.typed.as_str()),
+        Some("sock5://127.0.0.1")
+    );
+    key(&mut app, KeyCode::Esc);
+
+    // A password is in the file, and not on the screen.
+    type_in(&mut app, "socks5h://me:hunter2@127.0.0.1:1080");
+    assert_eq!(
+        app.config.network.proxy,
+        "socks5h://me:hunter2@127.0.0.1:1080"
+    );
+    let screen = drawn(&mut app);
+    assert!(
+        screen.contains("socks5h://me:"),
+        "the row is drawn:\n{screen}"
+    );
+    assert!(
+        !screen.contains("hunter2"),
+        "without the password:\n{screen}"
+    );
+
+    // Emptied, the proxy is off again.
+    type_in(&mut app, "");
+    assert_eq!(app.config.network.proxy, "");
+}
+
+#[test]
 fn a_text_setting_is_typed_in_its_box_and_written_on_enter() {
     let mut app = signed_in(sidebar::Section::Settings);
     while app.settings.current() != settings::Setting::Discord {
