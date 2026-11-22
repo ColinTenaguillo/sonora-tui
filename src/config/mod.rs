@@ -72,6 +72,8 @@ pub struct Config {
     /// What is playing, on a Discord profile. Off until an application is
     /// named.
     pub discord: DiscordConfig,
+    /// How the services are reached. Directly, unless a proxy is named.
+    pub network: NetworkConfig,
     /// Rebound keys, as `action = "key"`. Empty is the normal case, and the
     /// defaults are in `shell::keymap::ACTIONS`.
     #[serde(default)]
@@ -205,6 +207,86 @@ impl Config {
 #[serde(default)]
 pub struct DiscordConfig {
     pub application_id: String,
+}
+
+/// A proxy the requests to the services go through; empty means none.
+///
+/// sonora builds its own HTTP clients and takes no proxy, so the one way to
+/// give them this is the environment reqwest reads when a client is built:
+/// `main` calls [`NetworkConfig::name_in_environment`] before anything else
+/// runs. That is also why a change is only picked up at the next start.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct NetworkConfig {
+    pub proxy: String,
+}
+
+/// What reqwest reads its proxy from. All three, so that one already set
+/// for a single scheme does not win over the config.
+const PROXY_VARIABLES: [&str; 3] = ["ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY"];
+
+/// What stays off the proxy: this machine and the private ranges, where a
+/// Subsonic, Jellyfin or Maloja server of the listener's own is, and which
+/// a proxy elsewhere could not reach. Set over any `NO_PROXY` inherited, so
+/// that nothing else is exempt without the config saying so.
+const DIRECT: &str = "localhost,127.0.0.0/8,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16";
+
+/// The schemes reqwest connects through.
+const PROXY_SCHEMES: [&str; 6] = ["socks5h", "socks5", "socks4a", "socks4", "http", "https"];
+
+/// Said without the address, which may hold a password and would follow
+/// the message to the status bar and the log.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[error("that is not a proxy address: write it as socks5h://host:port, or with socks5, socks4a, socks4, http or https")]
+pub struct NotAProxy;
+
+impl NetworkConfig {
+    /// The proxy to go through, if one is named, as reqwest takes it.
+    ///
+    /// An address reqwest cannot use is an error rather than no proxy:
+    /// reqwest skips one in silence, and the requests would then leave
+    /// directly from a machine whose owner asked for the opposite. For the
+    /// same reason what comes back is the address parsed and written out
+    /// again, not the text typed: reqwest reads the variable more strictly
+    /// than `Url` does, and would skip `SOCKS5H://...` or a password with
+    /// a `^` in it as typed.
+    pub fn proxy(&self) -> Result<Option<String>, NotAProxy> {
+        let address = self.proxy.trim();
+        if address.is_empty() {
+            return Ok(None);
+        }
+        reqwest::Url::parse(address)
+            .ok()
+            .filter(|url| PROXY_SCHEMES.contains(&url.scheme()) && url.has_host())
+            .map(|url| Some(url.into()))
+            .ok_or(NotAProxy)
+    }
+
+    /// The address as a row may draw it: with the password, if it has one,
+    /// as dots.
+    pub fn proxy_shown(&self) -> String {
+        let address = self.proxy.trim();
+        let hidden = address.rsplit_once('@').and_then(|(before, host)| {
+            let (scheme, credentials) = before.split_once("://")?;
+            let (user, _password) = credentials.split_once(':')?;
+            Some(format!("{scheme}://{user}:\u{2022}\u{2022}\u{2022}@{host}"))
+        });
+        hidden.unwrap_or_else(|| address.to_owned())
+    }
+
+    /// Names the proxy in this process's environment, for every client
+    /// built from here on. To be called while the process has one thread:
+    /// the environment is not safe to change under another that reads it.
+    pub fn name_in_environment(&self) -> Result<(), NotAProxy> {
+        let Some(proxy) = self.proxy()? else {
+            return Ok(());
+        };
+        for variable in PROXY_VARIABLES {
+            std::env::set_var(variable, &proxy);
+        }
+        std::env::set_var("NO_PROXY", DIRECT);
+        Ok(())
+    }
 }
 
 /// The folders the local-files provider reads.
@@ -548,6 +630,96 @@ mod tests {
                 home.join("Videos"),
             ]
         );
+    }
+
+    #[test]
+    fn a_proxy_is_an_address_reqwest_can_connect_through_or_nothing() {
+        let proxy = |address: &str| {
+            NetworkConfig {
+                proxy: address.into(),
+            }
+            .proxy()
+        };
+        let is = |address: &str| Ok(Some(address.to_owned()));
+
+        assert_eq!(proxy(""), Ok(None));
+        assert_eq!(proxy("  "), Ok(None));
+        for address in [
+            "socks5h://127.0.0.1:1080",
+            "socks5://user:secret@proxy.example:1080",
+            "socks4a://proxy.example",
+        ] {
+            assert_eq!(proxy(address), is(address));
+        }
+        assert_eq!(
+            proxy(" socks5h://127.0.0.1:1080 "),
+            is("socks5h://127.0.0.1:1080")
+        );
+        // Each of these would be skipped in silence further down, and the
+        // requests would leave without the proxy.
+        for address in [
+            "sock5://127.0.0.1:1080",
+            "127.0.0.1:1080",
+            "localhost:1080",
+            "socks5h://",
+        ] {
+            assert_eq!(proxy(address), Err(NotAProxy), "{address}");
+        }
+    }
+
+    #[test]
+    fn a_proxy_is_handed_on_the_way_reqwest_reads_it_not_the_way_it_was_typed() {
+        let proxy = |address: &str| {
+            NetworkConfig {
+                proxy: address.into(),
+            }
+            .proxy()
+            .unwrap()
+            .unwrap()
+        };
+
+        assert_eq!(
+            proxy("SOCKS5H://127.0.0.1:1080"),
+            "socks5h://127.0.0.1:1080"
+        );
+        assert_eq!(
+            proxy("socks5h://user:p^s s@host:1080"),
+            "socks5h://user:p%5Es%20s@host:1080"
+        );
+        assert_eq!(
+            proxy("http:proxy.example:3128"),
+            "http://proxy.example:3128/"
+        );
+    }
+
+    #[test]
+    fn a_proxy_password_is_drawn_as_dots() {
+        let shown = |address: &str| {
+            NetworkConfig {
+                proxy: address.into(),
+            }
+            .proxy_shown()
+        };
+
+        assert_eq!(
+            shown("socks5h://user:secret@host:1080"),
+            "socks5h://user:\u{2022}\u{2022}\u{2022}@host:1080"
+        );
+        assert_eq!(
+            shown("socks5h://user@host:1080"),
+            "socks5h://user@host:1080"
+        );
+        assert_eq!(shown("socks5h://host:1080"), "socks5h://host:1080");
+    }
+
+    #[test]
+    fn the_proxy_is_read_from_the_network_table() {
+        let c: Config = toml::from_str("[network]\nproxy = \"socks5h://127.0.0.1:1080\"").unwrap();
+        assert_eq!(
+            c.network.proxy(),
+            Ok(Some("socks5h://127.0.0.1:1080".to_owned()))
+        );
+        assert_eq!(Config::default().network.proxy(), Ok(None));
     }
 
     #[test]

@@ -1644,6 +1644,7 @@ impl App {
             | settings::Setting::MalojaUrl
             | settings::Setting::MalojaKey
             | settings::Setting::Discord
+            | settings::Setting::Proxy
             | settings::Setting::ServerAddress(_)
             | settings::Setting::ServerUser(_)
             | settings::Setting::LocalFolders => None,
@@ -3287,6 +3288,18 @@ impl App {
                 self.lyrics_wanted()
             }
             Action::SettingTyped(setting, text) => {
+                // Refused here rather than at the next start, which an
+                // address that is not one would stop.
+                if let Err(refusal) = settings::check_text(setting, &text) {
+                    self.say(refusal);
+                    // The box again, on what was typed: one wrong letter
+                    // should not cost the whole address.
+                    self.setting_edit = Some(settings::Edit {
+                        setting,
+                        typed: text,
+                    });
+                    return None;
+                }
                 settings::set_text(&mut self.config, setting, &text);
                 self.save_config();
                 Some(Action::SettingChanged(setting))

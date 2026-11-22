@@ -8,6 +8,10 @@ fn main() {
     if host_cdm() {
         return;
     }
+    if let Err(e) = use_proxy() {
+        eprintln!("{e}");
+        std::process::exit(1);
+    }
     let code = std::sync::Arc::new(std::sync::atomic::AtomicI32::new(0));
     let exit = code.clone();
     sonora_tui::shell::mediakeys_macos::run_with_main_loop(move || async move {
@@ -25,7 +29,27 @@ fn main() -> anyhow::Result<()> {
     if host_cdm() {
         return Ok(());
     }
+    use_proxy()?;
     app()
+}
+
+/// Names the config's proxy in the environment, where reqwest looks for one
+/// each time a client is built: see `config::NetworkConfig`. Called while
+/// this is still the only thread, since the environment is not safe to
+/// change under another that reads it.
+///
+/// A proxy that cannot be used stops the start: carrying on would send the
+/// requests directly. A config that cannot be read is left for the app to
+/// report when it reads it in turn, with the log up to keep the reason.
+fn use_proxy() -> anyhow::Result<()> {
+    use sonora_tui::config::{paths, Config};
+    let Ok(config) = Config::load() else {
+        return Ok(());
+    };
+    config.network.name_in_environment().map_err(|error| {
+        let file = paths::config_file().unwrap_or_default();
+        anyhow::anyhow!("proxy, under [network] in {}: {error}", file.display())
+    })
 }
 
 /// The webkit2gtk check: this executable started again by `webview` on

@@ -358,7 +358,7 @@ delivers them rather than the terminal.
 ## Settings
 
 Settings (`8`) edits `config.toml` in place, row by row: the service, the
-sound, the content filters, the look, the scrobbling accounts, the Discord
+sound, the content filters, the look, the proxy, the scrobbling accounts, the Discord
 application, the Subsonic and Jellyfin servers and the music folders. `h`/`l` step a
 value, Enter opens a box on a text row and
 saves on Enter, `x` drops the last music folder. A secret is drawn as dots
@@ -489,6 +489,39 @@ halfblocks = true   # covers as half blocks, for a terminal that claims an image
                     # protocol and draws it wrong; read at start
 list_view = true    # Playlists and Albums as a list rather than covers; `v`
 ```
+
+## Proxy
+
+```toml
+[network]
+proxy = "socks5h://127.0.0.1:1080"   # empty: none
+```
+
+The requests to the services go through it: the catalogue, the covers, the
+lyrics and the audio. It takes `socks5h`, `socks5`, `socks4a`, `socks4`,
+`http` and `https`; a user name and password go in the address
+(`socks5h://user:password@host:1080`), and are then in `config.toml` as
+written. With `socks5h` and `socks4a` the proxy looks the names up too;
+with `socks5` and `socks4` this machine does first. The Proxy row in
+Settings writes the same key, and draws the password as dots. It is read
+at the start, so a change waits for the next one, and an address that is
+not one stops the start rather than let the requests leave directly.
+
+It is handed on as `ALL_PROXY`, `HTTPS_PROXY` and `HTTP_PROXY`, over
+whatever the shell had set, and the programs the app starts inherit them.
+`NO_PROXY` is set too: this machine and the private ranges (`10.0.0.0/8`,
+`172.16.0.0/12`, `192.168.0.0/16`) are reached directly, so a Subsonic,
+Jellyfin or Maloja server at home still answers.
+
+What does not go through it:
+
+- **Spotify's connection and audio.** They are librespot's, which knows
+  HTTP proxies only and is not handed this one. Its sign-in and the
+  catalogue pages asked over HTTP do go through.
+- **Jellyfin's remote control**, a WebSocket of its own. The library and
+  the audio do go through.
+- **The sign-in windows** of Apple Music, Deezer and YouTube Music, which
+  are the system's browser engine and follow the system's proxy settings.
 
 ## Where things live
 
