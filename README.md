@@ -526,6 +526,9 @@ What does not go through it:
   the audio do go through.
 - **The sign-in windows** of Apple Music, Deezer and YouTube Music, which
   are the system's browser engine and follow the system's proxy settings.
+  So with a proxy set they do not open on their own: the sign-in starts
+  at the box the cookies are pasted in, and Enter on it, empty, opens the
+  window for whoever wants it anyway.
 
 ## Where things live
 

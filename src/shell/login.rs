@@ -184,7 +184,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
             ]),
             Line::from(""),
             Line::from("Enter to send, Esc to cancel."),
-            Line::from("Enter with nothing pasted opens the sign-in window again."),
+            Line::from("Enter with nothing pasted opens the sign-in window."),
         ],
         LoginState::Accounts { choices, selected } => {
             let question = match choices.kind {
