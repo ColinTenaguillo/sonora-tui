@@ -495,6 +495,7 @@ list_view = true    # Playlists and Albums as a list rather than covers; `v`
 ```toml
 [network]
 proxy = "socks5h://127.0.0.1:1080"   # empty: none
+no_proxy = "localhost,192.168.0.0/16,music.example"   # optional, see below
 ```
 
 The requests to the services go through it: the catalogue, the covers, the
@@ -511,7 +512,10 @@ It is handed on as `ALL_PROXY`, `HTTPS_PROXY` and `HTTP_PROXY`, over
 whatever the shell had set, and the programs the app starts inherit them.
 `NO_PROXY` is set too: this machine and the private ranges (`10.0.0.0/8`,
 `172.16.0.0/12`, `192.168.0.0/16`) are reached directly, so a Subsonic,
-Jellyfin or Maloja server at home still answers.
+Jellyfin or Maloja server at home still answers. `no_proxy` replaces that
+list with its own, written as `NO_PROXY` is: names, addresses and ranges
+with commas between. Left empty (`no_proxy = ""`), nothing is exempt, this
+machine included. It has no row in Settings.
 
 What does not go through it:
 

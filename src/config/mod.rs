@@ -219,6 +219,9 @@ pub struct DiscordConfig {
 #[serde(default)]
 pub struct NetworkConfig {
     pub proxy: String,
+    /// What is reached without the proxy, as `NO_PROXY` is written; absent
+    /// means [`DIRECT`], and empty that nothing is exempt.
+    pub no_proxy: Option<String>,
 }
 
 /// What reqwest reads its proxy from. All three, so that one already set
@@ -228,7 +231,8 @@ const PROXY_VARIABLES: [&str; 3] = ["ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY"];
 /// What stays off the proxy: this machine and the private ranges, where a
 /// Subsonic, Jellyfin or Maloja server of the listener's own is, and which
 /// a proxy elsewhere could not reach. Set over any `NO_PROXY` inherited, so
-/// that nothing else is exempt without the config saying so.
+/// that nothing else is exempt without the config saying so: `no_proxy`
+/// there replaces this list.
 const DIRECT: &str = "localhost,127.0.0.0/8,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16";
 
 /// The schemes reqwest connects through.
@@ -284,7 +288,7 @@ impl NetworkConfig {
         for variable in PROXY_VARIABLES {
             std::env::set_var(variable, &proxy);
         }
-        std::env::set_var("NO_PROXY", DIRECT);
+        std::env::set_var("NO_PROXY", self.no_proxy.as_deref().unwrap_or(DIRECT));
         Ok(())
     }
 }
@@ -637,6 +641,7 @@ mod tests {
         let proxy = |address: &str| {
             NetworkConfig {
                 proxy: address.into(),
+                ..NetworkConfig::default()
             }
             .proxy()
         };
@@ -672,6 +677,7 @@ mod tests {
         let proxy = |address: &str| {
             NetworkConfig {
                 proxy: address.into(),
+                ..NetworkConfig::default()
             }
             .proxy()
             .unwrap()
@@ -697,6 +703,7 @@ mod tests {
         let shown = |address: &str| {
             NetworkConfig {
                 proxy: address.into(),
+                ..NetworkConfig::default()
             }
             .proxy_shown()
         };
@@ -720,6 +727,23 @@ mod tests {
             Ok(Some("socks5h://127.0.0.1:1080".to_owned()))
         );
         assert_eq!(Config::default().network.proxy(), Ok(None));
+    }
+
+    #[test]
+    fn no_proxy_is_kept_as_written_when_the_config_is_saved_again() {
+        // Settings writes the whole file back: an empty list must not come
+        // back as an absent one, which stands for the built-in list.
+        for (written, read) in [
+            ("", None),
+            ("no_proxy = \"\"", Some("")),
+            ("no_proxy = \"10.1.0.0/16\"", Some("10.1.0.0/16")),
+        ] {
+            let c: Config = toml::from_str(&format!("[network]\n{written}")).unwrap();
+            assert_eq!(c.network.no_proxy.as_deref(), read);
+            let saved = toml::to_string_pretty(&c).unwrap();
+            let back: Config = toml::from_str(&saved).unwrap();
+            assert_eq!(back.network, c.network, "{saved}");
+        }
     }
 
     #[test]

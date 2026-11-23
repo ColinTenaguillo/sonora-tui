@@ -279,7 +279,10 @@ pub fn check_text(setting: Setting, text: &str) -> Result<(), String> {
     if setting != Setting::Proxy {
         return Ok(());
     }
-    let typed = crate::config::NetworkConfig { proxy: text.into() };
+    let typed = crate::config::NetworkConfig {
+        proxy: text.into(),
+        ..Default::default()
+    };
     typed
         .proxy()
         .map(drop)
