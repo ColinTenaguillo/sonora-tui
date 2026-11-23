@@ -3430,6 +3430,14 @@ impl App {
         self.login = match prompt {
             music::SignInPrompt::Code { code, url } => login::LoginState::Waiting { code, url },
             music::SignInPrompt::Url(url) => login::LoginState::Url(url),
+            // Behind a proxy the paste box comes first: the window is the
+            // system's web view, which the proxy of `[network]` does not
+            // reach, and opened unasked it would leave directly.
+            music::SignInPrompt::Secret if !self.config.network.proxy.trim().is_empty() => {
+                login::LoginState::Secret {
+                    typed: login::Secret::default(),
+                }
+            }
             // The service's own page answers it, with no key to press; the
             // paste box only comes up if that window is closed.
             music::SignInPrompt::Secret => return Some(Action::OpenSignInWindow),

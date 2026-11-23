@@ -633,6 +633,32 @@ fn the_cookie_prompt_opens_the_sign_in_window_and_closing_it_leaves_the_paste_bo
 }
 
 #[test]
+fn behind_a_proxy_the_cookie_prompt_goes_to_the_paste_box_and_opens_no_window() {
+    // The window is the system's web view, which the proxy of `[network]`
+    // does not reach: opened unasked, it would leave directly. Enter on the
+    // empty box still opens it, for whoever wants it anyway.
+    let mut app = App::default();
+    app.config.provider.kind = crate::config::ProviderKind::Deezer;
+    app.config.network.proxy = " socks5h://127.0.0.1:1080 ".into();
+
+    assert!(app
+        .update(Action::LoginPrompt(music::SignInPrompt::Secret))
+        .is_none());
+    assert!(matches!(app.login, login::LoginState::Secret { .. }));
+    assert!(matches!(
+        key(&mut app, KeyCode::Enter),
+        Some(Action::OpenSignInWindow)
+    ));
+
+    // Blank is no proxy: the window opens as it does without the key.
+    app.config.network.proxy = "  ".into();
+    assert!(matches!(
+        app.update(Action::LoginPrompt(music::SignInPrompt::Secret)),
+        Some(Action::OpenSignInWindow)
+    ));
+}
+
+#[test]
 fn a_cookie_sign_in_takes_what_is_pasted_and_sends_it_as_the_answer() {
     // Deezer, Apple and YouTube want the cookies of a signed-in tab.
     // Enter contacts the service; its Secret prompt opens the box;
