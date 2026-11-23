@@ -43,6 +43,7 @@ async fn clients_built_without_a_proxy_go_through_the_one_the_config_names() {
     // Typed in capitals, which reqwest would skip if handed on as typed.
     let network = |proxy: std::net::SocketAddr| NetworkConfig {
         proxy: format!("SOCKS5H://{proxy}"),
+        ..NetworkConfig::default()
     };
     network(for_the_providers).name_in_environment().unwrap();
 
@@ -72,4 +73,24 @@ async fn clients_built_without_a_proxy_go_through_the_one_the_config_names() {
         .await;
     assert_eq!(heard(asked), Some(b'G'), "the server hears GET");
     assert!(proxy.try_recv().is_err(), "and the proxy nothing");
+
+    // Unless `no_proxy` says otherwise: an empty one exempts nothing, and
+    // the same server is then asked through the proxy.
+    let (for_everything, everything) = listener();
+    let (server, _) = listener();
+    NetworkConfig {
+        no_proxy: Some(String::new()),
+        ..network(for_everything)
+    }
+    .name_in_environment()
+    .unwrap();
+    let _ = reqwest::Client::new()
+        .get(format!("http://{server}/"))
+        .send()
+        .await;
+    assert_eq!(
+        heard(everything),
+        Some(SOCKS5),
+        "no_proxy replaces the list"
+    );
 }
