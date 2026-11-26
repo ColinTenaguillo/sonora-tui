@@ -444,6 +444,10 @@ pub struct UiConfig {
     /// Whether Playlists and Albums are a list, a line each, rather than a
     /// grid of covers. What `v` toggles there.
     pub list_view: bool,
+    /// Whether the desktop is notified when the track changes. Off by
+    /// default: a notification nobody asked for is the kind that gets a
+    /// program muted.
+    pub notifications: bool,
     /// Which set of colours to draw with: "default" or "catppuccin".
     ///
     /// A name rather than a table, so the common case is one word. The

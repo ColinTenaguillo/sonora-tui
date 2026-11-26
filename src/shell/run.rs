@@ -449,6 +449,9 @@ async fn run_loop(
 ) -> anyhow::Result<()> {
     // The last request the loop sent; an open stamped after it is fetched.
     let mut fetched = RequestId::default();
+    // Always there, and idle unless `[ui] notifications` is on: the row in
+    // Settings then takes effect at the next track, with nothing to start.
+    let notices = crate::notify::spawn();
     while !app.should_quit {
         // A modal that covered the artwork leaves its text there: the image
         // cells are marked `Skip`, so the next frame writes nothing over
@@ -471,6 +474,9 @@ async fn run_loop(
             tokio::spawn(sending);
         }
         app.tell_presence();
+        if let Some(notice) = app.track_to_announce() {
+            let _ = notices.send(notice);
+        }
     }
     Ok(())
 }

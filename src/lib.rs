@@ -9,6 +9,7 @@ pub mod catalogue;
 pub mod config;
 pub mod domain;
 pub mod library;
+pub mod notify;
 pub mod playback;
 pub mod presence;
 pub mod scrobble;

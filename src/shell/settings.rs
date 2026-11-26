@@ -26,6 +26,8 @@ pub enum Setting {
     Autoplay,
     Explicit,
     Ai,
+    /// Whether the desktop is told when the track changes.
+    Notifications,
     NerdFont,
     Theme,
     /// What the requests to the services go through.
@@ -64,7 +66,7 @@ pub enum Kind {
 }
 
 impl Setting {
-    pub const ALL: [Setting; 29] = [
+    pub const ALL: [Setting; 30] = [
         Setting::Service,
         Setting::Quality,
         Setting::Volume,
@@ -76,6 +78,7 @@ impl Setting {
         Setting::Autoplay,
         Setting::Explicit,
         Setting::Ai,
+        Setting::Notifications,
         Setting::NerdFont,
         Setting::Theme,
         Setting::Proxy,
@@ -111,6 +114,7 @@ impl Setting {
             | Setting::Autoplay
             | Setting::Explicit
             | Setting::Ai
+            | Setting::Notifications
             | Setting::NerdFont
             | Setting::Librefm => Kind::Toggle,
             Setting::LastfmKey
@@ -142,7 +146,8 @@ impl Setting {
             | Setting::MatchRate
             | Setting::Autoplay
             | Setting::Explicit
-            | Setting::Ai => "Playback",
+            | Setting::Ai
+            | Setting::Notifications => "Playback",
             Setting::NerdFont | Setting::Theme => "Appearance",
             Setting::LastfmKey
             | Setting::LastfmSecret
@@ -191,6 +196,7 @@ impl Setting {
             Setting::Autoplay => "Autoplay",
             Setting::Explicit => "Allow explicit content",
             Setting::Ai => "Allow AI-generated content",
+            Setting::Notifications => "Notify on track change",
             Setting::NerdFont => "Nerd font icons",
             Setting::Theme => "Theme",
             Setting::LastfmKey => "Last.fm API key",
@@ -226,6 +232,7 @@ impl Setting {
             Setting::Autoplay => "Keep playing something similar when the queue runs out.",
             Setting::Explicit => "Off, tracks marked E will not play.",
             Setting::Ai => "Off, tracks marked AI will not play.",
+            Setting::Notifications => "A desktop notification, with the cover, when a track starts.",
             Setting::NerdFont => "Needs a nerd font. Empty boxes mean you have none.",
             Setting::Theme => "h or l to pick one; the colours change at once.",
             Setting::LastfmKey => "From last.fm/api/account/create. Enter to type it.",
@@ -510,6 +517,7 @@ pub fn cycle(config: &mut crate::config::Config, setting: Setting, forward: bool
         Setting::Autoplay => config.playback.autoplay = !config.playback.autoplay,
         Setting::Explicit => config.playback.explicit = !config.playback.explicit,
         Setting::Ai => config.playback.ai = !config.playback.ai,
+        Setting::Notifications => config.ui.notifications = !config.ui.notifications,
         Setting::NerdFont => {
             config.ui.nerd_font = !config.ui.nerd_font;
             // Applied at once rather than at the next start: the icons are
@@ -795,6 +803,7 @@ fn value_of(
         Setting::Autoplay => on_off(config.playback.autoplay),
         Setting::Explicit => on_off(config.playback.explicit),
         Setting::Ai => on_off(config.playback.ai),
+        Setting::Notifications => on_off(config.ui.notifications),
         // Drawn with the icons themselves: a terminal cannot be asked what
         // font it has, so the row shows the glyphs and lets the user see.
         Setting::NerdFont => {
@@ -1409,7 +1418,7 @@ mod tests {
             "and reaches the bottom at the last row: {bottom:?}"
         );
         assert!(
-            thumb(&state, 100).is_empty(),
+            thumb(&state, 120).is_empty(),
             "a pane that holds it all has no bar"
         );
     }

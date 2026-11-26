@@ -488,7 +488,20 @@ nerd_font = true    # Nerd Font glyphs for the icons; off by default, never gues
 halfblocks = true   # covers as half blocks, for a terminal that claims an image
                     # protocol and draws it wrong; read at start
 list_view = true    # Playlists and Albums as a list rather than covers; `v`
+notifications = true   # a desktop notification when a track starts; off by default
 ```
+
+The notification names the track, the artist and the album; "Notify on
+track change" in Settings is the same key. On Linux and Windows the cover
+is beside them, written to the temporary folder as one file that each
+track writes over, and on Linux each notification replaces the last. On
+macOS the system shows none from a program that is not an application, so
+it is sent through one that is. With
+[terminal-notifier](https://github.com/julienXX/terminal-notifier)
+installed (`brew install terminal-notifier`) it has the cover and replaces
+the last; allow its notifications the first time macOS asks, or in System
+Settings. Without it, or while it is not allowed, the notification goes
+through AppleScript: no cover, and shown under Script Editor's name.
 
 ## Proxy
 
