@@ -220,6 +220,51 @@ fn the_quality_badge_omits_bit_depth_when_unknown() {
 }
 
 #[test]
+fn a_track_is_announced_once_when_it_starts_and_only_with_notifications_on() {
+    use std::time::Duration;
+    let track = |id: u64, title: &str| crate::domain::Track {
+        id: crate::domain::TrackId::from(id),
+        album: "Album".into(),
+        cover: Some("https://covers.example/a.jpg".into()),
+        ..crate::domain::Track::sample(title, "Someone", Duration::from_secs(200))
+    };
+    let mut app = App::default();
+    app.now_playing.track = Some(track(1, "First"));
+    app.now_playing.playing = true;
+
+    assert_eq!(app.track_to_announce(), None, "off by default");
+
+    app.config.ui.notifications = true;
+    let notice = app.track_to_announce().expect("the track that plays");
+    assert_eq!(
+        (notice.title.as_str(), notice.artist.as_str()),
+        ("First", "Someone")
+    );
+    assert_eq!(notice.album, "Album");
+    assert_eq!(
+        notice.cover.as_deref(),
+        Some("https://covers.example/a.jpg")
+    );
+    assert_eq!(app.track_to_announce(), None, "said once");
+
+    // Pausing and resuming is the same track still.
+    app.now_playing.playing = false;
+    assert_eq!(app.track_to_announce(), None);
+    app.now_playing.playing = true;
+    assert_eq!(app.track_to_announce(), None);
+
+    // The next one is loaded before it plays: nothing until it does.
+    app.now_playing.track = Some(track(2, "Second"));
+    app.now_playing.playing = false;
+    assert_eq!(app.track_to_announce(), None);
+    app.now_playing.playing = true;
+    assert_eq!(
+        app.track_to_announce().map(|n| n.title),
+        Some("Second".to_owned())
+    );
+}
+
+#[test]
 fn a_track_without_a_duration_takes_the_streams() {
     use std::time::Duration;
     let mut app = App::default();

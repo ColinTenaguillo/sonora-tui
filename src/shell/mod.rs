@@ -1208,6 +1208,9 @@ pub struct App {
     /// and what it was last told: the track and whether it plays.
     pub presence: Option<std::sync::mpsc::Sender<crate::presence::Presence>>,
     pub presence_shown: Option<(crate::domain::TrackId, bool)>,
+    /// The track the desktop was last told has started, so that a pause
+    /// and a resume do not say it again.
+    pub announced: Option<crate::domain::TrackId>,
     /// The Widevine module, for a service whose streams are encrypted.
     pub cdm: drmview::Cdm,
     /// The download waiting on the user's word about Google's terms.
@@ -1631,6 +1634,9 @@ impl App {
             | settings::Setting::Autoplay
             | settings::Setting::Explicit
             | settings::Setting::Ai
+            // Read by the loop after each action: turned on while a track
+            // plays, that track is announced at once, which shows it works.
+            | settings::Setting::Notifications
             | settings::Setting::NerdFont => None,
             settings::Setting::Theme | settings::Setting::Librefm => {
                 Some(Action::SettingChanged(which))
@@ -1810,6 +1816,25 @@ impl App {
             },
         };
         let _ = sender.send(shown);
+    }
+
+    /// The track that has just started playing, to notify the desktop of
+    /// when `[ui] notifications` is on; `None` once it has been said.
+    pub fn track_to_announce(&mut self) -> Option<crate::notify::Notice> {
+        if !self.config.ui.notifications || !self.now_playing.playing {
+            return None;
+        }
+        let track = self.now_playing.track.as_ref()?;
+        if self.announced.as_ref() == Some(&track.id) {
+            return None;
+        }
+        self.announced = Some(track.id.clone());
+        Some(crate::notify::Notice {
+            title: track.title.clone(),
+            artist: track.artist.clone(),
+            album: track.album.clone(),
+            cover: track.cover.clone(),
+        })
     }
 
     /// The listen that just ended goes to the outbox if `played` earned it
