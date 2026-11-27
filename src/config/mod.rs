@@ -293,6 +293,16 @@ impl NetworkConfig {
     }
 }
 
+/// A client for the requests this app makes itself: the covers, the
+/// lyrics. reqwest is built without a TLS provider of its own, so that
+/// sonora's crates and this one agree on ring, and it panics when none is
+/// installed: this installs ring first, which `main` has already done and
+/// a test has not.
+pub fn http() -> reqwest::Client {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::Client::new()
+}
+
 /// The folders the local-files provider reads.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]

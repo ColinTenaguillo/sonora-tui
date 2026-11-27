@@ -516,7 +516,14 @@ fn translate(event: music::PlaybackEvent, starts: &mut Starts) -> Option<Playbac
             starts.announced = None;
             Some(PlaybackEvent::Finished)
         }
-        Engine::Unavailable { id: Some(id) } => {
+        Engine::Unavailable {
+            id: Some(id),
+            timed_out: true,
+        } => Some(failed(
+            &id,
+            "the service did not answer in time; check the connection".into(),
+        )),
+        Engine::Unavailable { id: Some(id), .. } => {
             Some(failed(&id, "track not available for playback".into()))
         }
         Engine::Throttled { id: Some(id) } => Some(failed(
@@ -524,35 +531,31 @@ fn translate(event: music::PlaybackEvent, starts: &mut Starts) -> Option<Playbac
             "the service is rate limiting playback; try again shortly".into(),
         )),
         Engine::Gated => Some(PlaybackEvent::SessionExpired),
-        // Only Spotify sends this, when its audio key is denied (0x0001).
-        // A free account gets it, and so does a Premium one that Spotify
-        // moved to its newer sign-in flow -- accounts made since late
-        // 2025, more over time. librespot cannot stream for those yet:
-        // librespot-org/librespot#1649. Nothing on this side fixes it.
+        // Only Spotify sends this, when its audio key is denied. A free
+        // account gets it, and so does a Premium one that Spotify moved to
+        // its newer sign-in flow. Nothing on this side fixes it.
         Engine::Refused => Some(PlaybackEvent::Error(
-            "Spotify is not granting this account playback keys: free, or a newer account librespot cannot stream for yet (librespot#1649)".into(),
+            "Spotify is not granting this account playback keys: free, or on a sign-in flow Spotify gives none to".into(),
+        )),
+        // Only YouTube Music sends this, for an address it turns away.
+        Engine::Blocked => Some(PlaybackEvent::Error(
+            "the service refuses this network; no track will load until it changes".into(),
         )),
         Engine::Length { duration, .. } => Some(PlaybackEvent::Length(duration)),
         Engine::OutputChanged { heard } => Some(PlaybackEvent::OutputChanged {
             heard: heard.map(|(id, at)| (TrackId::from(id), at)),
         }),
         // A resume, a seek and a pause are things the shell already knows.
-        // The queue events are Soloist's, the headless Spotify player sonora
-        // plays through once the Sonora app has set it up. They follow a
-        // queue shared with other Spotify apps, which this one does not:
-        // a track another app queues is not taken up, and Soloist
-        // pauses it; adopt QueuedTrack here if that is wanted.
+        // A step back is another Spotify app's, over a queue shared with
+        // it, which this one does not follow.
         Engine::Playing { .. }
         | Engine::Loading { .. }
         | Engine::Paused { .. }
         | Engine::Seeked { .. }
+        | Engine::SteppedBack { .. }
         | Engine::Downloaded { id: None }
-        | Engine::Unavailable { id: None }
-        | Engine::Throttled { id: None }
-        | Engine::QueueChanged { .. }
-        | Engine::QueuedTrack { .. }
-        | Engine::QueueRejected { .. }
-        | Engine::QueueAppended { .. } => None,
+        | Engine::Unavailable { id: None, .. }
+        | Engine::Throttled { id: None } => None,
     }
 }
 
@@ -832,6 +835,7 @@ mod tests {
         let event = translate(
             music::PlaybackEvent::Unavailable {
                 id: Some("655911".into()),
+                timed_out: false,
             },
             &mut Starts::default(),
         );
@@ -842,6 +846,25 @@ mod tests {
             }
             other => panic!("expected Failed, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_load_that_timed_out_points_at_the_connection_not_the_track() {
+        let event = translate(
+            music::PlaybackEvent::Unavailable {
+                id: Some("655911".into()),
+                timed_out: true,
+            },
+            &mut Starts::default(),
+        );
+        assert!(
+            matches!(&event, Some(PlaybackEvent::Failed { message, .. }) if message.contains("connection")),
+            "got {event:?}"
+        );
+        assert!(matches!(
+            translate(music::PlaybackEvent::Blocked, &mut Starts::default()),
+            Some(PlaybackEvent::Error(message)) if message.contains("network")
+        ));
     }
 
     #[test]

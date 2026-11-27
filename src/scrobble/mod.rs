@@ -1,6 +1,6 @@
 //! Scrobbling: telling Last.fm, Libre.fm, ListenBrainz or Maloja what played.
 //!
-//! The services and their protocols come from sonora's `music` crate. This
+//! The services and their protocols come from sonora's `scrobble` crate. This
 //! links the ones the config names, keeps their accounts in a file beside
 //! the token, turns a track into a listen, and sends what the shell puts in
 //! the outbox. Whether a listen counts is the services' own rule, and lives
@@ -16,19 +16,33 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use music::scrobble::{Account, Play, Secret, Service};
+use scrobbling::{Account, Play, Secret, Service};
 
 use crate::config::ScrobbleConfig;
 use crate::domain::Track;
 
-/// A service with the account it is linked to.
+/// A service with the account it is linked to, and whether listens go to
+/// it: the switch of its row in Settings.
 #[derive(Clone)]
 pub struct Linked {
     pub service: Arc<dyn Service>,
     pub account: Account,
+    pub enabled: bool,
+}
+
+/// An account as the file keeps it. The switch sits beside the account's
+/// own fields, where sonora's `Account` had it until it moved to sonora's
+/// settings: a file written before reads the same.
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+struct Kept {
+    #[serde(flatten)]
+    account: Account,
+    #[serde(default)]
+    enabled: bool,
 }
 
 impl std::fmt::Debug for Linked {
@@ -83,7 +97,7 @@ pub fn secret_for(config: &ScrobbleConfig, id: &str) -> Option<Secret> {
 /// Whether the config names any service at all, so a run without one
 /// never opens the account file or says anything about scrobbling.
 pub fn configured(config: &ScrobbleConfig) -> bool {
-    music::scrobble::services()
+    scrobbling::services()
         .iter()
         .any(|s| secret_for(config, s.id()).is_some())
 }
@@ -110,14 +124,15 @@ pub async fn link(
     let stored = file.map(load).unwrap_or_default();
     let mut linked = Vec::new();
     let mut refused = Vec::new();
-    for service in music::scrobble::services() {
+    for service in scrobbling::services() {
         let Some(secret) = secret_for(config, service.id()) else {
             continue;
         };
-        if let Some(account) = still_linked(&stored, service.id(), &secret, fresh) {
+        if let Some(kept) = still_linked(&stored, service.id(), &secret, fresh) {
             linked.push(Linked {
                 service,
-                account: account.clone(),
+                account: kept.account.clone(),
+                enabled: kept.enabled,
             });
             continue;
         }
@@ -127,7 +142,11 @@ pub async fn link(
         match service.connect(secret).await {
             Ok(account) => {
                 tracing::info!("scrobbling: linked {} as {}", service.id(), account.name);
-                linked.push(Linked { service, account });
+                linked.push(Linked {
+                    service,
+                    account,
+                    enabled: true,
+                });
             }
             Err(error) => {
                 tracing::warn!("scrobbling: could not link {}: {error:#}", service.id());
@@ -144,15 +163,16 @@ pub async fn link(
 /// it again with what was typed, nor for a ListenBrainz account linked with
 /// another token, or to another server, than the config now names.
 fn still_linked<'a>(
-    stored: &'a HashMap<String, Account>,
+    stored: &'a HashMap<String, Kept>,
     id: &str,
     secret: &Secret,
     fresh: Option<&str>,
-) -> Option<&'a Account> {
+) -> Option<&'a Kept> {
     if fresh == Some(id) {
         return None;
     }
-    let account = stored.get(id).filter(|a| a.linked())?;
+    let kept = stored.get(id).filter(|k| k.account.linked())?;
+    let account = &kept.account;
     match secret {
         // sonora keeps the server as it rewrote it -- scheme added, `/1`
         // dropped -- so a host is all the two have in common.
@@ -161,7 +181,7 @@ fn still_linked<'a>(
         {
             None
         }
-        _ => Some(account),
+        _ => Some(kept),
     }
 }
 
@@ -185,7 +205,7 @@ pub fn store(file: Option<&Path>, linked: &[Linked]) {
 }
 
 /// The accounts kept from the last run, by service id.
-fn load(file: &Path) -> HashMap<String, Account> {
+fn load(file: &Path) -> HashMap<String, Kept> {
     std::fs::read(file)
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -194,9 +214,15 @@ fn load(file: &Path) -> HashMap<String, Account> {
 
 /// The accounts, readable by the owner alone: a session key is a credential.
 fn save(file: &Path, linked: &[Linked]) -> anyhow::Result<()> {
-    let accounts: HashMap<&str, &Account> = linked
+    let accounts: HashMap<&str, Kept> = linked
         .iter()
-        .map(|l| (l.service.id(), &l.account))
+        .map(|l| {
+            let kept = Kept {
+                account: l.account.clone(),
+                enabled: l.enabled,
+            };
+            (l.service.id(), kept)
+        })
         .collect();
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir)?;
@@ -214,6 +240,9 @@ fn save(file: &Path, linked: &[Linked]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// How many listens have begun since the start, which numbers each one.
+static BEGUN: AtomicU64 = AtomicU64::new(0);
+
 /// A track as a listen that started `at`. A track with no artist or no
 /// title is nothing a service can file, so it is not one.
 pub fn play_of(track: &Track, at: SystemTime) -> Option<Play> {
@@ -221,6 +250,7 @@ pub fn play_of(track: &Track, at: SystemTime) -> Option<Play> {
         return None;
     }
     Some(Play {
+        order: BEGUN.fetch_add(1, Ordering::Relaxed),
         artist: track.artist.clone(),
         title: track.title.clone(),
         album: (!track.album.trim().is_empty()).then(|| track.album.clone()),
@@ -275,7 +305,7 @@ type Sending = Pin<Box<dyn Future<Output = ()> + Send>>;
 pub fn drain(linked: &[Linked], outbox: &mut Outbox) -> Vec<Sending> {
     let mut sending: Vec<Sending> = Vec::new();
     if let Some(play) = outbox.now_playing.take() {
-        for l in linked.iter().filter(|l| l.account.enabled).cloned() {
+        for l in linked.iter().filter(|l| l.enabled).cloned() {
             let play = play.clone();
             sending.push(Box::pin(async move {
                 if let Err(error) = l.service.now_playing(&l.account, &play).await {
@@ -289,7 +319,7 @@ pub fn drain(linked: &[Linked], outbox: &mut Outbox) -> Vec<Sending> {
     }
     let plays: Vec<Play> = std::mem::take(&mut outbox.finished);
     if !plays.is_empty() {
-        for l in linked.iter().filter(|l| l.account.enabled).cloned() {
+        for l in linked.iter().filter(|l| l.enabled).cloned() {
             // What the service still owes goes first, so the order holds.
             let backlog = Arc::clone(&outbox.backlog);
             let mut batch = owed(&backlog, l.service.id());
@@ -325,13 +355,15 @@ mod tests {
             token: token.into(),
             server: server.into(),
         };
-        let account = |server: &str| Account {
-            session: "t".into(),
-            server: server.into(),
+        let account = |server: &str| Kept {
+            account: Account {
+                session: "t".into(),
+                server: server.into(),
+                ..Account::default()
+            },
             enabled: true,
-            ..Account::default()
         };
-        let stored: HashMap<String, Account> = [("listenbrainz".to_owned(), account(""))].into();
+        let stored: HashMap<String, Kept> = [("listenbrainz".to_owned(), account(""))].into();
         let lb = "listenbrainz";
         assert!(still_linked(&stored, lb, &token("t", ""), None).is_some());
         assert!(
@@ -350,7 +382,7 @@ mod tests {
             still_linked(&stored, lb, &token("t", "https://lb.example.org"), None).is_none(),
             "a server now"
         );
-        let own: HashMap<String, Account> =
+        let own: HashMap<String, Kept> =
             [("listenbrainz".to_owned(), account("https://lb.example.org"))].into();
         assert!(
             still_linked(&own, lb, &token("t", ""), None).is_none(),
@@ -360,14 +392,42 @@ mod tests {
     }
 
     #[test]
+    fn the_account_file_keeps_the_switch_beside_the_account_as_it_always_did() {
+        let dir = std::env::temp_dir().join(format!("sonora-tui-scrobble-{}", std::process::id()));
+        let file = dir.join("scrobble.json");
+        std::fs::create_dir_all(&dir).expect("a folder");
+        // As a release before the switch left sonora's `Account` wrote it.
+        std::fs::write(
+            &file,
+            r#"{"listenbrainz":{"session":"t","name":"me","enabled":true},"maloja":{"session":"k","enabled":false}}"#,
+        )
+        .expect("a file");
+        let kept = load(&file);
+        assert!(kept["listenbrainz"].enabled && kept["listenbrainz"].account.session == "t");
+        assert!(!kept["maloja"].enabled);
+
+        let linked = Linked {
+            service: scrobbling::services().remove(2),
+            account: kept["listenbrainz"].account.clone(),
+            enabled: false,
+        };
+        save(&file, &[linked]).expect("saved");
+        let again = load(&file);
+        assert!(!again["listenbrainz"].enabled, "the switch is written back");
+        assert_eq!(again["listenbrainz"].account.name, "me");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_listenbrainz_account_on_a_server_of_ones_own_is_named_by_its_host() {
         let on = |server: &str| {
             Linked {
-                service: music::scrobble::services().remove(2),
+                service: scrobbling::services().remove(2),
                 account: Account {
                     server: server.into(),
                     ..Account::default()
                 },
+                enabled: true,
             }
             .label()
         };
@@ -433,6 +493,7 @@ mod tests {
             album: None,
             duration: Duration::from_secs(200),
             at: SystemTime::UNIX_EPOCH,
+            order: 0,
         };
         keep(&backlog, "lastfm", vec![play("one"), play("two")]);
         assert!(
@@ -475,14 +536,14 @@ mod tests {
 
     #[test]
     fn the_outbox_is_emptied_into_one_request_per_service_and_kind() {
-        let service = music::scrobble::services().remove(2);
+        let service = scrobbling::services().remove(2);
         let linked = Linked {
             service,
             account: Account {
                 session: "t".into(),
-                enabled: true,
                 ..Account::default()
             },
+            enabled: true,
         };
         let play = play_of(
             &Track::sample("Song", "Someone", Duration::from_secs(200)),
@@ -499,10 +560,7 @@ mod tests {
         assert!(outbox.now_playing.is_none() && outbox.finished.is_empty());
 
         let off = Linked {
-            account: Account {
-                enabled: false,
-                ..linked.account.clone()
-            },
+            enabled: false,
             ..linked
         };
         outbox.finished.push(
@@ -521,8 +579,9 @@ mod tests {
 
     fn linked_label() -> String {
         Linked {
-            service: music::scrobble::services().remove(2),
+            service: scrobbling::services().remove(2),
             account: Account::default(),
+            enabled: true,
         }
         .label()
     }

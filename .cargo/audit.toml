@@ -1,14 +1,8 @@
-# Advisories cargo audit (CI's audit.yml) skips. The first three are in
-# librespot, which sonora's `music` pulls in as a git dependency:
-# librespot-core holds quick-xml 0.38 and rsa 0.9. Then paste, a proc-macro
-# under lofty (`music`) and image's pulp and rav1e, all at their latest
-# release. Nothing here can move them; the fix is upstream, then a new
-# `music` pin.
+# Advisories cargo audit (CI's audit.yml) skips: paste, a proc-macro under
+# lofty (sonora's crates) and image's pulp and rav1e, all at their latest
+# release. Nothing here can move it; the fix is upstream, then a new pin.
 # Drop an entry when its crate goes.
 [advisories]
 ignore = [
-  "RUSTSEC-2026-0194", # quick-xml 0.38: quadratic duplicate-attribute check
-  "RUSTSEC-2026-0195", # quick-xml 0.38: unbounded namespace allocation
-  "RUSTSEC-2023-0071", # rsa 0.9: Marvin timing attack, no fixed release
   "RUSTSEC-2024-0436", # paste 1: unmaintained, compile-time only
 ]

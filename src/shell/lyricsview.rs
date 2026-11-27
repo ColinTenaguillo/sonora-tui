@@ -89,15 +89,16 @@ pub fn query(track: &Track, provider: &'static str) -> music::LyricsQuery {
 /// The providers asked, in sonora's own order less the ones that need a
 /// signed-in service of their own.
 pub fn providers() -> Vec<Arc<dyn music::LyricsProvider>> {
+    let http = crate::config::http();
     vec![
         // A file's own tags or the `.lrc` beside it; silent for any other
         // track.
-        Arc::new(music::local::LocalLyrics),
-        Arc::new(music::binimum::Binimum::new()),
-        Arc::new(music::musixmatch::Musixmatch::new()),
-        Arc::new(music::lrclib::LrcLib::new()),
-        Arc::new(music::kugou::Kugou::new()),
-        Arc::new(music::netease::NetEase::new()),
+        Arc::new(local::LocalLyrics),
+        Arc::new(lyric_sources::lrcred::LrcRed::new(http.clone())),
+        Arc::new(lyric_sources::musixmatch::Musixmatch::new(http.clone())),
+        Arc::new(lyric_sources::lrclib::LrcLib::new(http.clone())),
+        Arc::new(lyric_sources::kugou::Kugou::new(http.clone())),
+        Arc::new(lyric_sources::netease::NetEase::new(http)),
     ]
 }
 
@@ -113,11 +114,11 @@ pub async fn search(query: music::LyricsQuery) -> Found {
             Err(error) => tracing::info!("lyrics: {} answered with {error:#}", provider.name()),
         }
     }
-    if music::lyrics::instrumental(&query, &hits) {
+    if lyrics::instrumental(&query, &hits) {
         return Found::Instrumental;
     }
-    let mut ranked = music::lyrics::rank(&query, hits);
-    music::lyrics::reshape(&mut ranked);
+    let mut ranked = lyrics::rank(&query, hits);
+    lyrics::reshape(&mut ranked);
     match ranked.into_iter().next() {
         Some(hit) if !hit.lyrics.is_empty() => Found::Sheet(hit.lyrics),
         _ => Found::Nothing,
@@ -143,7 +144,7 @@ fn synced_lines<'a>(
     at: Duration,
     palette: &Palette,
 ) -> (Vec<Line<'a>>, Option<usize>) {
-    let active = music::lyrics::active(lines, at);
+    let active = lyrics::active(lines, at);
     let mut out = Vec::with_capacity(lines.len() * 2);
     let mut active_row = None;
     for (i, line) in lines.iter().enumerate() {

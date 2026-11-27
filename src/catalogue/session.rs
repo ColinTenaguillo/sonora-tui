@@ -1215,6 +1215,8 @@ mod tests {
                 cover: None,
                 track_count: 1,
                 modified_at: None,
+                read_only: false,
+                revision: None,
             })
             .public
         };
@@ -1248,6 +1250,8 @@ mod tests {
                 cover: None,
                 track_count,
                 modified_at: None,
+                read_only: false,
+                revision: None,
             }))
         };
         let p = playlist(12);
@@ -1271,7 +1275,7 @@ mod tests {
                 release_type,
                 year,
                 track_count: 0,
-                release_date: String::new(),
+                release_date: None,
                 label: String::new(),
                 copyrights: Vec::new(),
                 added_at: None,
@@ -1318,7 +1322,7 @@ mod tests {
             release_type,
             year: 1959,
             track_count: 5,
-            release_date: String::new(),
+            release_date: None,
             label: String::new(),
             copyrights: Vec::new(),
             added_at: None,

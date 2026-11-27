@@ -236,7 +236,7 @@ fn draw_section(
             let linked: Vec<(String, String, bool)> = app
                 .scrobblers
                 .iter()
-                .map(|l| (l.service.id().to_string(), l.label(), l.account.enabled))
+                .map(|l| (l.service.id().to_string(), l.label(), l.enabled))
                 .collect();
             settings::render(
                 frame,

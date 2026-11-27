@@ -97,20 +97,20 @@ impl std::fmt::Debug for dyn Provider {
 /// The service the config names, signed out.
 pub fn provider_for(config: &Config) -> anyhow::Result<Arc<dyn Provider>> {
     Ok(match config.provider.kind {
-        ProviderKind::Tidal => Arc::new(music::tidal::TidalProvider::new()),
-        ProviderKind::Subsonic => Arc::new(music::subsonic::SubsonicProvider::new()),
-        ProviderKind::Jellyfin => Arc::new(music::jellyfin::JellyfinProvider::new()),
-        ProviderKind::Spotify => Arc::new(music::spotify::SpotifyProvider::from_env()),
-        ProviderKind::Apple => Arc::new(music::apple::AppleProvider::new()),
-        ProviderKind::Deezer => Arc::new(music::deezer::DeezerProvider::new()),
-        ProviderKind::Youtube => Arc::new(music::youtube::YouTubeProvider::new()),
+        ProviderKind::Tidal => Arc::new(tidal::TidalProvider::new()),
+        ProviderKind::Subsonic => Arc::new(subsonic::SubsonicProvider::new()),
+        ProviderKind::Jellyfin => Arc::new(jellyfin::JellyfinProvider::new()),
+        ProviderKind::Spotify => Arc::new(spotify::SpotifyProvider::from_env()),
+        ProviderKind::Apple => Arc::new(apple::AppleProvider::new()),
+        ProviderKind::Deezer => Arc::new(deezer::DeezerProvider::new()),
+        ProviderKind::Youtube => Arc::new(youtube::YouTubeProvider::new()),
         // Its index and artwork go under this app's own cache rather than
         // sonora's, so the two never read each other's files.
         ProviderKind::Local => {
             let dir = crate::config::paths::cache_dir()
                 .unwrap_or_else(std::env::temp_dir)
                 .join("local");
-            Arc::new(music::local::LocalProvider::new(
+            Arc::new(local::LocalProvider::new(
                 dir.clone(),
                 storage::Database::at(dir.join("state.sqlite")),
                 storage::Cache::at(dir.join("cache.sqlite")),

@@ -19,8 +19,8 @@ before committing; the tree is rustfmt's and CI checks it.
 
 - Never run a plain `cargo update`: it re-resolves the macOS media-key pins
   and breaks that build. Bump one crate with `--precise` (see CONTRIBUTING).
-- `music`, `storage` and `webview` are git pins to sonorahq/sonora, moved
-  weekly by `update-music.yml`. What they lack is proposed upstream first;
+- `music`, `storage`, `webview` and one crate per service are git pins to
+  sonorahq/sonora, moved weekly by `update-music.yml`. What they lack is proposed upstream first;
   when Sonora declines it, as it did for playlist lengths, it is done here.
 - No `unwrap` outside tests and `main`, and no component reaching into
   another's internals: `tests/architecture.rs` fails the build on either.

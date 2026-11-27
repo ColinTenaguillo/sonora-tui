@@ -1198,7 +1198,7 @@ pub struct App {
     /// was refused until the first gave up.
     pub link_task: Option<tokio::task::AbortHandle>,
     /// The listen in progress: the track playing, as a service files it.
-    pub listen: Option<music::scrobble::Play>,
+    pub listen: Option<scrobbling::Play>,
     /// What the loop sends on: the track that started, the listens that
     /// earned a submission.
     pub scrobble_outbox: crate::scrobble::Outbox,
@@ -3454,7 +3454,11 @@ impl App {
     fn on_login_prompt(&mut self, prompt: music::SignInPrompt) -> Option<Action> {
         self.login = match prompt {
             music::SignInPrompt::Code { code, url } => login::LoginState::Waiting { code, url },
-            music::SignInPrompt::Url(url) => login::LoginState::Url(url),
+            // A page the service ends its sign-in on, shown as an address to
+            // open. Only Plex asks for one, which is not offered here.
+            music::SignInPrompt::Url(url) | music::SignInPrompt::Window(url) => {
+                login::LoginState::Url(url)
+            }
             // Behind a proxy the paste box comes first: the window is the
             // system's web view, which the proxy of `[network]` does not
             // reach, and opened unasked it would leave directly.
@@ -4300,8 +4304,8 @@ impl App {
         else {
             return Some(Action::SettingChanged(which));
         };
-        linked.account.enabled = !linked.account.enabled;
-        let said = match linked.account.enabled {
+        linked.enabled = !linked.enabled;
+        let said = match linked.enabled {
             true => format!("scrobbling to {} again", linked.label()),
             false => format!("{} off", linked.label()),
         };

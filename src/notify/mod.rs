@@ -38,7 +38,7 @@ impl Notice {
 pub fn spawn() -> UnboundedSender<Notice> {
     let (sender, mut receiver) = unbounded_channel::<Notice>();
     tokio::spawn(async move {
-        let http = reqwest::Client::new();
+        let http = crate::config::http();
         while let Some(mut notice) = receiver.recv().await {
             // Only the latest matters: a burst of skips is one notification.
             while let Ok(newer) = receiver.try_recv() {
@@ -265,7 +265,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_cover_already_on_disk_is_handed_over_where_it_is() {
-        let http = reqwest::Client::new();
+        let http = crate::config::http();
         assert_eq!(
             picture_of(&http, "file:///music/album/cover.jpg").await,
             Some(PathBuf::from("/music/album/cover.jpg"))

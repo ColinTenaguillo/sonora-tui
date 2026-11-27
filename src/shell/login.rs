@@ -190,6 +190,8 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState, service: &str, 
             let question = match choices.kind {
                 music::AccountKind::Session => "Which account?",
                 music::AccountKind::Profile => "Which profile?",
+                music::AccountKind::Server => "Which server?",
+                music::AccountKind::Library => "Which library?",
             };
             let mut lines = vec![Line::from(question), Line::from("")];
             for (i, choice) in choices.accounts.iter().enumerate() {

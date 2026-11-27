@@ -143,7 +143,7 @@ Each signs in from the same screen, its own way:
 | `kind` | How it signs in |
 |---|---|
 | `tidal` | A code and a link, confirmed in your browser. HiFi Plus for hi-res. See [TIDAL](#tidal) below. |
-| `spotify` | A link opens in the browser; authorise there and come back. Needs Premium, and an account Spotify still serves to librespot: newer accounts (late 2025 on) are refused playback keys whatever their plan, see [librespot#1649](https://github.com/librespot-org/librespot/issues/1649). |
+| `spotify` | A link opens in the browser; authorise there and come back. Needs Premium, and an account Spotify still hands playback keys to: it refuses them to some newer accounts (late 2025 on) whatever their plan. |
 | `apple` | Paste the `Cookie` header of a signed-in music.apple.com tab. Playback needs Google's Widevine module: see below. |
 | `deezer` | Paste the `Cookie` header (or just the `arl` cookie) of a signed-in deezer.com tab; on a family plan, pick your profile. |
 | `youtube` | `g` to continue as a guest, or paste the `Cookie` header of a signed-in music.youtube.com tab; with several accounts on it, pick one. |
@@ -403,7 +403,7 @@ untouched, keep the volume full and the equaliser and normalisation off.
 
 `L` opens them over the main pane. Synced lyrics follow the position, the
 line being sung in the middle; plain ones are a page to scroll. They come
-from the sources sonora asks — the file's own tags, Binimum, Musixmatch,
+from the sources sonora asks — the file's own tags, lrc.red, Musixmatch,
 LRCLIB, Kugou, NetEase — ranked its way: synced over plain, a close match
 over a loose one.
 
@@ -533,9 +533,9 @@ machine included. It has no row in Settings.
 
 What does not go through it:
 
-- **Spotify's connection and audio.** They are librespot's, which knows
-  HTTP proxies only and is not handed this one. Its sign-in and the
-  catalogue pages asked over HTTP do go through.
+- **Spotify's connection to its access point and its remote control.**
+  They are sockets of their own and are not handed this proxy. Its sign-in
+  and the catalogue pages asked over HTTP do go through.
 - **Jellyfin's remote control**, a WebSocket of its own. The library and
   the audio do go through.
 - **The sign-in windows** of Apple Music, Deezer and YouTube Music, which
