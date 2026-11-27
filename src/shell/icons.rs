@@ -131,14 +131,6 @@ pub fn pause() -> &'static str {
     pick("\u{01c1}", "\u{f04c}")
 }
 
-pub fn previous() -> &'static str {
-    pick("⏮", "\u{f048}")
-}
-
-pub fn next() -> &'static str {
-    pick("⏭", "\u{f051}")
-}
-
 pub fn shuffle() -> &'static str {
     pick("⇄", "\u{f074}")
 }
