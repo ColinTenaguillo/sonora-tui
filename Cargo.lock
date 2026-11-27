@@ -5217,7 +5217,7 @@ dependencies = [
 
 [[package]]
 name = "sonora-tui"
-version = "0.21.1"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "apple-cf",
