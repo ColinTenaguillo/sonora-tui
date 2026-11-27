@@ -548,7 +548,7 @@ What does not go through it:
 
 | What | Linux | macOS | Windows |
 |---|---|---|---|
-| Config | `~/.config/sonora-tui/config.toml` | `~/Library/Application Support/sonora-tui/config.toml` | `%APPDATA%\sonora-tui\config\config.toml` |
+| Config | `~/.config/sonora-tui/config.toml`, mode `0600` | `~/Library/Application Support/sonora-tui/config.toml`, mode `0600` | `%APPDATA%\sonora-tui\config\config.toml`, under your profile's own access rules |
 | Service sessions | `~/.local/share/sonora/accounts`, mode `0600` | `~/Library/Application Support/sonora/accounts`, mode `0600` | `%LOCALAPPDATA%\sonora\accounts`, under your profile's own access rules |
 | Scrobbling accounts | `scrobble.json` alongside the config, mode `0600` | same | `scrobble.json` alongside the config, under your profile's own access rules |
 | Local-files index, Widevine module | under the cache directory | same | same |
