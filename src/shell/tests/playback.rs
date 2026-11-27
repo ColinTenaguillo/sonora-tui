@@ -1541,6 +1541,39 @@ fn l_opens_the_lyrics_and_asks_for_the_playing_tracks_words_once() {
 }
 
 #[test]
+fn words_a_source_could_not_be_asked_for_are_asked_again_when_the_pane_opens_again() {
+    let mut app = signed_in(sidebar::Section::Tracks);
+    let track = crate::domain::Track::sample("Song", "Someone", std::time::Duration::from_secs(90));
+    app.now_playing.track = Some(track.clone());
+    assert!(matches!(
+        app.update(Action::ToggleLyrics),
+        Some(Action::LoadLyrics(_))
+    ));
+    app.update(Action::LyricsLoaded {
+        id: track.id.clone(),
+        found: lyricsview::Found::Unanswered,
+    });
+    let text = super::drawn(&mut app);
+    assert!(text.contains("did not answer"), "{text}");
+
+    // Not on every event: a source that is down would be asked in a loop.
+    let again = app.update(Action::Playback(crate::playback::PlaybackEvent::Started {
+        bit_depth: None,
+        sample_rate: 44_100,
+        delivered: crate::domain::Quality::Lossless,
+    }));
+    assert!(again.is_none(), "got {again:?}");
+
+    // Closed and opened again, it is asked again.
+    app.update(Action::ToggleLyrics);
+    let asked = app.update(Action::ToggleLyrics);
+    assert!(
+        matches!(asked, Some(Action::LoadLyrics(ref id)) if *id == track.id),
+        "got {asked:?}"
+    );
+}
+
+#[test]
 fn a_track_that_played_long_enough_becomes_a_listen_in_the_outbox() {
     let mut app = signed_in(sidebar::Section::Tracks);
     let started = |app: &mut App, title: &str| {

@@ -21,6 +21,10 @@ use crate::domain::{Track, TrackId};
 pub enum Found {
     Searching,
     Nothing,
+    /// Nothing, while a source did not answer: a server down, the network
+    /// gone. Asked again when the pane opens again, not on every event,
+    /// where a source that stays down would be asked in a loop.
+    Unanswered,
     Instrumental,
     Sheet(music::Lyrics),
 }
@@ -41,6 +45,9 @@ pub struct Pane {
 impl Pane {
     pub fn toggle(&mut self) {
         self.open = !self.open;
+        if self.open {
+            self.found.retain(|_, found| *found != Found::Unanswered);
+        }
         self.scroll = 0;
         self.following = true;
     }
@@ -50,7 +57,7 @@ impl Pane {
     pub fn wants(&self, id: &TrackId) -> bool {
         !matches!(
             self.found.get(id),
-            Some(Found::Nothing | Found::Instrumental | Found::Sheet(_))
+            Some(Found::Nothing | Found::Unanswered | Found::Instrumental | Found::Sheet(_))
         )
     }
 
@@ -130,10 +137,14 @@ pub async fn search(
 async fn search_in(query: music::LyricsQuery, asked: Vec<Arc<dyn music::LyricsProvider>>) -> Found {
     let answers = futures::future::join_all(asked.iter().map(|p| p.search(&query))).await;
     let mut hits = Vec::new();
+    let mut unanswered = false;
     for (provider, answer) in asked.iter().zip(answers) {
         match answer {
             Ok(found) => hits.extend(found),
-            Err(error) => tracing::info!("lyrics: {} answered with {error:#}", provider.name()),
+            Err(error) => {
+                unanswered = true;
+                tracing::info!("lyrics: {} answered with {error:#}", provider.name());
+            }
         }
     }
     if lyrics::instrumental(&query, &hits) {
@@ -143,6 +154,7 @@ async fn search_in(query: music::LyricsQuery, asked: Vec<Arc<dyn music::LyricsPr
     lyrics::reshape(&mut ranked);
     match ranked.into_iter().next() {
         Some(hit) if !hit.lyrics.is_empty() => Found::Sheet(hit.lyrics),
+        _ if unanswered => Found::Unanswered,
         _ => Found::Nothing,
     }
 }
@@ -226,6 +238,12 @@ pub fn render(
         None if track.is_none() => (vec![Line::from("Nothing is playing.")], None),
         None | Some(Found::Searching) => (vec![Line::from("Looking for the words…")], None),
         Some(Found::Nothing) => (vec![Line::from("No lyrics found for this track.")], None),
+        Some(Found::Unanswered) => (
+            vec![Line::from(
+                "No lyrics found, but a source did not answer. L twice asks again.",
+            )],
+            None,
+        ),
         Some(Found::Instrumental) => (vec![Line::from("♪ Instrumental ♪")], None),
         Some(Found::Sheet(music::Lyrics::Plain { text, .. })) => (
             text.lines().map(|l| Line::from(l.to_string())).collect(),
@@ -293,6 +311,40 @@ mod tests {
         assert_eq!(asked.len(), providers().len() + 1);
         assert!(Arc::ptr_eq(&asked[0], &own));
         assert_eq!(sources(None).len(), providers().len());
+    }
+
+    /// A source that cannot be reached.
+    struct Down;
+
+    #[async_trait::async_trait]
+    impl music::LyricsProvider for Down {
+        fn name(&self) -> &'static str {
+            "Down"
+        }
+
+        async fn search(&self, _: &music::LyricsQuery) -> anyhow::Result<Vec<music::LyricsHit>> {
+            anyhow::bail!("unreachable")
+        }
+    }
+
+    #[test]
+    fn nothing_found_while_a_source_did_not_answer_is_not_taken_for_no_lyrics() {
+        let track = Track::sample("Song", "Someone", Duration::from_secs(30));
+        let ask = |asked: Vec<Arc<dyn music::LyricsProvider>>| {
+            futures::executor::block_on(search_in(query(&track, "own"), asked))
+        };
+        assert!(matches!(
+            ask(vec![Arc::new(Own(None)), Arc::new(Down)]),
+            Found::Unanswered
+        ));
+        assert!(matches!(ask(vec![Arc::new(Own(None))]), Found::Nothing));
+        assert!(
+            matches!(
+                ask(vec![Arc::new(Own(Some(sheet()))), Arc::new(Down)]),
+                Found::Sheet(_)
+            ),
+            "a sheet found elsewhere is shown all the same"
+        );
     }
 
     #[test]
