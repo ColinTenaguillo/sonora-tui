@@ -259,12 +259,20 @@ pub fn play_of(track: &Track, at: SystemTime) -> Option<Play> {
     })
 }
 
+/// A listen that ended, with how long it was heard: each service weighs
+/// that by its own rule before it is sent.
+#[derive(Debug, Clone)]
+pub struct Listened {
+    pub play: Play,
+    pub played: std::time::Duration,
+}
+
 /// What the shell has decided and not yet sent: the track that just
 /// started, and the listens that earned a submission.
 #[derive(Debug, Default)]
 pub struct Outbox {
     pub now_playing: Option<Play>,
-    pub finished: Vec<Play>,
+    pub finished: Vec<Listened>,
     /// The listens a service refused, by its id, to go out again with
     /// the next batch. Shared with the requests in flight, which put a
     /// batch back here when it fails.
@@ -302,6 +310,13 @@ type Sending = Pin<Box<dyn Future<Output = ()> + Send>>;
 /// Everything in the outbox, as one request per service, and the outbox
 /// emptied. The caller runs them: spawned while the app runs, awaited on
 /// the way out.
+///
+/// A service is sent the listens its own rule counts, which may be fewer
+/// than the general one: teal.fm takes a short track only if it ran to the
+/// end. They go one at a time, as sonora sends them, so a service that
+/// refuses one partway has filed the ones before it, and only that one and
+/// those after it are kept: teal.fm writes a record per listen and would
+/// file a resent one twice.
 pub fn drain(linked: &[Linked], outbox: &mut Outbox) -> Vec<Sending> {
     let mut sending: Vec<Sending> = Vec::new();
     if let Some(play) = outbox.now_playing.take() {
@@ -317,29 +332,46 @@ pub fn drain(linked: &[Linked], outbox: &mut Outbox) -> Vec<Sending> {
             }));
         }
     }
-    let plays: Vec<Play> = std::mem::take(&mut outbox.finished);
-    if !plays.is_empty() {
+    let listened: Vec<Listened> = std::mem::take(&mut outbox.finished);
+    if !listened.is_empty() {
         for l in linked.iter().filter(|l| l.enabled).cloned() {
             // What the service still owes goes first, so the order holds.
             let backlog = Arc::clone(&outbox.backlog);
             let mut batch = owed(&backlog, l.service.id());
-            batch.extend(plays.iter().cloned());
-            sending.push(Box::pin(async move {
-                match l.service.scrobble(&l.account, &batch).await {
-                    Ok(()) => tracing::info!("scrobbled {} to {}", batch.len(), l.service.id()),
-                    Err(error) => {
-                        tracing::warn!(
-                            "scrobbling: {} refused {}, kept for the next try: {error:#}",
-                            l.service.id(),
-                            batch.len()
-                        );
-                        keep(&backlog, l.service.id(), batch);
-                    }
-                }
-            }));
+            batch.extend(
+                listened
+                    .iter()
+                    .filter(|f| l.service.earned(&f.play, f.played))
+                    .map(|f| f.play.clone()),
+            );
+            if batch.is_empty() {
+                continue;
+            }
+            sending.push(Box::pin(file_one_by_one(l, batch, backlog)));
         }
     }
     sending
+}
+
+/// Sends `batch` to the service a listen at a time, and keeps for the next
+/// try the one it refuses and every one after it.
+async fn file_one_by_one(l: Linked, batch: Vec<Play>, backlog: Backlog) {
+    let id = l.service.id();
+    let total = batch.len();
+    let mut left = batch.into_iter();
+    while let Some(play) = left.next() {
+        let one = std::slice::from_ref(&play);
+        if let Err(error) = l.service.scrobble(&l.account, one).await {
+            let kept: Vec<Play> = std::iter::once(play).chain(left).collect();
+            tracing::warn!(
+                "scrobbling: {id} refused a listen, {} kept for the next try: {error:#}",
+                kept.len()
+            );
+            keep(&backlog, id, kept);
+            return;
+        }
+    }
+    tracing::info!("scrobbled {total} to {id}");
 }
 
 #[cfg(test)]
@@ -552,7 +584,7 @@ mod tests {
         .expect("a listen");
         let mut outbox = Outbox {
             now_playing: Some(play.clone()),
-            finished: vec![play.clone(), play],
+            finished: vec![listened(&play, 200), listened(&play, 200)],
             backlog: Backlog::default(),
         };
         let sending = drain(std::slice::from_ref(&linked), &mut outbox);
@@ -563,18 +595,126 @@ mod tests {
             enabled: false,
             ..linked
         };
-        outbox.finished.push(
-            play_of(
-                &Track::sample("S", "A", Duration::from_secs(60)),
-                SystemTime::UNIX_EPOCH,
-            )
-            .unwrap(),
-        );
+        let short = play_of(
+            &Track::sample("S", "A", Duration::from_secs(60)),
+            SystemTime::UNIX_EPOCH,
+        )
+        .expect("a listen");
+        outbox.finished.push(listened(&short, 60));
         assert!(
             drain(&[off], &mut outbox).is_empty(),
             "a switched-off account sends nothing"
         );
         assert_eq!(linked_label(), "ListenBrainz");
+    }
+
+    fn listened(play: &Play, seconds: u64) -> Listened {
+        Listened {
+            play: play.clone(),
+            played: Duration::from_secs(seconds),
+        }
+    }
+
+    /// A service that files what it is sent, refuses the title it is told
+    /// to, and with `whole` counts a listen only if it played to the end.
+    #[derive(Default)]
+    struct Fake {
+        whole: bool,
+        refuse: Mutex<Option<String>>,
+        filed: Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Service for Fake {
+        fn id(&self) -> &'static str {
+            "fake"
+        }
+
+        fn link(&self) -> scrobbling::Link {
+            scrobbling::Link::Token
+        }
+
+        async fn connect(&self, _: Secret) -> anyhow::Result<Account> {
+            Ok(Account::default())
+        }
+
+        fn earned(&self, play: &Play, played: Duration) -> bool {
+            play.earned(played) && (!self.whole || played >= play.duration)
+        }
+
+        async fn scrobble(&self, _: &Account, plays: &[Play]) -> anyhow::Result<()> {
+            for play in plays {
+                if self.refuse.lock().expect("lock").as_deref() == Some(play.title.as_str()) {
+                    anyhow::bail!("refused {}", play.title);
+                }
+                self.filed.lock().expect("lock").push(play.title.clone());
+            }
+            Ok(())
+        }
+    }
+
+    fn linked_to(fake: &Arc<Fake>) -> Linked {
+        Linked {
+            service: Arc::clone(fake) as Arc<dyn Service>,
+            account: Account::default(),
+            enabled: true,
+        }
+    }
+
+    fn song(title: &str) -> Play {
+        play_of(
+            &Track::sample(title, "Someone", Duration::from_secs(100)),
+            SystemTime::UNIX_EPOCH,
+        )
+        .expect("a listen")
+    }
+
+    fn send(linked: &[Linked], outbox: &mut Outbox) {
+        futures::executor::block_on(futures::future::join_all(drain(linked, outbox)));
+    }
+
+    #[test]
+    fn a_service_is_sent_only_the_listens_its_own_rule_counts() {
+        let loose = Arc::new(Fake::default());
+        let strict = Arc::new(Fake {
+            whole: true,
+            ..Fake::default()
+        });
+        let mut outbox = Outbox {
+            finished: vec![listened(&song("Half"), 60), listened(&song("Whole"), 100)],
+            ..Outbox::default()
+        };
+        send(&[linked_to(&loose), linked_to(&strict)], &mut outbox);
+        assert_eq!(*loose.filed.lock().expect("lock"), ["Half", "Whole"]);
+        assert_eq!(
+            *strict.filed.lock().expect("lock"),
+            ["Whole"],
+            "a listen skipped before the end is not one to this service"
+        );
+    }
+
+    #[test]
+    fn a_batch_refused_partway_keeps_only_what_was_not_filed_yet() {
+        let fake = Arc::new(Fake::default());
+        *fake.refuse.lock().expect("lock") = Some("Two".into());
+        let linked = [linked_to(&fake)];
+        let mut outbox = Outbox {
+            finished: ["One", "Two", "Three"]
+                .map(|t| listened(&song(t), 100))
+                .into(),
+            ..Outbox::default()
+        };
+        send(&linked, &mut outbox);
+        assert_eq!(*fake.filed.lock().expect("lock"), ["One"]);
+
+        *fake.refuse.lock().expect("lock") = None;
+        outbox.finished.push(listened(&song("Four"), 100));
+        send(&linked, &mut outbox);
+        assert_eq!(
+            *fake.filed.lock().expect("lock"),
+            ["One", "Two", "Three", "Four"],
+            "one filed once, the rest in their order"
+        );
     }
 
     fn linked_label() -> String {
