@@ -413,20 +413,20 @@ impl Default for PlaybackConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
     /// Whether to use nerd-font glyphs for the icons.
     ///
-    /// Off by default, and set by hand rather than detected. A terminal
-    /// does not say what font it is using, and the glyphs cannot be
-    /// measured either: nerd fonts set the x-advance of every glyph to one
-    /// cell, which is also what a font without them advances when it draws
-    /// a replacement box. lazygit, starship and yazi all ask rather than
-    /// guess, for the same reason.
+    /// On by default, and turned off by hand rather than detected. A
+    /// terminal does not say what font it is using, and the glyphs cannot
+    /// be measured either: nerd fonts set the x-advance of every glyph to
+    /// one cell, which is also what a font without them advances when it
+    /// draws a replacement box. So one of the two has to be assumed, and a
+    /// terminal set up for a program like this one mostly has the font.
     ///
-    /// The Settings row draws the glyphs beside the value, so the answer is
-    /// one keypress away rather than a matter of detection.
+    /// The Settings row draws the glyphs beside the value, so whoever sees
+    /// empty boxes is one keypress from the plain set.
     pub nerd_font: bool,
     /// Whether to draw covers as half blocks rather than as real images.
     ///
@@ -462,6 +462,19 @@ pub struct UiConfig {
     /// than replacing the theme with something half-applied.
     #[serde(default)]
     pub colors: std::collections::HashMap<String, String>,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            nerd_font: true,
+            halfblocks: false,
+            list_view: false,
+            notifications: false,
+            theme: String::new(),
+            colors: std::collections::HashMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -748,6 +761,17 @@ mod tests {
             let back: Config = toml::from_str(&saved).unwrap();
             assert_eq!(back.network, c.network, "{saved}");
         }
+    }
+
+    #[test]
+    fn the_nerd_font_icons_are_on_unless_the_config_turns_them_off() {
+        let read = |text: &str| toml::from_str::<Config>(text).unwrap().ui.nerd_font;
+        assert!(read(""), "no config at all");
+        assert!(
+            read("[ui]\nlist_view = true"),
+            "a [ui] table without the key"
+        );
+        assert!(!read("[ui]\nnerd_font = false"), "turned off by hand");
     }
 
     #[test]
