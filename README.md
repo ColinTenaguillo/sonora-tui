@@ -484,7 +484,8 @@ the terminal cannot do better.
 
 ```toml
 [ui]
-nerd_font = true    # Nerd Font glyphs for the icons; off by default, never guessed
+nerd_font = false   # plain glyphs for the icons, for a font that is not a Nerd Font;
+                    # on by default, since a terminal cannot be asked
 halfblocks = true   # covers as half blocks, for a terminal that claims an image
                     # protocol and draws it wrong; read at start
 list_view = true    # Playlists and Albums as a list rather than covers; `v`

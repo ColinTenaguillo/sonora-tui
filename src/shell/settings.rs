@@ -233,7 +233,7 @@ impl Setting {
             Setting::Explicit => "Off, tracks marked E will not play.",
             Setting::Ai => "Off, tracks marked AI will not play.",
             Setting::Notifications => "A desktop notification, with the cover, when a track starts.",
-            Setting::NerdFont => "Needs a nerd font. Empty boxes mean you have none.",
+            Setting::NerdFont => "Needs a nerd font. Empty boxes mean you have none: turn it off.",
             Setting::Theme => "h or l to pick one; the colours change at once.",
             Setting::LastfmKey => "From last.fm/api/account/create. Enter to type it.",
             Setting::LastfmSecret => "Its secret. Enter to type it; shown as dots.",
@@ -1485,25 +1485,25 @@ mod tests {
         // than at the next start. There is no detecting it: a terminal does
         // not say what font it has, and a nerd font advances one cell just
         // as the replacement box does.
-        let fixed = crate::shell::icons::Fixed::at(false);
+        let fixed = crate::shell::icons::Fixed::at(true);
         let _ = &fixed;
         let mut config = crate::config::Config::default();
-        assert!(!config.ui.nerd_font, "off by default, as lazygit has it");
+        assert!(config.ui.nerd_font, "on by default");
 
-        let plain = crate::shell::icons::music();
+        let nerd = crate::shell::icons::music();
         cycle(&mut config, Setting::NerdFont, true);
-        assert!(config.ui.nerd_font, "the setting turned on");
+        assert!(!config.ui.nerd_font, "the setting turned off");
         assert_ne!(
             crate::shell::icons::music(),
-            plain,
+            nerd,
             "and the icons changed with it"
         );
 
         // Either direction flips it: two states, so a key that only turned
-        // it on would be half a key.
+        // it off would be half a key.
         cycle(&mut config, Setting::NerdFont, false);
-        assert!(!config.ui.nerd_font, "and back again");
-        assert_eq!(crate::shell::icons::music(), plain);
+        assert!(config.ui.nerd_font, "and back again");
+        assert_eq!(crate::shell::icons::music(), nerd);
     }
 
     #[test]
