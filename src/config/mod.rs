@@ -354,6 +354,9 @@ pub struct ScrobbleConfig {
     pub listenbrainz_server: Option<String>,
     /// Maloja: the server and one of its API keys.
     pub maloja: Option<MalojaConfig>,
+    /// teal.fm: the account's handle and an app password, which sonora
+    /// signs in to the account's own server with.
+    pub tealfm: Option<TealfmConfig>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -368,6 +371,16 @@ pub struct ApiKeys {
 pub struct MalojaConfig {
     pub url: String,
     pub key: String,
+}
+
+/// An app password rather than the account's own: it can be revoked alone,
+/// and it is what sits in this file.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct TealfmConfig {
+    /// `alice.bsky.social`, or the account's DID.
+    pub handle: String,
+    pub password: String,
 }
 
 /// Where a Subsonic or Jellyfin server is and who signs in. The password
@@ -698,6 +711,24 @@ mod tests {
                 home.clone(),
                 home.join("Videos"),
             ]
+        );
+    }
+
+    #[test]
+    fn a_tealfm_account_is_read_from_the_scrobble_table_as_the_readme_writes_it() {
+        let config: Config = toml::from_str(
+            r#"
+            [scrobble]
+            tealfm = { handle = "alice.bsky.social", password = "abcd-efgh-ijkl-mnop" }
+            "#,
+        )
+        .expect("the README's line parses");
+        assert_eq!(
+            config.scrobble.tealfm,
+            Some(TealfmConfig {
+                handle: "alice.bsky.social".into(),
+                password: "abcd-efgh-ijkl-mnop".into(),
+            })
         );
     }
 
