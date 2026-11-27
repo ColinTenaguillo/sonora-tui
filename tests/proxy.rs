@@ -48,7 +48,7 @@ async fn clients_built_without_a_proxy_go_through_the_one_the_config_names() {
     network(for_the_providers).name_in_environment().unwrap();
 
     // The stand-in never answers, so the request itself fails either way.
-    let _ = reqwest::Client::new()
+    let _ = sonora_tui::config::http()
         .get("http://service.invalid/")
         .send()
         .await;
@@ -67,7 +67,7 @@ async fn clients_built_without_a_proxy_go_through_the_one_the_config_names() {
     let (unused, proxy) = listener();
     let (server, asked) = listener();
     network(unused).name_in_environment().unwrap();
-    let _ = reqwest::Client::new()
+    let _ = sonora_tui::config::http()
         .get(format!("http://{server}/"))
         .send()
         .await;
@@ -84,7 +84,7 @@ async fn clients_built_without_a_proxy_go_through_the_one_the_config_names() {
     }
     .name_in_environment()
     .unwrap();
-    let _ = reqwest::Client::new()
+    let _ = sonora_tui::config::http()
         .get(format!("http://{server}/"))
         .send()
         .await;

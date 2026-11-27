@@ -731,7 +731,7 @@ fn a_link_prompt_waits_on_the_browser_and_a_guest_key_needs_a_guest_service() {
     let mut app = App::default();
     let g = KeyCode::Char(App::GUEST_KEY);
     assert!(key(&mut app, g).is_none(), "TIDAL has no guest");
-    app.provider = Some(std::sync::Arc::new(music::youtube::YouTubeProvider::new()));
+    app.provider = Some(std::sync::Arc::new(youtube::YouTubeProvider::new()));
     assert!(app.guest_allowed());
     assert!(matches!(key(&mut app, g), Some(Action::BeginGuest)));
     app.update(Action::BeginGuest);
@@ -748,7 +748,7 @@ fn a_protected_service_asks_for_the_module_and_the_keys_answer_it() {
         "no provider, nothing to look for"
     );
 
-    app.provider = Some(std::sync::Arc::new(music::apple::AppleProvider::new()));
+    app.provider = Some(std::sync::Arc::new(apple::AppleProvider::new()));
     assert!(matches!(
         app.update(Action::SessionReady),
         Some(Action::LookForCdm)

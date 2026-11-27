@@ -7,9 +7,14 @@ use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::EnvFilter;
 
 /// What is logged when `RUST_LOG` does not say. sonora's crates are in it
-/// at `warn`: the engine tells the shell only that a track could not play,
-/// and writes why here.
-const DEFAULT_FILTER: &str = "sonora_tui=info,music=warn,storage=warn,webview=warn,rodio=warn";
+/// at `warn`, each under its own name: the engine tells the shell only that
+/// a track could not play, and writes why here. A crate added to
+/// `Cargo.toml` from sonora's workspace is added here too, or what it
+/// warns of is dropped.
+const DEFAULT_FILTER: &str = "sonora_tui=info,music=warn,storage=warn,webview=warn,rodio=warn,\
+    engine=warn,sound=warn,soloist=warn,spotify=warn,spotifyapis=warn,tidal=warn,apple=warn,\
+    deezer=warn,youtube=warn,jellyfin=warn,subsonic=warn,local=warn,scrobble=warn,lyrics=warn,\
+    lyric_sources=warn,widevine=warn";
 
 /// The subscriber that writes the log to `file`, to be installed by `main`.
 pub fn to<M>(file: M) -> impl Subscriber + Send + Sync

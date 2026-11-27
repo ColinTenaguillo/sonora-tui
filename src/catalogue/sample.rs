@@ -90,9 +90,6 @@ impl MusicApi for Sample {
     async fn track(&self, _: &str) -> Result<Track> {
         nothing!()
     }
-    async fn track_playcount(&self, _: &str) -> Result<Option<u64>> {
-        nothing!()
-    }
     async fn playlists(&self) -> Result<Vec<Playlist>> {
         nothing!()
     }

@@ -236,7 +236,7 @@ impl Artwork {
         Self {
             cache: HashMap::new(),
             picker,
-            http: reqwest::Client::new(),
+            http: crate::config::http(),
             tx,
         }
     }
@@ -679,7 +679,7 @@ mod tests {
         image::RgbImage::new(8, 8).save(&path).unwrap();
         let url = format!("file://{}", path.display());
         let decoded = fetch_and_decode(
-            &reqwest::Client::new(),
+            &crate::config::http(),
             &Picker::halfblocks(),
             &url,
             Shape::Square,
@@ -743,7 +743,7 @@ mod tests {
             let mut art = Artwork {
                 cache: HashMap::new(),
                 picker: Picker::halfblocks(),
-                http: reqwest::Client::new(),
+                http: crate::config::http(),
                 tx,
             };
             art.cache.insert(
@@ -885,7 +885,7 @@ mod tests {
         let mut art = Artwork {
             cache: HashMap::new(),
             picker: Picker::halfblocks(),
-            http: reqwest::Client::new(),
+            http: crate::config::http(),
             tx,
         };
 
@@ -1041,7 +1041,7 @@ mod tests {
             let mut art = Artwork {
                 cache: HashMap::new(),
                 picker: picker.clone(),
-                http: reqwest::Client::new(),
+                http: crate::config::http(),
                 tx,
             };
             art.cache
@@ -1157,7 +1157,7 @@ mod tests {
         let mut art = Artwork {
             cache: HashMap::new(),
             picker: Picker::halfblocks(),
-            http: reqwest::Client::new(),
+            http: crate::config::http(),
             tx,
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1176,7 +1176,7 @@ mod tests {
         let mut art = Artwork {
             cache: HashMap::new(),
             picker: Picker::halfblocks(),
-            http: reqwest::Client::new(),
+            http: crate::config::http(),
             tx,
         };
         // No runtime here, so the spawn would panic; drive `request` inside
@@ -1220,7 +1220,7 @@ mod cut_alignment {
         let mut art = Artwork {
             cache: HashMap::new(),
             picker: Picker::halfblocks(),
-            http: reqwest::Client::new(),
+            http: crate::config::http(),
             tx,
         };
         art.cache.insert(
