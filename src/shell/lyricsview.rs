@@ -87,19 +87,25 @@ pub fn query(track: &Track, provider: &'static str) -> music::LyricsQuery {
 }
 
 /// The providers asked, in sonora's own order less the ones that need a
-/// signed-in service of their own.
-pub fn providers() -> Vec<Arc<dyn music::LyricsProvider>> {
-    let http = crate::config::http();
-    vec![
-        // A file's own tags or the `.lrc` beside it; silent for any other
-        // track.
-        Arc::new(local::LocalLyrics),
-        Arc::new(lyric_sources::lrcred::LrcRed::new(http.clone())),
-        Arc::new(lyric_sources::musixmatch::Musixmatch::new(http.clone())),
-        Arc::new(lyric_sources::lrclib::LrcLib::new(http.clone())),
-        Arc::new(lyric_sources::kugou::Kugou::new(http.clone())),
-        Arc::new(lyric_sources::netease::NetEase::new(http)),
-    ]
+/// signed-in service of their own. Built once and kept: Musixmatch holds
+/// its token, the pause between its requests and the wait after a refusal
+/// in itself, and a list made afresh for each track forgot all three.
+pub fn providers() -> &'static [Arc<dyn music::LyricsProvider>] {
+    static PROVIDERS: std::sync::OnceLock<Vec<Arc<dyn music::LyricsProvider>>> =
+        std::sync::OnceLock::new();
+    PROVIDERS.get_or_init(|| {
+        let http = crate::config::http();
+        vec![
+            // A file's own tags or the `.lrc` beside it; silent for any
+            // other track.
+            Arc::new(local::LocalLyrics),
+            Arc::new(lyric_sources::lrcred::LrcRed::new(http.clone())),
+            Arc::new(lyric_sources::musixmatch::Musixmatch::new(http.clone())),
+            Arc::new(lyric_sources::lrclib::LrcLib::new(http.clone())),
+            Arc::new(lyric_sources::kugou::Kugou::new(http.clone())),
+            Arc::new(lyric_sources::netease::NetEase::new(http)),
+        ]
+    })
 }
 
 /// Ask every provider at once and keep the best answer, by sonora's
@@ -231,6 +237,16 @@ pub fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_same_lyrics_sources_are_asked_from_one_track_to_the_next() {
+        let (first, again) = (providers(), providers());
+        assert_eq!(first.len(), 6);
+        assert!(
+            first.iter().zip(again).all(|(a, b)| Arc::ptr_eq(a, b)),
+            "a source made afresh forgets what it was told to wait for"
+        );
+    }
 
     fn sheet() -> music::Lyrics {
         let line = |start: u64, text: &str| music::LyricsLine {
