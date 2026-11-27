@@ -500,6 +500,18 @@ fn signal_meta(track: &music::TrackSignal) -> Option<Meta> {
 
 fn translate(event: music::PlaybackEvent, starts: &mut Starts) -> Option<PlaybackEvent> {
     use music::PlaybackEvent as Engine;
+    // A load that failed stopped whatever played before it, so the track
+    // announced last is no longer on: played again, it starts again.
+    if matches!(
+        event,
+        Engine::Unavailable { .. }
+            | Engine::Throttled { .. }
+            | Engine::Refused
+            | Engine::Blocked
+            | Engine::Gated
+    ) {
+        starts.announced = None;
+    }
     match event {
         Engine::Signal { id, track } => {
             if let Some(found) = signal_meta(&track) {
@@ -846,6 +858,28 @@ mod tests {
             }
             other => panic!("expected Failed, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_track_played_again_after_another_failed_to_load_starts_again() {
+        let playing = |id: &str| music::PlaybackEvent::Playing {
+            id: Some(id.into()),
+            at: Duration::ZERO,
+        };
+        let mut starts = Starts::default();
+        assert!(translate(playing("1"), &mut starts).is_some());
+        let failed = music::PlaybackEvent::Unavailable {
+            id: Some("2".into()),
+            timed_out: false,
+        };
+        assert!(translate(failed, &mut starts).is_some());
+        assert!(
+            matches!(
+                translate(playing("1"), &mut starts),
+                Some(PlaybackEvent::Started { .. })
+            ),
+            "the engine loaded it afresh: a new listen, the position back at nought"
+        );
     }
 
     #[test]
