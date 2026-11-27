@@ -40,6 +40,8 @@ pub enum Setting {
     ListenbrainzServer,
     MalojaUrl,
     MalojaKey,
+    TealfmHandle,
+    TealfmPassword,
     Discord,
     /// Where a server of the listener's own is, and who signs in to it.
     ServerAddress(crate::config::Server),
@@ -66,7 +68,7 @@ pub enum Kind {
 }
 
 impl Setting {
-    pub const ALL: [Setting; 30] = [
+    pub const ALL: [Setting; 32] = [
         Setting::Service,
         Setting::Quality,
         Setting::Volume,
@@ -90,6 +92,8 @@ impl Setting {
         Setting::ListenbrainzServer,
         Setting::MalojaUrl,
         Setting::MalojaKey,
+        Setting::TealfmHandle,
+        Setting::TealfmPassword,
         Setting::Discord,
         Setting::ServerAddress(crate::config::Server::Subsonic),
         Setting::ServerUser(crate::config::Server::Subsonic),
@@ -120,13 +124,15 @@ impl Setting {
             Setting::LastfmKey
             | Setting::ListenbrainzServer
             | Setting::MalojaUrl
+            | Setting::TealfmHandle
             | Setting::Discord
             | Setting::Proxy
             | Setting::ServerAddress(_)
             | Setting::ServerUser(_) => Kind::Text { secret: false },
-            Setting::LastfmSecret | Setting::ListenbrainzToken | Setting::MalojaKey => {
-                Kind::Text { secret: true }
-            }
+            Setting::LastfmSecret
+            | Setting::ListenbrainzToken
+            | Setting::MalojaKey
+            | Setting::TealfmPassword => Kind::Text { secret: true },
             Setting::LocalFolders => Kind::Folders,
             Setting::LastfmLink => Kind::Link,
         }
@@ -156,7 +162,9 @@ impl Setting {
             | Setting::ListenbrainzToken
             | Setting::ListenbrainzServer
             | Setting::MalojaUrl
-            | Setting::MalojaKey => "Scrobbling",
+            | Setting::MalojaKey
+            | Setting::TealfmHandle
+            | Setting::TealfmPassword => "Scrobbling",
             Setting::Discord => "Discord",
             Setting::ServerAddress(server) | Setting::ServerUser(server) => server.name(),
             Setting::Library => crate::config::Server::Subsonic.name(),
@@ -178,6 +186,7 @@ impl Setting {
             Setting::Librefm => Some("librefm"),
             Setting::ListenbrainzToken | Setting::ListenbrainzServer => Some("listenbrainz"),
             Setting::MalojaUrl | Setting::MalojaKey => Some("maloja"),
+            Setting::TealfmHandle | Setting::TealfmPassword => Some("tealfm"),
             _ => None,
         }
     }
@@ -207,6 +216,8 @@ impl Setting {
             Setting::ListenbrainzServer => "ListenBrainz server",
             Setting::MalojaUrl => "Maloja server",
             Setting::MalojaKey => "Maloja API key",
+            Setting::TealfmHandle => "teal.fm handle",
+            Setting::TealfmPassword => "teal.fm app password",
             Setting::Discord => "Discord application id",
             Setting::ServerAddress(server) => server.address_label(),
             Setting::ServerUser(server) => server.user_label(),
@@ -243,6 +254,8 @@ impl Setting {
             Setting::ListenbrainzServer => "Your own server or multi-scrobbler; empty is listenbrainz.org. Enter to type it.",
             Setting::MalojaUrl => "Your Maloja server, with its scheme. Enter to type it.",
             Setting::MalojaKey => "Its API key. Enter to type it; shown as dots.",
+            Setting::TealfmHandle => "Your Bluesky or other atproto handle, or its DID. Enter to type it.",
+            Setting::TealfmPassword => "An app password from bsky.app/settings/app-passwords, not your own. Enter to type it; shown as dots.",
             Setting::Discord => "From discord.com/developers; empty turns the presence off. Enter to type it.",
             Setting::ServerAddress(_) => "Used at the next sign-in. Enter to type it.",
             Setting::ServerUser(_) => "The password is asked on the sign-in screen. Enter to type it.",
@@ -268,6 +281,7 @@ pub fn text_of(config: &crate::config::Config, setting: Setting) -> String {
 fn scrobble_text_of(scrobble: &crate::config::ScrobbleConfig, setting: Setting) -> String {
     let lastfm = scrobble.lastfm.as_ref();
     let maloja = scrobble.maloja.as_ref();
+    let tealfm = scrobble.tealfm.as_ref();
     let text = match setting {
         Setting::LastfmKey => lastfm.map(|k| &k.key),
         Setting::LastfmSecret => lastfm.map(|k| &k.secret),
@@ -275,6 +289,8 @@ fn scrobble_text_of(scrobble: &crate::config::ScrobbleConfig, setting: Setting) 
         Setting::ListenbrainzServer => scrobble.listenbrainz_server.as_ref(),
         Setting::MalojaUrl => maloja.map(|m| &m.url),
         Setting::MalojaKey => maloja.map(|m| &m.key),
+        Setting::TealfmHandle => tealfm.map(|t| &t.handle),
+        Setting::TealfmPassword => tealfm.map(|t| &t.password),
         _ => None,
     };
     text.cloned().unwrap_or_default()
@@ -311,8 +327,9 @@ pub fn set_text(config: &mut crate::config::Config, setting: Setting, text: &str
 }
 
 /// A pair that is empty on both sides -- Last.fm's key and secret,
-/// Maloja's server and key -- is no service at all, and is written as
-/// none; so is an empty ListenBrainz token or server.
+/// Maloja's server and key, teal.fm's handle and app password -- is no
+/// service at all, and is written as none; so is an empty ListenBrainz
+/// token or server.
 fn set_scrobble_text(scrobble: &mut crate::config::ScrobbleConfig, setting: Setting, text: &str) {
     let typed = (!text.is_empty()).then(|| text.to_owned());
     match setting {
@@ -330,6 +347,15 @@ fn set_scrobble_text(scrobble: &mut crate::config::ScrobbleConfig, setting: Sett
             scrobble.maloja = set_pair(
                 scrobble.maloja.take(),
                 |m| (&mut m.url, &mut m.key),
+                first,
+                text,
+            );
+        }
+        Setting::TealfmHandle | Setting::TealfmPassword => {
+            let first = setting == Setting::TealfmHandle;
+            scrobble.tealfm = set_pair(
+                scrobble.tealfm.take(),
+                |t| (&mut t.handle, &mut t.password),
                 first,
                 text,
             );
@@ -544,6 +570,8 @@ pub fn cycle(config: &mut crate::config::Config, setting: Setting, forward: bool
         | Setting::ListenbrainzServer
         | Setting::MalojaUrl
         | Setting::MalojaKey
+        | Setting::TealfmHandle
+        | Setting::TealfmPassword
         | Setting::Discord
         | Setting::Proxy
         | Setting::ServerAddress(_)
@@ -756,9 +784,10 @@ fn value_of(
             true => "default".to_string(),
             false => config.ui.theme.clone(),
         },
-        Setting::LastfmSecret | Setting::ListenbrainzToken | Setting::MalojaKey => {
-            set_or_not(&text_of(config, setting))
-        }
+        Setting::LastfmSecret
+        | Setting::ListenbrainzToken
+        | Setting::MalojaKey
+        | Setting::TealfmPassword => set_or_not(&text_of(config, setting)),
         Setting::ListenbrainzServer => match text_of(config, setting) {
             server if server.is_empty() => "listenbrainz.org".to_string(),
             server => server,
@@ -774,6 +803,7 @@ fn value_of(
         },
         Setting::LastfmKey
         | Setting::MalojaUrl
+        | Setting::TealfmHandle
         | Setting::Discord
         | Setting::ServerAddress(_)
         | Setting::ServerUser(_) => {
@@ -1255,6 +1285,66 @@ mod tests {
     }
 
     #[test]
+    fn every_scrobbling_row_relinks_a_service_sonora_offers_and_no_other_row_does() {
+        let offered: Vec<&str> = scrobbling::services().iter().map(|s| s.id()).collect();
+        for setting in Setting::ALL {
+            match (setting.is_scrobbling(), setting.scrobbler()) {
+                (true, Some(id)) => assert!(offered.contains(&id), "{setting:?} names {id}"),
+                (true, None) => panic!("{setting:?} relinks nothing"),
+                (false, Some(id)) => panic!("{setting:?} is not a scrobbling row but names {id}"),
+                (false, None) => {}
+            }
+        }
+        let named: Vec<&str> = Setting::ALL.iter().filter_map(|s| s.scrobbler()).collect();
+        for id in offered {
+            assert!(named.contains(&id), "{id} has no row in Settings");
+        }
+    }
+
+    #[test]
+    fn the_tealfm_rows_take_a_handle_and_an_app_password_and_relink_the_account() {
+        let mut config = crate::config::Config::default();
+        assert_eq!(value_of(&config, Setting::TealfmHandle, &[]), "not set");
+        set_text(&mut config, Setting::TealfmHandle, " alice.bsky.social ");
+        set_text(&mut config, Setting::TealfmPassword, "abcd-efgh-ijkl-mnop");
+        let tealfm = config.scrobble.tealfm.clone().expect("a teal.fm account");
+        assert_eq!(
+            (tealfm.handle.as_str(), tealfm.password.as_str()),
+            ("alice.bsky.social", "abcd-efgh-ijkl-mnop")
+        );
+        assert_eq!(
+            value_of(&config, Setting::TealfmHandle, &[]),
+            "alice.bsky.social"
+        );
+        assert_eq!(
+            value_of(&config, Setting::TealfmPassword, &[]),
+            "set",
+            "an app password is never shown"
+        );
+        assert_eq!(Setting::TealfmPassword.scrobbler(), Some("tealfm"));
+        assert!(Setting::TealfmHandle.is_scrobbling());
+
+        let buf = crate::shell::geometry::draw(120, 120, |f, area, palette| {
+            render(
+                f,
+                area,
+                palette,
+                &config,
+                &SettingsState::default(),
+                true,
+                Live::default(),
+            );
+        });
+        let text = crate::shell::geometry::text(&buf);
+        assert!(text.contains("teal.fm handle"), "{text}");
+        assert!(text.contains("teal.fm app password"), "{text}");
+
+        set_text(&mut config, Setting::TealfmHandle, "");
+        set_text(&mut config, Setting::TealfmPassword, "");
+        assert!(config.scrobble.tealfm.is_none(), "both empty is no service");
+    }
+
+    #[test]
     fn every_row_has_a_group_and_the_groups_are_contiguous() {
         let mut seen: Vec<&str> = Vec::new();
         for s in Setting::ALL {
@@ -1270,7 +1360,7 @@ mod tests {
                 }
             }
         }
-        let buf = crate::shell::geometry::draw(120, 100, |f, area, palette| {
+        let buf = crate::shell::geometry::draw(120, 120, |f, area, palette| {
             render(
                 f,
                 area,
@@ -1433,7 +1523,7 @@ mod tests {
         let _ = &fixed;
         let config = crate::config::Config::default();
         let state = SettingsState::default();
-        let buf = crate::shell::geometry::draw(120, 100, |f, area, palette| {
+        let buf = crate::shell::geometry::draw(120, 120, |f, area, palette| {
             render(f, area, palette, &config, &state, false, Live::default());
         });
         let text = crate::shell::geometry::text(&buf);

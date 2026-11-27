@@ -1,10 +1,12 @@
-//! Scrobbling: telling Last.fm, Libre.fm, ListenBrainz or Maloja what played.
+//! Scrobbling: telling Last.fm, Libre.fm, ListenBrainz, Maloja or teal.fm
+//! what played.
 //!
 //! The services and their protocols come from sonora's `scrobble` crate. This
 //! links the ones the config names, keeps their accounts in a file beside
 //! the token, turns a track into a listen, and sends what the shell puts in
 //! the outbox. Whether a listen counts is the services' own rule, and lives
-//! with them: thirty seconds at least, and half the track or four minutes.
+//! with them: thirty seconds at least, and half the track or four minutes,
+//! which a service may narrow, as teal.fm does for a short track.
 //!
 //! A submission that fails is kept, per service, and goes out again with
 //! the next one -- a listen earned on a train is filed when the network
@@ -58,6 +60,7 @@ impl Linked {
         match self.service.id() {
             "lastfm" => "Last.fm".to_string(),
             "librefm" => "Libre.fm".to_string(),
+            "tealfm" => "teal.fm".to_string(),
             "listenbrainz" => match host(&self.account.server) {
                 "" => "ListenBrainz".to_string(),
                 host => format!("ListenBrainz on {host}"),
@@ -90,6 +93,16 @@ pub fn secret_for(config: &ScrobbleConfig, id: &str) -> Option<Secret> {
             url: m.url.clone(),
             key: m.key.clone(),
         }),
+        // Half of one is what the Settings rows hold between the first and
+        // the second: not tried, so not refused in the status line.
+        "tealfm" => config
+            .tealfm
+            .as_ref()
+            .filter(|t| !t.handle.trim().is_empty() && !t.password.trim().is_empty())
+            .map(|t| Secret::Password {
+                identifier: t.handle.clone(),
+                password: t.password.clone(),
+            }),
         _ => None,
     }
 }
@@ -161,7 +174,9 @@ pub async fn link(
 /// The account kept from the last run for the service `id`, while it still
 /// stands: not when a Settings row of the service just changed, which links
 /// it again with what was typed, nor for a ListenBrainz account linked with
-/// another token, or to another server, than the config now names.
+/// another token, or to another server, than the config now names, nor for
+/// a teal.fm account linked with another app password: one revoked and
+/// replaced in the file by hand would otherwise be sent for ever.
 fn still_linked<'a>(
     stored: &'a HashMap<String, Kept>,
     id: &str,
@@ -181,8 +196,22 @@ fn still_linked<'a>(
         {
             None
         }
+        // sonora keeps the app password as the session, trimmed, the DID
+        // as the key and the handle as the name.
+        Secret::Password {
+            identifier,
+            password,
+        } if account.session != password.trim() || !names(account, identifier) => None,
         _ => Some(kept),
     }
+}
+
+/// Whether an atproto handle or DID, as the config writes it, is the one
+/// `account` was linked as. A handle is matched without its `@` and in any
+/// case, as handles are.
+fn names(account: &Account, identifier: &str) -> bool {
+    let identifier = identifier.trim().trim_start_matches('@');
+    identifier.eq_ignore_ascii_case(&account.name) || identifier == account.key
 }
 
 /// The host of a server's address, port included: what is left of it
@@ -379,7 +408,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::config::{ApiKeys, MalojaConfig};
+    use crate::config::{ApiKeys, MalojaConfig, TealfmConfig};
 
     #[test]
     fn a_kept_account_stands_until_its_row_changes_or_its_token_or_server_does() {
@@ -451,6 +480,107 @@ mod tests {
     }
 
     #[test]
+    fn a_tealfm_account_links_with_the_handle_and_app_password_the_config_names() {
+        let config = ScrobbleConfig {
+            tealfm: Some(TealfmConfig {
+                handle: "alice.bsky.social".into(),
+                password: "abcd-efgh-ijkl-mnop".into(),
+            }),
+            ..Default::default()
+        };
+        assert!(configured(&config));
+        assert!(matches!(
+            secret_for(&config, "tealfm"),
+            Some(Secret::Password { identifier, password })
+                if identifier == "alice.bsky.social" && password == "abcd-efgh-ijkl-mnop"
+        ));
+
+        // sonora keeps the app password as the account's session.
+        let kept = |password: &str| Kept {
+            account: Account {
+                key: "did:plc:alice".into(),
+                session: password.into(),
+                name: "alice.bsky.social".into(),
+                ..Account::default()
+            },
+            enabled: true,
+        };
+        let secret = secret_for(&config, "tealfm").expect("a secret");
+        let stored: HashMap<String, Kept> =
+            [("tealfm".to_owned(), kept("abcd-efgh-ijkl-mnop"))].into();
+        assert!(still_linked(&stored, "tealfm", &secret, None).is_some());
+        let revoked: HashMap<String, Kept> = [("tealfm".to_owned(), kept("old"))].into();
+        assert!(
+            still_linked(&revoked, "tealfm", &secret, None).is_none(),
+            "another app password in the config links the account again"
+        );
+        let with = |handle: &str| {
+            let mut config = config.clone();
+            if let Some(t) = config.tealfm.as_mut() {
+                t.handle = handle.into();
+            }
+            secret_for(&config, "tealfm").expect("a secret")
+        };
+        assert!(
+            still_linked(&stored, "tealfm", &with(" @Alice.bsky.social "), None).is_some(),
+            "the same handle, written as one is shown"
+        );
+        assert!(still_linked(&stored, "tealfm", &with("did:plc:alice"), None).is_some());
+        assert!(
+            still_linked(&stored, "tealfm", &with("bob.example"), None).is_none(),
+            "another account in the config links that one"
+        );
+
+        let half = |handle: &str, password: &str| ScrobbleConfig {
+            tealfm: Some(TealfmConfig {
+                handle: handle.into(),
+                password: password.into(),
+            }),
+            ..Default::default()
+        };
+        for typed_so_far in [half("alice.bsky.social", " "), half("", "abcd")] {
+            assert!(
+                secret_for(&typed_so_far, "tealfm").is_none(),
+                "half an account is not tried, and not refused at every start"
+            );
+        }
+
+        let tealfm = scrobbling::services()
+            .into_iter()
+            .find(|s| s.id() == "tealfm")
+            .expect("sonora offers teal.fm");
+        let linked = Linked {
+            service: tealfm,
+            account: kept("p").account,
+            enabled: true,
+        };
+        assert_eq!(linked.label(), "teal.fm");
+    }
+
+    #[test]
+    fn the_status_line_calls_each_service_by_its_name_or_the_account_by_its_own() {
+        let label = |id: &str, name: &str| {
+            Linked {
+                service: scrobbling::services()
+                    .into_iter()
+                    .find(|s| s.id() == id)
+                    .expect("sonora offers it"),
+                account: Account {
+                    name: name.into(),
+                    ..Account::default()
+                },
+                enabled: true,
+            }
+            .label()
+        };
+        assert_eq!(label("lastfm", "someone"), "Last.fm");
+        assert_eq!(label("librefm", "someone"), "Libre.fm");
+        assert_eq!(label("tealfm", "alice.bsky.social"), "teal.fm");
+        assert_eq!(label("maloja", "My Maloja"), "My Maloja");
+        assert_eq!(label("maloja", ""), "maloja", "with no name, the id");
+    }
+
+    #[test]
     fn a_listenbrainz_account_on_a_server_of_ones_own_is_named_by_its_host() {
         let on = |server: &str| {
             Linked {
@@ -501,6 +631,7 @@ mod tests {
                 url: "https://m".into(),
                 key: "mk".into(),
             }),
+            tealfm: None,
         };
         assert!(
             matches!(secret_for(&config, "lastfm"), Some(Secret::Keys { key, secret }) if key == "k" && secret == "s")

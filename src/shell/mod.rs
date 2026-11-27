@@ -1649,6 +1649,8 @@ impl App {
             | settings::Setting::ListenbrainzServer
             | settings::Setting::MalojaUrl
             | settings::Setting::MalojaKey
+            | settings::Setting::TealfmHandle
+            | settings::Setting::TealfmPassword
             | settings::Setting::Discord
             | settings::Setting::Proxy
             | settings::Setting::ServerAddress(_)

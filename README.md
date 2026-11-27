@@ -55,7 +55,7 @@ in the terminal, over [sonora](https://github.com/sonorahq/sonora)'s `music` cra
   presets, a sleep timer
 - A queue with shuffle, repeat and autoplay, and favouriting from anywhere
 - Synced lyrics, following the track
-- Scrobbling to Last.fm, Libre.fm, ListenBrainz and Maloja
+- Scrobbling to Last.fm, Libre.fm, ListenBrainz, Maloja and teal.fm
 - Discord Rich Presence
 - The keyboard's media keys and the desktop's player widget — MPRIS on
   Linux, Now Playing on macOS (none yet on Windows)
@@ -420,11 +420,17 @@ listenbrainz_server = "https://lb.example.org"   # your own, or multi-scrobbler;
 lastfm = { key = "an API key", secret = "its secret" }   # from last.fm/api/account/create
 librefm = true
 maloja = { url = "https://maloja.example.org", key = "an API key" }
+tealfm = { handle = "you.bsky.social", password = "an app password" }   # from bsky.app/settings/app-passwords
 ```
 
 Last.fm and Libre.fm approve the account in the browser, once, at the first
 start after. The linked accounts are kept in `scrobble.json` beside the
 config, mode `0600`.
+
+teal.fm reads the listens from your Bluesky or other atproto account, so
+the app writes them there itself, signed in with the handle (or the DID)
+and an app password. Make one for this rather than giving your own: it sits
+in the config, and can be revoked on its own.
 
 ## Discord
 
