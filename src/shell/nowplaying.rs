@@ -467,11 +467,13 @@ fn render_transport(
     // band between them — anchoring to `area.y` would put this in the margin.
     let band = content_band(area);
 
-    // Shuffle, previous, play/pause, next, repeat — the same five the web
-    // client shows, in the same order. Shuffle and repeat light up when they
-    // are on, which is the only thing that says a mode is in effect.
-    // Play is the one control the eye should land on, so it is the brightest
-    // and heaviest of the five, as the web client draws it much larger. A
+    // Shuffle, play or pause, repeat: the three that say something. Nothing
+    // here is pressed, so each is a state, and the previous and next marks
+    // the web client has beside them had none to show. Shuffle and repeat
+    // light up when they are on, which is the only thing that says a mode
+    // is in effect.
+    // Play is the one the eye should land on, so it is the brightest and
+    // heaviest of the three, as the web client draws it much larger. A
     // terminal has one glyph size, so weight and colour carry that instead.
     // The pause pair is two half blocks rather than U+23F8, which most fonts
     // draw thin enough to disappear next to the triangle.
@@ -509,15 +511,9 @@ fn render_transport(
             super::icons::shuffle(),
             if modes.shuffled { on } else { off },
         ),
-        Span::styled(
-            format!("   {}   ", super::icons::previous()),
-            palette.subtitle(),
-        ),
-        Span::styled(play, palette.play_button()),
-        Span::styled(
-            format!("   {}   ", super::icons::next()),
-            palette.subtitle(),
-        ),
+        // Wide of the two modes, so the three do not read as one cluster:
+        // it is the room the skip marks took between them.
+        Span::styled(format!("       {play}       "), palette.play_button()),
         // Repeat-one is marked apart from repeat-all: the same glyph in the
         // same colour for two different modes says nothing. The superscript
         // is a second cell, so the other modes are padded to match — left
@@ -1097,8 +1093,9 @@ mod tests {
         let paused = draw(false);
         // The button AFTER the mark: shuffle sits before it and never moves,
         // so comparing that passed however wide the mark was drawn.
-        let a = geometry::find(&playing, "⏭").expect("next while playing");
-        let b = geometry::find(&paused, "⏭").expect("next while paused");
+        let after = crate::shell::icons::repeat();
+        let a = geometry::find(&playing, after).expect("repeat while playing");
+        let b = geometry::find(&paused, after).expect("repeat while paused");
         assert_eq!(
             a.start,
             b.start,
@@ -1114,7 +1111,7 @@ mod tests {
         // single-character pause, and `▐▌` closes up into a solid block that
         // reads as nothing. Two cells meant the row was padded to a common
         // width and nudged a column right to correct the ink -- and both of
-        // those put the button off centre between the skips.
+        // those put the button off centre in the row.
         //
         // U+01C1 is one cell and unambiguously so, which is what lets the
         // padding and the lead-in go.
@@ -1177,16 +1174,16 @@ mod tests {
         );
 
         let play = geometry::find(&buf, PLAY).expect("the play button");
-        let skip = geometry::find(&buf, "⏭").expect("the next button");
+        let shuffle = geometry::find(&buf, SHUFFLE).expect("the shuffle mark");
         assert_eq!(
             buf[(play.start, play.row)].fg,
             palette.text,
             "play is the white one"
         );
         assert_eq!(
-            buf[(skip.start, skip.row)].fg,
+            buf[(shuffle.start, shuffle.row)].fg,
             palette.dim,
-            "and the skips are dimmer than it"
+            "and a mode that is off is dimmer than it"
         );
     }
 
@@ -1627,7 +1624,7 @@ mod tests {
         // The row is laid out on the assumption that each control takes one
         // column. A two-cell glyph -- the `▌▌` pause this used to have --
         // means padding the row to a common width, which puts the play
-        // button off centre between the skips.
+        // button off centre in the row.
         let fixed = crate::shell::icons::Fixed::at(false);
 
         for nerd in [false, true] {
@@ -1635,8 +1632,6 @@ mod tests {
             for control in [
                 crate::shell::icons::play(),
                 crate::shell::icons::pause(),
-                crate::shell::icons::previous(),
-                crate::shell::icons::next(),
                 crate::shell::icons::shuffle(),
                 crate::shell::icons::repeat(),
                 crate::shell::icons::repeat_one(),
@@ -1658,7 +1653,7 @@ mod tests {
     }
 
     #[test]
-    fn the_play_button_sits_midway_between_the_skips() {
+    fn the_play_button_sits_midway_between_shuffle_and_repeat() {
         // Reported as four columns on one side and three on the other. The
         // pause used to be `▌▌`, two cells, so the row was padded to a
         // common width and given a column of lead-in to correct the ink of
@@ -1695,9 +1690,14 @@ mod tests {
                 );
 
                 let text = crate::shell::geometry::text(&buf);
+                // Previous and next were drawn here once: marks with no
+                // state to show, in a bar where nothing is pressed.
+                for skip in ["⏮", "⏭", "\u{f048}", "\u{f051}"] {
+                    assert!(!text.contains(skip), "a skip mark is back:\n{text}");
+                }
                 let row = text
                     .lines()
-                    .find(|l| l.contains(crate::shell::icons::previous()))
+                    .find(|l| l.contains(crate::shell::icons::shuffle()))
                     .expect("the transport row");
                 // In columns rather than bytes: the glyphs are different
                 // lengths in UTF-8, and `find` returns a byte index.
@@ -1706,8 +1706,8 @@ mod tests {
                         .map(|b| row[..b].chars().count())
                         .expect("a control is missing from the row")
                 };
-                let prev = col(crate::shell::icons::previous());
-                let next = col(crate::shell::icons::next());
+                let prev = col(crate::shell::icons::shuffle());
+                let next = col(crate::shell::icons::repeat());
                 let mark = col(if playing {
                     crate::shell::icons::play()
                 } else {
