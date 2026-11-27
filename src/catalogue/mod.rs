@@ -46,9 +46,44 @@ pub enum Favourable {
 
 /// A service the shell can sign in to: sonora's own trait, under a name
 /// of ours so the shell's state, which derives `Debug`, can print one.
-pub trait Provider: MusicProvider {}
+pub trait Provider: MusicProvider {
+    /// The lyrics the service keeps itself, asked beside the sources any
+    /// track is. Built from this provider so that Spotify's shares its
+    /// account: two would each refresh the one stored grant, and Spotify
+    /// may then refuse the other's.
+    fn own_lyrics(&self) -> Option<Arc<dyn music::LyricsProvider>> {
+        None
+    }
+}
 
-impl<P: MusicProvider> Provider for P {}
+impl Provider for spotify::SpotifyProvider {
+    fn own_lyrics(&self) -> Option<Arc<dyn music::LyricsProvider>> {
+        Some(Arc::new(spotify::SpotifyProvider::lyrics(self)))
+    }
+}
+
+/// Subsonic's and Jellyfin's read the sign-in sonora stored, and answer
+/// only for the server's own tracks.
+impl Provider for subsonic::SubsonicProvider {
+    fn own_lyrics(&self) -> Option<Arc<dyn music::LyricsProvider>> {
+        Some(Arc::new(subsonic::SubsonicLyrics::new()))
+    }
+}
+
+impl Provider for jellyfin::JellyfinProvider {
+    fn own_lyrics(&self) -> Option<Arc<dyn music::LyricsProvider>> {
+        Some(Arc::new(jellyfin::JellyfinLyrics::new()))
+    }
+}
+
+/// sonora has no lyrics of TIDAL's, Apple Music's or Deezer's own. A
+/// folder's and YouTube Music's, which need no sign-in, are among the
+/// sources every track is asked.
+impl Provider for tidal::TidalProvider {}
+impl Provider for apple::AppleProvider {}
+impl Provider for deezer::DeezerProvider {}
+impl Provider for youtube::YouTubeProvider {}
+impl Provider for local::LocalProvider {}
 
 /// What a service has that sonora's `MusicApi` has no word for yet. Each
 /// answers nothing by default, and the session then makes do with what
@@ -117,4 +152,35 @@ pub fn provider_for(config: &Config) -> anyhow::Result<Arc<dyn Provider>> {
             ))
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A Spotify provider whose sign-in would be kept in a folder of the
+    /// test's: `from_env`, and YouTube Music's `new`, name sonora's own
+    /// folder, which moves the sign-ins an older Sonora left in the cache.
+    pub(crate) fn spotify_away_from_home() -> spotify::SpotifyProvider {
+        spotify::SpotifyProvider::new(spotify::AuthConfig {
+            client_id: "test".into(),
+            redirect_uri: "http://127.0.0.1:1/".into(),
+            cache_dir: std::env::temp_dir().join("sonora-tui-test-spotify"),
+        })
+    }
+
+    #[test]
+    fn the_services_with_lyrics_of_their_own_hand_them_over_and_the_others_none() {
+        let own = |provider: &dyn Provider| provider.own_lyrics().map(|l| l.name());
+        assert_eq!(own(&spotify_away_from_home()), Some("Spotify"));
+        assert_eq!(own(&subsonic::SubsonicProvider::new()), Some("Subsonic"));
+        assert_eq!(own(&jellyfin::JellyfinProvider::new()), Some("Jellyfin"));
+        for none in [
+            own(&tidal::TidalProvider::new()),
+            own(&apple::AppleProvider::new()),
+            own(&deezer::DeezerProvider::new()),
+        ] {
+            assert_eq!(none, None);
+        }
+    }
 }

@@ -99,6 +99,8 @@ pub fn providers() -> &'static [Arc<dyn music::LyricsProvider>] {
             // A file's own tags or the `.lrc` beside it; silent for any
             // other track.
             Arc::new(local::LocalLyrics),
+            // Public, and asked signed out, whatever the service.
+            Arc::new(youtube::YouTubeLyrics::new()),
             Arc::new(lyric_sources::lrcred::LrcRed::new(http.clone())),
             Arc::new(lyric_sources::musixmatch::Musixmatch::new(http.clone())),
             Arc::new(lyric_sources::lrclib::LrcLib::new(http.clone())),
@@ -108,10 +110,24 @@ pub fn providers() -> &'static [Arc<dyn music::LyricsProvider>] {
     })
 }
 
-/// Ask every provider at once and keep the best answer, by sonora's
-/// ranking: synced over plain, a close match over a loose one.
-pub async fn search(query: music::LyricsQuery) -> Found {
-    let asked = providers();
+/// What a track's lyrics are asked of: the signed-in service's own, where
+/// it keeps any, then the sources every track is asked.
+fn sources(own: Option<Arc<dyn music::LyricsProvider>>) -> Vec<Arc<dyn music::LyricsProvider>> {
+    own.into_iter().chain(providers().iter().cloned()).collect()
+}
+
+/// Ask the service's own source, if any, and every other at once, and keep
+/// the best answer.
+pub async fn search(
+    query: music::LyricsQuery,
+    own: Option<Arc<dyn music::LyricsProvider>>,
+) -> Found {
+    search_in(query, sources(own)).await
+}
+
+/// Ask `asked` at once and keep the best answer, by sonora's ranking:
+/// synced over plain, a close match over a loose one.
+async fn search_in(query: music::LyricsQuery, asked: Vec<Arc<dyn music::LyricsProvider>>) -> Found {
     let answers = futures::future::join_all(asked.iter().map(|p| p.search(&query))).await;
     let mut hits = Vec::new();
     for (provider, answer) in asked.iter().zip(answers) {
@@ -241,11 +257,52 @@ mod tests {
     #[test]
     fn the_same_lyrics_sources_are_asked_from_one_track_to_the_next() {
         let (first, again) = (providers(), providers());
-        assert_eq!(first.len(), 6);
+        assert_eq!(first.len(), 7);
         assert!(
             first.iter().zip(again).all(|(a, b)| Arc::ptr_eq(a, b)),
             "a source made afresh forgets what it was told to wait for"
         );
+    }
+
+    /// A service's own lyrics source that knows one sheet.
+    struct Own(Option<music::Lyrics>);
+
+    #[async_trait::async_trait]
+    impl music::LyricsProvider for Own {
+        fn name(&self) -> &'static str {
+            "Own"
+        }
+
+        async fn search(
+            &self,
+            query: &music::LyricsQuery,
+        ) -> anyhow::Result<Vec<music::LyricsHit>> {
+            Ok(self
+                .0
+                .clone()
+                .map(|sheet| lyrics::catalog::hit("Own", query, sheet))
+                .into_iter()
+                .collect())
+        }
+    }
+
+    #[test]
+    fn the_signed_in_services_own_lyrics_are_asked_first_beside_the_others() {
+        let own: Arc<dyn music::LyricsProvider> = Arc::new(Own(None));
+        let asked = sources(Some(Arc::clone(&own)));
+        assert_eq!(asked.len(), providers().len() + 1);
+        assert!(Arc::ptr_eq(&asked[0], &own));
+        assert_eq!(sources(None).len(), providers().len());
+    }
+
+    #[test]
+    fn a_sheet_the_service_has_is_the_one_shown() {
+        let track = Track::sample("Song", "Someone", Duration::from_secs(30));
+        let ask = |own: Own| {
+            futures::executor::block_on(search_in(query(&track, "own"), vec![Arc::new(own)]))
+        };
+        assert!(matches!(ask(Own(Some(sheet()))), Found::Sheet(_)));
+        assert!(matches!(ask(Own(None)), Found::Nothing));
     }
 
     fn sheet() -> music::Lyrics {

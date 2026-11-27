@@ -1466,6 +1466,34 @@ fn r_does_nothing_inside_the_radio_it_would_open() {
 }
 
 #[test]
+fn the_playing_tracks_words_are_asked_of_its_service_too() {
+    let mut app = signed_in(sidebar::Section::Tracks);
+    let server = super::HeldSignIn {
+        at: "https://music.example.org",
+    };
+    app.session = Some(crate::catalogue::Session::sample_on(std::sync::Arc::new(
+        server,
+    )));
+    let track = crate::domain::Track::sample("Song", "Someone", std::time::Duration::from_secs(90));
+    app.now_playing.track = Some(track.clone());
+
+    let (query, own) = app
+        .lyrics_ask(&track.id)
+        .expect("the playing track is asked");
+    assert_eq!(own.map(|source| source.name()), Some("Server"));
+    assert_eq!(
+        query.id_for("jellyfin"),
+        Some(track.id.0.as_str()),
+        "the service looks its own track up by id"
+    );
+    let other = crate::domain::TrackId::from(7);
+    assert!(
+        app.lyrics_ask(&other).is_none(),
+        "a track that is no longer playing is not asked"
+    );
+}
+
+#[test]
 fn l_opens_the_lyrics_and_asks_for_the_playing_tracks_words_once() {
     let mut app = signed_in(sidebar::Section::Tracks);
     let track = crate::domain::Track::sample("Song", "Someone", std::time::Duration::from_secs(90));

@@ -41,6 +41,8 @@ impl Sample {
     }
 }
 
+impl super::Provider for Sample {}
+
 #[async_trait]
 impl MusicProvider for Sample {
     fn name(&self) -> &'static str {
