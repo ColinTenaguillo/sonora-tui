@@ -1,8 +1,9 @@
 name: Update music
 
-# `music` and `storage` are git dependencies pinned to a commit of
-# sonorahq/sonora, which Dependabot does not move, and `[patch.crates-io]`
-# holds the librespot and rodio forks that commit's workspace builds with.
+# `music`, `storage` and the crates beside them are git dependencies pinned
+# to a commit of sonorahq/sonora, which Dependabot does not move, and
+# `[patch.crates-io]` holds the rodio and opensubsonic commits that
+# commit's workspace builds with.
 # Weekly: read sonora's main, move all three pins to what it names, build
 # and test, and open a PR with the result. Nothing is opened when the pin
 # is already current or when the build fails; the failed run is the signal.
@@ -35,17 +36,17 @@ jobs:
           echo "old=$old new=$new"
           if [ "$old" = "$new" ]; then echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           curl -fsSL "https://raw.githubusercontent.com/sonorahq/sonora/$new/Cargo.toml" > /tmp/sonora.toml
-          old_ls=$(rev librespot-core sonorahq/librespot Cargo.toml)
-          new_ls=$(rev librespot-core sonorahq/librespot /tmp/sonora.toml)
+          old_os=$(rev opensubsonic sonorahq/opensubsonic-rs Cargo.toml)
+          new_os=$(rev opensubsonic sonorahq/opensubsonic-rs /tmp/sonora.toml)
           old_rodio=$(rev rodio RustAudio/rodio Cargo.toml)
           new_rodio=$(rev rodio RustAudio/rodio /tmp/sonora.toml)
-          test -n "$new_ls" && test -n "$new_rodio"
+          test -n "$new_os" && test -n "$new_rodio"
           # Each rev is a full sha, unique in the file, so a plain substitution
-          # moves music, storage and every librespot crate together.
-          sed -i -e "s/$old/$new/g" -e "s/$old_ls/$new_ls/g" -e "s/$old_rodio/$new_rodio/g" Cargo.toml
-          # Only a rev that moved has to be gone: librespot and rodio often
+          # moves every crate of sonora's together.
+          sed -i -e "s/$old/$new/g" -e "s/$old_os/$new_os/g" -e "s/$old_rodio/$new_rodio/g" Cargo.toml
+          # Only a rev that moved has to be gone: opensubsonic and rodio often
           # stay where they are while sonora moves.
-          for pair in "$old $new" "$old_ls $new_ls" "$old_rodio $new_rodio"; do
+          for pair in "$old $new" "$old_os $new_os" "$old_rodio $new_rodio"; do
             set -- $pair
             if [ "$1" != "$2" ] && grep -q "$1" Cargo.toml; then
               echo "$1 is still in Cargo.toml"; exit 1
@@ -56,7 +57,7 @@ jobs:
           echo "new=${new:0:7}" >> "$GITHUB_OUTPUT"
           # The commit subject is the changelog line and the PR title has to
           # match it, so both are this one string.
-          echo "subject=build(deps): move music, storage and webview from sonorahq/sonora@${old:0:7} to ${new:0:7}" >> "$GITHUB_OUTPUT"
+          echo "subject=build(deps): move sonora's crates from sonorahq/sonora@${old:0:7} to ${new:0:7}" >> "$GITHUB_OUTPUT"
 
       - name: Install the audio headers
         if: steps.pin.outputs.changed == 'true'
@@ -88,7 +89,7 @@ jobs:
           title: ${{ steps.pin.outputs.subject }}
           commit-message: ${{ steps.pin.outputs.subject }}
           body: |
-            Re-pins the `music`, `storage` and `webview` git dependencies from `${{ steps.pin.outputs.old }}` to `${{ steps.pin.outputs.new }}`.
+            Re-pins every git dependency on sonorahq/sonora from `${{ steps.pin.outputs.old }}` to `${{ steps.pin.outputs.new }}`.
             Built and tested on ubuntu in the workflow run that opened this PR.
 
             Before merging, add to the commit subject and to this title what the range brings: the workflow cannot tell.
