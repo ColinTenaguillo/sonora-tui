@@ -1557,7 +1557,7 @@ fn a_track_that_played_long_enough_becomes_a_listen_in_the_outbox() {
     // Played to the end: a listen.
     app.update(Action::Playback(crate::playback::PlaybackEvent::Finished));
     assert_eq!(app.scrobble_outbox.finished.len(), 1);
-    assert_eq!(app.scrobble_outbox.finished[0].title, "Second");
+    assert_eq!(app.scrobble_outbox.finished[0].play.title, "Second");
     assert!(app.listen.is_none(), "and nothing is in progress");
 
     // A track that failed to play is no listen either.

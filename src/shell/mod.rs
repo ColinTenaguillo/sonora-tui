@@ -1838,11 +1838,13 @@ impl App {
     }
 
     /// The listen that just ended goes to the outbox if `played` earned it
-    /// a submission -- the services' rule, not ours.
+    /// a submission -- the rule the services share, not ours. A service
+    /// with a stricter one of its own narrows it when the outbox is sent.
     fn settle_listen(&mut self, played: Duration) {
         if let Some(play) = self.listen.take() {
             if play.earned(played) {
-                self.scrobble_outbox.finished.push(play);
+                let listened = crate::scrobble::Listened { play, played };
+                self.scrobble_outbox.finished.push(listened);
             }
         }
     }
