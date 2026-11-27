@@ -29,6 +29,9 @@ pub struct Session {
     shape: music::Shape,
     /// What the service lets the user do beyond reading.
     capabilities: music::Capabilities,
+    /// The lyrics the service keeps itself, made once for the session so
+    /// that a source holding a client keeps it from one track to the next.
+    lyrics: Option<Arc<dyn music::LyricsProvider>>,
 }
 
 /// The shell's state derives `Debug`; a session prints as its service.
@@ -48,6 +51,7 @@ impl Session {
             playback: session.playback,
             shape: session.shape,
             capabilities: session.capabilities,
+            lyrics: provider.own_lyrics(),
             provider,
         }
     }
@@ -71,6 +75,13 @@ impl Session {
         Arc::new(Self::open(Arc::new(Sample), Sample::session()))
     }
 
+    /// The same, signed in through `provider`, for what a session takes
+    /// from the provider itself.
+    #[doc(hidden)]
+    pub fn sample_on(provider: Arc<dyn Provider>) -> Arc<Self> {
+        Arc::new(Self::open(provider, super::sample::Sample::session()))
+    }
+
     /// The same, on a service that keeps playlists in its own order.
     #[doc(hidden)]
     pub fn sample_in_fixed_order() -> Arc<Self> {
@@ -89,6 +100,11 @@ impl Session {
     /// service itself keys its lookups by.
     pub fn slug(&self) -> &'static str {
         self.provider.slug()
+    }
+
+    /// The lyrics the service keeps itself, where it has any.
+    pub fn lyrics(&self) -> Option<Arc<dyn music::LyricsProvider>> {
+        self.lyrics.clone()
     }
 
     /// The engine that plays this session's tracks.
@@ -841,6 +857,19 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_session_keeps_the_lyrics_its_service_has_of_its_own() {
+        use crate::catalogue::sample::Sample;
+        let on = |provider: Arc<dyn Provider>| {
+            super::Session::open(provider, Sample::session())
+                .lyrics()
+                .map(|l| l.name())
+        };
+        let spotify = crate::catalogue::tests::spotify_away_from_home();
+        assert_eq!(on(Arc::new(spotify)), Some("Spotify"));
+        assert_eq!(on(Arc::new(Sample)), None);
+    }
+
     fn session_with(extras: Radio) -> super::Session {
         use crate::catalogue::sample::Sample;
         let signed_in = Sample::session();
@@ -852,6 +881,7 @@ mod tests {
             playback: signed_in.playback,
             shape: signed_in.shape,
             capabilities: signed_in.capabilities,
+            lyrics: None,
         }
     }
 

@@ -1227,15 +1227,12 @@ fn load_lyrics(
     id: &crate::domain::TrackId,
     action_tx: &tokio::sync::mpsc::UnboundedSender<Action>,
 ) {
-    if let (Some(session), Some(track)) = (&app.session, app.now_playing.track.clone()) {
-        if track.id == *id {
-            let query = lyricsview::query(&track, session.slug());
-            let (id, tx) = (id.clone(), action_tx.clone());
-            tokio::spawn(async move {
-                let found = lyricsview::search(query).await;
-                let _ = tx.send(Action::LyricsLoaded { id, found });
-            });
-        }
+    if let Some((query, own)) = app.lyrics_ask(id) {
+        let (id, tx) = (id.clone(), action_tx.clone());
+        tokio::spawn(async move {
+            let found = lyricsview::search(query, own).await;
+            let _ = tx.send(Action::LyricsLoaded { id, found });
+        });
     }
 }
 

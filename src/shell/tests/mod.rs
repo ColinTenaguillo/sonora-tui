@@ -65,6 +65,26 @@ pub(super) struct HeldSignIn {
     pub(super) at: &'static str,
 }
 
+/// The server keeps lyrics of its own, as a Jellyfin server does.
+impl crate::catalogue::Provider for HeldSignIn {
+    fn own_lyrics(&self) -> Option<std::sync::Arc<dyn music::LyricsProvider>> {
+        Some(std::sync::Arc::new(ServerLyrics))
+    }
+}
+
+/// The lyrics a server keeps, which know no track.
+pub(super) struct ServerLyrics;
+
+#[async_trait::async_trait]
+impl music::LyricsProvider for ServerLyrics {
+    fn name(&self) -> &'static str {
+        "Server"
+    }
+    async fn search(&self, _: &music::LyricsQuery) -> anyhow::Result<Vec<music::LyricsHit>> {
+        Ok(Vec::new())
+    }
+}
+
 #[async_trait::async_trait]
 impl music::MusicProvider for HeldSignIn {
     fn name(&self) -> &'static str {

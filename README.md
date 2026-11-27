@@ -403,9 +403,10 @@ untouched, keep the volume full and the equaliser and normalisation off.
 
 `L` opens them over the main pane. Synced lyrics follow the position, the
 line being sung in the middle; plain ones are a page to scroll. They come
-from the sources sonora asks — the file's own tags, lrc.red, Musixmatch,
-LRCLIB, Kugou, NetEase — ranked its way: synced over plain, a close match
-over a loose one.
+from the sources sonora asks — the file's own tags, YouTube Music, lrc.red,
+Musixmatch, LRCLIB, Kugou, NetEase, and the service you are signed in to
+where it keeps lyrics of its own: Spotify, Subsonic or Jellyfin — ranked its
+way: synced over plain, a close match over a loose one.
 
 ## Scrobbling
 

@@ -1768,6 +1768,21 @@ impl App {
         }
     }
 
+    /// What the words of track `id` are asked with, while it is the one
+    /// playing: the query, and the service's own lyrics where it keeps any.
+    pub fn lyrics_ask(
+        &self,
+        id: &crate::domain::TrackId,
+    ) -> Option<(
+        music::LyricsQuery,
+        Option<std::sync::Arc<dyn music::LyricsProvider>>,
+    )> {
+        let session = self.session.as_ref()?;
+        let track = self.now_playing.track.as_ref().filter(|t| t.id == *id)?;
+        let query = lyricsview::query(track, session.slug());
+        Some((query, session.lyrics()))
+    }
+
     /// The search the lyrics pane is waiting on, if it is open on a track
     /// nothing has been found for yet. Marked as searching here, so the
     /// same track is not asked about on every event.
