@@ -577,20 +577,11 @@ impl Config {
     pub fn load() -> Result<Self, ConfigError> {
         let path = paths::config_file().ok_or(ConfigError::NoConfigDir)?;
 
+        // Written as any later save is, so a secret typed into it by hand is
+        // not readable by every account on the machine.
         if !path.exists() {
             let config = Self::default();
-            let text = toml::to_string_pretty(&config)
-                .expect("Config serializes; it has no maps with non-string keys");
-            if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir).map_err(|source| ConfigError::Write {
-                    path: path.clone(),
-                    source,
-                })?;
-            }
-            std::fs::write(&path, text).map_err(|source| ConfigError::Write {
-                path: path.clone(),
-                source,
-            })?;
+            config.save_to(&path)?;
             return Ok(config);
         }
 
@@ -625,7 +616,7 @@ impl Config {
             })?;
         }
         let tmp = path.with_extension("toml.new");
-        std::fs::write(&tmp, text).map_err(|source| ConfigError::Write {
+        write_owner_only(&tmp, &text).map_err(|source| ConfigError::Write {
             path: tmp.clone(),
             source,
         })?;
@@ -636,9 +627,56 @@ impl Config {
     }
 }
 
+/// Writes `text` to a new file only its owner can read: the config holds
+/// the scrobbling services' keys, secrets and tokens. A file already there
+/// is removed first, since a mode is only given to a file as it is created.
+fn write_owner_only(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    match std::fs::remove_file(path) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+        _ => {}
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)?.write_all(text.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_config_is_written_readable_by_its_owner_alone_as_it_holds_secrets() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("sonora-tui-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a folder");
+        let path = dir.join("config.toml");
+        // As a release before this one left it, or as a hand made it.
+        std::fs::write(&path, "").expect("a config");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("readable by all");
+        // And a temporary file a crash left behind, readable by all too.
+        std::fs::write(path.with_extension("toml.new"), "").expect("a leftover");
+
+        let mut config = Config::default();
+        config.scrobble.lastfm = Some(ApiKeys {
+            key: "k".into(),
+            secret: "a secret".into(),
+        });
+        config.save_to(&path).expect("saved");
+        let mode = std::fs::metadata(&path)
+            .expect("there")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "{mode:o}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn local_folders_expand_the_tilde_and_skip_blanks() {
