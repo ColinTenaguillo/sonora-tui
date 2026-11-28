@@ -34,7 +34,9 @@ before committing; the tree is rustfmt's and CI checks it.
   new field is tested on a body copied from a real answer.
 - `cargo test` must never touch the user's own files;
   `catalogue::carry_tidal_sign_in_over` moves one and is called from `main`
-  alone.
+  alone. The unit tests run in a home folder of their own (`src/lib.rs`),
+  as sonora moves an older Sonora's sign-ins when a provider is built, but
+  not on Windows, and not the binaries under `tests/`.
 - A new key goes in `src/shell/help.rs` (tests check it) and in the README's
   key table (nothing checks it). A new config key goes in the README too.
 
